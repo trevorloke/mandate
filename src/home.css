@@ -494,3 +494,16 @@
 .m-pill--ok { color: var(--ok); border-color: rgba(46,107,62,0.3); background: rgba(46,107,62,0.06); }
 .m-pill--warn { color: var(--warn); border-color: rgba(138,98,6,0.3); background: rgba(138,98,6,0.06); }
 .m-pill--danger { color: var(--danger); border-color: rgba(138,20,20,0.3); background: rgba(138,20,20,0.06); }
+
+@media (max-width: 640px) {
+  .home2__plate { grid-template-columns: 1fr; gap: 24px; }
+  .home2__greeting { font-size: 38px; }
+  .home2__dek { font-size: 16px; }
+  .home2__index { width: 100%; min-width: 0; }
+  .home2__body { grid-template-columns: 1fr; }
+  .home2__indices, .home2__pillars { grid-template-columns: 1fr; gap: 16px; }
+  .stream { width: 100%; }
+  .mods { grid-template-columns: 1fr !important; }
+  .home2__break { padding: 0; }
+  .home2__break img { max-width: 100%; height: auto; }
+}

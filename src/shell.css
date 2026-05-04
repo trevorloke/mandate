@@ -271,3 +271,32 @@
   padding: 1px 6px; border-radius: 999px;
 }
 .mdt__handle:hover { background: var(--ink-1); transform: translateY(-1px); transition: all 0.15s; }
+
+/* ── Mobile (<= 640px): collapse the dense bar/strip down to essentials ──── */
+@media (max-width: 640px) {
+  /* Prevent off-screen panels (Conductor drawer, etc.) and oversized widgets
+     from pushing horizontal page scroll. */
+  body, .mdt { overflow-x: hidden; }
+
+  /* Top bar: keep brand mark + module nav scroll + notifications/avatar.
+     Hide wordmark, workspace pill, heartbeat, search box. */
+  .mdt__bar { gap: 8px; padding: 0 10px; }
+  .mdt__word { display: none; }
+  .mdt__brand { padding: 6px 8px 6px 0; margin-right: 4px; }
+  .mdt__workspace { display: none; }
+  .mdt__heartbeat { display: none; }
+  .mdt__cmd { display: none; }
+  .mdt__nav-sep { display: none; }
+  .mdt__tab { padding: 0 8px; font-size: 12.5px; }
+  .mdt__right { gap: 8px; }
+
+  /* Strip below bar: only show breadcrumb */
+  .mdt__strip { padding: 0 10px; }
+  .mdt__strip-right { display: none; }
+
+  /* Floating Conductor handle: hide (the panel itself can still be opened
+     via avatar menu / other entry points if desired). The 220px handle
+     would otherwise overlap the avatar tap target near the top-right. */
+  .mdt__handle { padding: 8px 12px 8px 10px; bottom: 12px; right: 12px; font-size: 11px; }
+  .mdt__handle-label { display: none; }
+}

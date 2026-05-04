@@ -782,3 +782,85 @@
 @media (max-width: 1024px) {
   .adm__form-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Mobile (<= 640px) ─────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .adm { padding: 18px 14px 60px; }
+
+  /* Header: stack title + "signed in as" instead of side-by-side */
+  .adm__head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .adm__head > div:last-child { text-align: left !important; }
+  .adm__title { font-size: 28px; }
+  .adm__sub { font-size: 13px; }
+
+  /* Nav: scroll horizontally instead of wrapping into multiple rows.
+     Tighter padding so more buttons fit per swipe. */
+  .adm__nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-bottom: 20px;
+  }
+  .adm__nav::-webkit-scrollbar { display: none; }
+  .adm__nav-btn {
+    padding: 10px 12px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+    flex: none;
+  }
+  /* Hide hint text — saves vertical room and width */
+  .adm__nav-btn small { display: none; }
+
+  /* Tables: make the table itself scroll horizontally without needing a wrapper.
+     `display: block` + overflow-x is the simplest cross-component fix. */
+  .adm__table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .adm__table th, .adm__table td { padding: 8px 6px; }
+
+  /* Bucket data card grid — single column */
+  .adm__data-grid { grid-template-columns: 1fr !important; }
+
+  /* Buttons row inside record edit */
+  .adm__actions { flex-direction: column; align-items: stretch; }
+  .adm__actions .adm__btn { width: 100%; text-align: center; }
+
+  /* Two-column field grids → single column */
+  .adm__field-row,
+  .adm__form-grid { grid-template-columns: 1fr; gap: 12px; }
+  .adm__panel { padding: 0; }
+  .adm__panel-inset { padding: 14px; }
+
+  /* Inputs with adequate touch height */
+  .adm__field-input,
+  .adm__field-select,
+  .adm__field-textarea {
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+    padding: 10px 12px;
+  }
+
+  /* Bar above tables can stack */
+  .adm__panel-bar {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 10px;
+  }
+}
+
+/* Always wrap tables so any wide table can horizontal-scroll inside its container */
+.adm__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
