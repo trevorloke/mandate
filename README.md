@@ -1,16 +1,63 @@
-# React + Vite
+# Mandate 2.0
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Campaign management platform — full-stack Vite + React frontend with a Hono + SQLite backend.
 
-Currently, two official plugins are available:
+## What's inside
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+**11 modules** for running a political campaign:
+Ground · Beacon · Raise · Ledger · Coalition · Civic · Opposition · Site · Events · Command · Academy
 
-## React Compiler
+**Admin & platform:**
+- Multi-tenant workspaces with per-module enable/disable
+- RBAC: viewer / editor / admin / super_admin
+- Auth: email+password, TOTP 2FA, OAuth/OIDC SSO (Google + generic)
+- Tamper-evident audit log (SHA-256 hash chain, verifiable via `/api/audit/verify`)
+- Comments with `@`-mentions on any record → in-app + realtime notifications
+- Bulk CSV user invites
+- Public forms with hCaptcha / Turnstile
+- Webhooks (HMAC-SHA256 signed) with retry queue + delivery log
+- API tokens with scopes + rate limiting
+- SSE realtime + in-app notification bell
+- Workspace export/import + clone
+- Soft-delete + trash + restore
+- 14 Playwright E2E test files
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Running locally
 
-## Expanding the ESLint configuration
+You'll need [Node.js](https://nodejs.org/) 20+ installed.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+# Install dependencies (one-time, ~2 minutes)
+npm install
+
+# Terminal 1 — start the API server
+node server/index.js
+
+# Terminal 2 — start the frontend
+npm run dev
+```
+
+Then open http://localhost:5173 and create your first super-admin account.
+
+## Layout
+
+```
+server/         API (Hono + SQLite + Drizzle ORM)
+  routes/      HTTP route modules (one per resource)
+  db/          Schema, migrations, SHA-256 chain trigger
+  lib/         Webhook worker, retention, realtime, notify, captcha
+  middleware/  Auth, CSRF, rate limit
+src/
+  admin/       Admin UI (users, data, audit, webhooks, forms, SSO)
+  auth/        Login, signup, password reset, invite accept
+  shell/       App chrome (top bar, user menu, notification bell)
+  *.jsx        One file per module page
+```
+
+## Tech stack
+
+- **Frontend:** Vite, React 19, React Router
+- **Backend:** Hono (HTTP), better-sqlite3 (DB), Drizzle ORM
+- **Auth:** bcryptjs, otplib (TOTP)
+- **Realtime:** Server-Sent Events
+- **Tests:** Playwright (browser E2E)
