@@ -212,7 +212,32 @@ export const comments = sqliteTable('comments', {
   createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
-// Scheduled reports — recurring CSV exports emailed to a target address.
+// Passkeys (WebAuthn credentials) — phishing-resistant 2nd factor or password-replacement.
+// One user can register many passkeys (phone Face ID, laptop Touch ID, hardware key, etc.).
+export const passkeys = sqliteTable('passkeys', {
+  id:           text('id').primaryKey(),
+  userId:       text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  credentialId: text('credential_id').notNull().unique(),  // base64url
+  publicKey:    text('public_key').notNull(),               // base64url COSE public key
+  counter:      integer('counter').notNull().default(0),
+  deviceType:   text('device_type'),                        // 'singleDevice' | 'multiDevice'
+  backedUp:     integer('backed_up', { mode: 'boolean' }).notNull().default(false),
+  transports:   text('transports').default('[]'),           // JSON array: ['internal','usb','nfc',...]
+  label:        text('label').notNull().default('Passkey'),
+  lastUsedAt:   integer('last_used_at', { mode: 'timestamp' }),
+  createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// One-shot challenge cache — session-bound, expires fast.
+// Used for both registration and authentication ceremonies.
+export const webauthnChallenges = sqliteTable('webauthn_challenges', {
+  id:        text('id').primaryKey(),
+  challenge: text('challenge').notNull().unique(),
+  userId:    text('user_id'),                       // null for usernameless login flow
+  kind:      text('kind').notNull(),                // 'register' | 'authenticate'
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
 // `kind` selects the generator. `params` is kind-specific JSON config.
 // `intervalMinutes` controls the cadence; nextRunAt is the wall-clock trigger.
 export const scheduledReports = sqliteTable('scheduled_reports', {

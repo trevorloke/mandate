@@ -138,6 +138,28 @@ export const api = {
 
   verifyAuditChain: () => fetchJson('/api/audit/verify'),
 
+  // ── Passkeys (WebAuthn) ──────────────────────────────────────────────
+  // Each helper coordinates with the @simplewebauthn/browser library:
+  // begin → server returns options → browser prompts user (biometric/PIN/key)
+  // → client returns signed response → /complete verifies and acts.
+  listPasskeys:   () => fetchJson('/api/auth/passkey'),
+  renamePasskey:  (id, label) => fetchJson(`/api/auth/passkey/${id}`, { method: 'PUT', body: { label } }),
+  deletePasskey:  (id) => fetchJson(`/api/auth/passkey/${id}`, { method: 'DELETE' }),
+
+  passkeyRegister: async (label) => {
+    const { startRegistration } = await import('@simplewebauthn/browser');
+    const { options } = await fetchJson('/api/auth/passkey/register/begin', { method: 'POST', body: {} });
+    const response = await startRegistration({ optionsJSON: options });
+    return fetchJson('/api/auth/passkey/register/complete', { method: 'POST', body: { response, label } });
+  },
+
+  passkeyLogin: async (email) => {
+    const { startAuthentication } = await import('@simplewebauthn/browser');
+    const { options } = await fetchJson('/api/auth/passkey/login/begin', { method: 'POST', body: { email } });
+    const response = await startAuthentication({ optionsJSON: options });
+    return fetchJson('/api/auth/passkey/login/complete', { method: 'POST', body: { response } });
+  },
+
   // Scheduled reports
   listReports:   () => fetchJson('/api/reports'),
   createReport:  (body) => fetchJson('/api/reports', { method: 'POST', body }),

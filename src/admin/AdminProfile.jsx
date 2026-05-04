@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import TotpPanel from './TotpPanel';
+import PasskeyPanel from './PasskeyPanel';
 
 export default function AdminProfile() {
   const { user, setUser, logout, refresh } = useAuth();
@@ -70,6 +71,8 @@ export default function AdminProfile() {
       </div>
 
       <TotpPanel user={user} onChange={refresh} />
+
+      <PasskeyPanel />
 
       <div className="adm__panel">
         <div className="adm__panel-h">Account · sessions</div>

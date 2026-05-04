@@ -19,6 +19,8 @@ const EXEMPT_PATHS = [
   '/api/password-reset/request',
   '/api/auth/oauth/providers',
   '/api/auth/oauth/callback',
+  '/api/auth/passkey/login/begin',
+  '/api/auth/passkey/login/complete',
 ];
 const EXEMPT_PATTERNS = [
   /^\/api\/invites\/[a-f0-9]+$/,           // POST accept-invite

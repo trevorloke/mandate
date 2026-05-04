@@ -246,6 +246,31 @@ function bootstrapTables() {
     CREATE INDEX IF NOT EXISTS idx_scheduled_reports_due ON scheduled_reports(active, next_run_at);
     CREATE INDEX IF NOT EXISTS idx_scheduled_reports_workspace ON scheduled_reports(workspace_id);
 
+    CREATE TABLE IF NOT EXISTS passkeys (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      credential_id TEXT NOT NULL UNIQUE,
+      public_key TEXT NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      device_type TEXT,
+      backed_up INTEGER NOT NULL DEFAULT 0,
+      transports TEXT DEFAULT '[]',
+      label TEXT NOT NULL DEFAULT 'Passkey',
+      last_used_at INTEGER,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
+
+    CREATE TABLE IF NOT EXISTS webauthn_challenges (
+      id TEXT PRIMARY KEY,
+      challenge TEXT NOT NULL UNIQUE,
+      user_id TEXT,
+      kind TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_expires ON webauthn_challenges(expires_at);
+
     CREATE INDEX IF NOT EXISTS idx_public_forms_workspace ON public_forms(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_public_forms_slug ON public_forms(slug);
     CREATE INDEX IF NOT EXISTS idx_oauth_providers_workspace ON oauth_providers(workspace_id);

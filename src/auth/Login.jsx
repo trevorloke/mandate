@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { api } from './api';
 
 export default function Login({ onSwitchToSignup }) {
-  const { login, setupComplete } = useAuth();
+  const { login, setupComplete, refresh } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
@@ -14,10 +14,14 @@ export default function Login({ onSwitchToSignup }) {
   const [totpRequired, setTotpRequired] = useState(false);
   const [totpCode, setTotpCode] = useState('');
   const [oauthProviders, setOauthProviders] = useState([]);
+  const [passkeySupported, setPasskeySupported] = useState(false);
 
   // Load OAuth providers, plus surface ?oauth_error if redirected back
   useEffect(() => {
     api.publicOauthProviders().then(r => setOauthProviders(r.providers || [])).catch(() => {});
+    import('@simplewebauthn/browser').then(({ browserSupportsWebAuthn }) => {
+      setPasskeySupported(browserSupportsWebAuthn());
+    }).catch(() => {});
     const u = new URL(window.location.href);
     const oe = u.searchParams.get('oauth_error');
     if (oe) {
@@ -26,6 +30,17 @@ export default function Login({ onSwitchToSignup }) {
       window.history.replaceState({}, '', u.toString());
     }
   }, []);
+
+  const passkeySignIn = async () => {
+    setErr(''); setBusy(true);
+    try {
+      // Pass email if filled; if empty, server returns broad options for discoverable creds.
+      await api.passkeyLogin(email || undefined);
+      await refresh();
+    } catch (e) {
+      setErr(e.message?.includes('NotAllowed') ? 'Cancelled.' : (e.message || 'Passkey sign-in failed'));
+    } finally { setBusy(false); }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -100,17 +115,25 @@ export default function Login({ onSwitchToSignup }) {
               <button className="auth-form__btn" disabled={busy} type="submit">
                 {busy ? 'Signing in…' : (totpRequired ? 'Verify & sign in' : 'Sign in')}
               </button>
+              {(passkeySupported || oauthProviders.length > 0) && !totpRequired && (
+                <div className="auth-form__divider"><span>or</span></div>
+              )}
+              {passkeySupported && !totpRequired && (
+                <button type="button"
+                  className="auth-form__btn auth-form__btn--ghost"
+                  disabled={busy}
+                  onClick={passkeySignIn}>
+                  🔑 Sign in with a passkey
+                </button>
+              )}
               {oauthProviders.length > 0 && !totpRequired && (
-                <>
-                  <div className="auth-form__divider"><span>or</span></div>
-                  {oauthProviders.map(p => (
-                    <a key={p.id} className="auth-form__btn auth-form__btn--ghost auth-form__btn--oauth"
-                       href={`/api/auth/oauth/start/${p.id}`}>
-                      <span className={`auth-form__oauth-mark auth-form__oauth-mark--${p.kind}`}></span>
-                      Sign in with {p.label}
-                    </a>
-                  ))}
-                </>
+                oauthProviders.map(p => (
+                  <a key={p.id} className="auth-form__btn auth-form__btn--ghost auth-form__btn--oauth"
+                     href={`/api/auth/oauth/start/${p.id}`}>
+                    <span className={`auth-form__oauth-mark auth-form__oauth-mark--${p.kind}`}></span>
+                    Sign in with {p.label}
+                  </a>
+                ))
               )}
               <div className="auth-screen__footer">
                 <button type="button" onClick={() => { setForgotMode(true); setErr(''); setForgotMsg(null); }}>Forgot password?</button>
