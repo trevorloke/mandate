@@ -1,0 +1,109 @@
+.notif { position: relative; display: inline-block; margin-right: 8px; }
+
+.notif__btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-3);
+  width: 32px; height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-grid; place-items: center;
+  position: relative;
+}
+.notif__btn:hover { color: var(--ink); border-color: var(--ink-5); }
+.notif__btn.has-unread { color: var(--ink); }
+
+.notif__badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  background: #b94a3a;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 8px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.notif__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  z-index: 100;
+  font-family: var(--font-serif);
+  max-height: 400px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.notif__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+.notif__head button {
+  appearance: none; background: transparent; border: 0;
+  font: inherit;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 0;
+}
+.notif__head button:hover { color: var(--ink); }
+
+.notif__list {
+  overflow-y: auto;
+  flex: 1;
+}
+.notif__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--paper-2);
+  padding: 12px 14px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.notif__item:hover { background: var(--paper); }
+.notif__item.is-unread { background: #fef9e0; }
+.notif__item.is-unread:hover { background: #fbf3d4; }
+
+.notif__title {
+  font-size: 14px;
+  font-weight: 500;
+}
+.notif__body {
+  font-size: 12px;
+  color: var(--ink-4);
+  margin-top: 2px;
+}
+.notif__when {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+
+.notif__empty {
+  padding: 20px 14px;
+  font-style: italic;
+  color: var(--ink-5);
+  font-size: 13px;
+  text-align: center;
+}

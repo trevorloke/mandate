@@ -1,0 +1,273 @@
+/* Mandate 2.0 — Shell: top bar, workspace strip, module nav, conductor handle */
+
+/* ── Suite frame */
+.mdt {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+
+/* ── Top bar (dark, cross-module) */
+.mdt__bar {
+  height: var(--bar-h);
+  background: var(--ink);
+  color: var(--paper);
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 0 var(--s-4);
+  position: sticky; top: 0; z-index: 80;
+  border-bottom: 1px solid #000;
+  min-width: 0;
+}
+.mdt__brand-wrap { flex: none; display: inline-flex; align-items: center; }
+.mdt__nav-wrap {
+  flex: 1; min-width: 0;
+  overflow-x: auto; overflow-y: hidden;
+  display: flex; align-items: center; height: 100%;
+  scrollbar-width: none;
+}
+.mdt__nav-wrap::-webkit-scrollbar { display: none; }
+
+.mdt__brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 6px 10px 6px 0;
+  border-right: 1px solid var(--ink-2);
+  margin-right: 6px;
+}
+.mdt__mark {
+  width: 22px; height: 22px;
+  background: var(--mark);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); color: var(--mark-ink);
+  font-weight: 500; font-size: 16px; line-height: 1;
+  letter-spacing: -0.04em;
+}
+.mdt__word {
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 400; letter-spacing: -0.02em;
+  color: var(--paper);
+}
+
+/* Workspace pill — shows configurability, the "deployed for" */
+.mdt__workspace {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px;
+  background: var(--ink-1);
+  border: 1px solid var(--ink-2);
+  font-size: 11.5px;
+  color: var(--paper-3);
+  border-radius: 2px;
+  margin-left: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+.mdt__workspace:hover { border-color: var(--ink-3); color: var(--paper); }
+.mdt__ws-type {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--mark);
+}
+.mdt__ws-name { color: var(--paper); font-family: var(--font-serif); font-size: 12.5px; }
+.mdt__ws-chev { opacity: 0.5; font-size: 10px; }
+
+/* Module nav — horizontal rail, serif labels */
+.mdt__nav {
+  display: flex; align-items: center; gap: 0;
+  height: 100%;
+  flex: none;
+  margin: 0 auto;
+}
+.mdt__tab {
+  position: relative;
+  height: 100%;
+  padding: 0 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  color: #8a857a;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  transition: color 0.1s;
+}
+.mdt__tab:hover { color: var(--paper); }
+.mdt__tab-sm { font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.08em; color: var(--ink-4); }
+.mdt__tab.is-active { color: var(--paper); }
+.mdt__tab.is-active::after {
+  content: ''; position: absolute; left: 8px; right: 8px; bottom: 0;
+  height: 2px; background: var(--mark);
+}
+.mdt__tab-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor; opacity: 0.5;
+}
+.mdt__tab.is-active .mdt__tab-dot { opacity: 1; background: var(--mark); }
+
+.mdt__nav-sep {
+  width: 1px; height: 18px; background: var(--ink-2); margin: 0 6px;
+}
+
+/* Peer tabs (Command / Field) — set apart */
+.mdt__tab--peer {
+  font-size: 12px; color: var(--ink-6);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.mdt__tab--peer .live-dot { width: 5px; height: 5px; background: #10b981; }
+
+/* Right side — heartbeat, cmd-K, user */
+.mdt__right { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+@media (max-width: 1280px) { .mdt__heartbeat { display: none; } }
+@media (max-width: 1120px) { .mdt__cmd { min-width: 100px; } .mdt__cmd-label { display: none; } }
+@media (max-width: 980px)  { .mdt__workspace .mdt__ws-type { display: none; } }
+
+.mdt__heartbeat {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px;
+  background: var(--ink-1);
+  border: 1px solid var(--ink-2);
+  border-radius: 2px;
+  cursor: default;
+  height: 28px;
+}
+.mdt__heartbeat .live-dot { background: var(--mark); box-shadow: 0 0 0 0 rgba(255,212,0,0.5); }
+.mdt__heartbeat-label {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.14em;
+  color: var(--ink-5); text-transform: uppercase;
+}
+.mdt__heartbeat-val {
+  font-family: var(--font-mono);
+  font-size: 11px; color: var(--paper);
+  font-variant-numeric: tabular-nums;
+}
+
+.mdt__cmd {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 10px; height: 28px;
+  background: var(--ink-1);
+  border: 1px solid var(--ink-2);
+  border-radius: 2px;
+  color: var(--ink-5);
+  font-size: 12px;
+  min-width: 200px;
+}
+.mdt__cmd:hover { border-color: var(--ink-3); color: var(--paper); }
+.mdt__cmd-label { flex: 1; text-align: left; }
+.mdt__cmd kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  background: var(--ink-2);
+  color: var(--paper-3);
+  border-radius: 2px;
+  border: 1px solid var(--ink-3);
+}
+
+.mdt__avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--mark); color: var(--mark-ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 700; font-size: 10.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+/* ── Module strip: under the bar, tinted to active module */
+.mdt__strip {
+  height: var(--strip-h);
+  padding: 0 var(--s-4);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--s-4);
+  font-size: 12px;
+  background: var(--strip-bg, var(--paper-1));
+  border-bottom: 1px solid var(--rule);
+  color: var(--text-2);
+  transition: background 0.3s;
+  overflow: hidden;
+  white-space: nowrap;
+}
+@media (max-width: 1000px) {
+  .mdt__strip-middle { display: none; }
+  .mdt__strip { grid-template-columns: auto auto; justify-content: space-between; }
+}
+.mdt__strip-crumb {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--text-1);
+}
+.mdt__strip-crumb .sep { color: var(--text-4); }
+.mdt__strip-crumb .mod-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--mod-accent, var(--ink));
+  text-transform: uppercase;
+}
+.mdt__strip-middle {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  justify-self: center;
+  text-align: center;
+}
+.mdt__strip-right {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mdt__strip-right b { color: var(--text-1); font-weight: 600; }
+.mdt__strip-pulse {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  background: var(--paper-0);
+  border-radius: 2px;
+}
+.mdt__strip-pulse .live-dot { background: var(--mod-accent, var(--ink)); }
+
+/* ── Body */
+.mdt__body {
+  flex: 1;
+  background: var(--paper);
+}
+
+/* ── Conductor handle (fixed bottom-right) */
+.mdt__handle {
+  position: fixed;
+  bottom: 20px; right: 20px;
+  z-index: 70;
+  padding: 10px 14px 10px 12px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 12px;
+  border: 1px solid var(--ink);
+  box-shadow: 0 12px 40px rgba(12,12,12,0.25);
+}
+.mdt__handle-mark {
+  width: 20px; height: 20px; background: var(--mark);
+  color: var(--mark-ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: 13px; font-weight: 500;
+  line-height: 1; border-radius: 50%;
+}
+.mdt__handle-label { font-family: var(--font-serif); font-size: 13px; }
+.mdt__handle-count {
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--ink-2); color: var(--mark);
+  padding: 1px 6px; border-radius: 999px;
+}
+.mdt__handle:hover { background: var(--ink-1); transform: translateY(-1px); transition: all 0.15s; }

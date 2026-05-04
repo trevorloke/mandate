@@ -1,0 +1,218 @@
+/* Mandate 2.0 — Coalition (diplomatic registry, sage/forest)
+   Aesthetic: cool sage-paper, forest ink, Fraunces drama, mono detail.
+   Theme: ledger of TRUST. Reach numbers as gravitational mass.
+*/
+
+.coa {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: calc(100vh - var(--shell-h));
+  background: #f5f7f2;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  --c-paper:    #f5f7f2;
+  --c-paper-2:  #ebefe5;
+  --c-paper-3:  #dde3d3;
+  --c-paper-4:  #cdd5bf;
+  --c-rule:     #d8dfcc;
+  --c-rule-2:   #c4ccb6;
+  --c-ink:      #16201a;
+  --c-ink-2:    #2f3d33;
+  --c-ink-3:    #56655a;
+  --c-ink-4:    #7c8a7e;
+  --c-forest:   #2a4d35;
+  --c-forest-2: #3d6248;
+  --c-sage:     #6b8b73;
+  --c-bronze:   #8a6f30;
+  --c-amber:    #c5874f;
+  --c-warn:     #b94a3a;
+  --c-cool:     #5a7a8a;
+  --c-vance:    #5d3447; /* opposition plum */
+}
+
+/* ── Crumbs ────────────────────────────────────────── */
+.coa__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 24px;
+  border-bottom: 1px solid var(--c-rule);
+  background: var(--c-paper);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-3);
+  text-transform: uppercase;
+}
+.coa__crumbs > span:nth-child(1) {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-forest);
+  letter-spacing: 0.02em;
+}
+.coa__crumbs em { font-style: normal; color: var(--c-ink-4); }
+
+/* ── KPI strip ─────────────────────────────────────── */
+.coa__kpis {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  background: #fff;
+  border-bottom: 1px solid var(--c-rule);
+}
+.coa__kpi {
+  padding: 14px 18px 12px;
+  border-right: 1px solid var(--c-rule);
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+}
+.coa__kpi:last-child { border-right: 0; }
+.coa__kpi-lbl {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+  font-weight: 600;
+}
+.coa__kpi-val {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--c-ink);
+  line-height: 1;
+}
+.coa__kpi-val.good { color: var(--c-forest); }
+.coa__kpi-val.warn { color: var(--c-warn); }
+.coa__kpi-val.flat { color: var(--c-ink); }
+
+.coa__kpi-spark { width: 56px; height: 22px; }
+.coa__kpi-delta {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--c-ink-3);
+  margin-top: 2px;
+}
+.coa__kpi-delta b { font-weight: 600; color: var(--c-forest); }
+.coa__kpi-delta.warn b { color: var(--c-warn); }
+.coa__kpi-delta.flat b { color: var(--c-ink-2); }
+.coa__kpi-delta span { color: var(--c-ink-4); font-style: normal; }
+
+/* ── Tabs ──────────────────────────────────────────── */
+.coa__tabs {
+  display: flex;
+  align-items: stretch;
+  background: var(--c-paper);
+  border-bottom: 1px solid var(--c-rule);
+  padding: 0 14px;
+  gap: 2px;
+}
+.coa__tab {
+  background: transparent;
+  border: 0;
+  padding: 12px 18px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  position: relative;
+  transition: background 120ms ease;
+}
+.coa__tab:hover { background: var(--c-paper-2); }
+.coa__tab.on { background: #fff; }
+.coa__tab.on::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--c-forest);
+}
+.coa__tab-lbl {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.10em;
+  font-weight: 600;
+  color: var(--c-ink-3);
+}
+.coa__tab.on .coa__tab-lbl { color: var(--c-forest); }
+.coa__tab-cnt {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--c-ink-4);
+  background: var(--c-paper-3);
+  padding: 1px 5px;
+  border-radius: 1px;
+  position: absolute;
+  top: 8px; right: 8px;
+}
+.coa__tab.on .coa__tab-cnt {
+  color: var(--c-forest);
+  background: var(--c-paper-2);
+}
+.coa__tab-hint {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 11px;
+  color: var(--c-ink-4);
+}
+
+.coa__tabs-spacer { flex: 1; }
+.coa__period {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 16px;
+  border-left: 1px solid var(--c-rule);
+}
+.coa__period span {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  color: var(--c-ink-4);
+  text-transform: uppercase;
+}
+.coa__period b {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--c-ink);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.coa__period em {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 10.5px;
+  color: var(--c-ink-3);
+}
+.coa__compose {
+  background: var(--c-forest);
+  color: #f3f5ec;
+  border: 0;
+  padding: 0 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 6px 12px 6px 0;
+  border-radius: 2px;
+}
+.coa__compose:hover { background: var(--c-forest-2); }
+
+/* ── Body ──────────────────────────────────────────── */
+.coa__body {
+  overflow: auto;
+  background: var(--c-paper);
+  min-width: 0;
+  min-height: 0;
+}

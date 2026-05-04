@@ -1,0 +1,145 @@
+/* Mandate 2.0 — Design tokens
+   Influences: A24 restraint, Apple precision, Economist sharpness, NYT seriousness, Patagonia earned simplicity.
+   One editorial serif + one operator mono. Warm off-white paper. Deep ink text. Single mark accent.
+   Per-module tint on the top chrome, body stays neutral so data reads like prose. */
+
+:root {
+  /* ── Type: ONE serif + ONE mono, used everywhere */
+  --font-display: 'GT Super Display', 'Canela', 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-serif: 'GT Super Text', 'Source Serif 4', 'Fraunces', Georgia, serif;
+  --font-ui: 'Söhne', 'Inter Tight', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --font-mono: 'Berkeley Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ── Core palette: ink on paper, mark accent */
+  --ink-0: #000000;
+  --ink:   #0c0c0c;
+  --ink-1: #1a1a1a;
+  --ink-2: #2a2a2a;
+  --ink-3: #3f3f3f;
+  --ink-4: #5a5956;
+  --ink-5: #7a7872;
+  --ink-6: #a8a59a;
+
+  --paper-0: #faf8f1;   /* warmest */
+  --paper:   #f4f1e8;   /* newsprint body */
+  --paper-1: #eeeadc;
+  --paper-2: #e6e1ce;
+  --paper-3: #d9d3bc;
+  --rule:    #c9c3aa;
+  --rule-2:  #b6af93;
+
+  --text-1: var(--ink);
+  --text-2: #3a3834;
+  --text-3: #6f6c63;
+  --text-4: #9c9887;
+
+  /* Mark — campaign yellow, warning-sign saturation */
+  --mark:       #ffd400;
+  --mark-ink:   #141100;
+  --mark-soft:  #fff4b3;
+  --mark-deep:  #d9ad00;
+
+  /* Module identities — each module owns a chromatic territory.
+     Saturation kept tight so in-module surfaces feel tonal, not loud. */
+  --m-home:       #0c0c0c;  --m-home-tint:       #f4f1e8;
+  --m-ground:     #1e3a5f;  --m-ground-tint:     #e7ecf2;   /* navy — voter file, gravitas */
+  --m-beacon:     #b8334a;  --m-beacon-tint:     #f7e3e2;   /* editorial red — broadcast */
+  --m-raise:      #2a4a3a;  --m-raise-tint:      #e5ede5;   /* forest — money, trust */
+  --m-ledger:     #5c4a1f;  --m-ledger-tint:     #efe8d4;   /* ledger tan — books */
+  --m-coalition:  #6d2e46;  --m-coalition-tint:  #f2e4e8;   /* plum — people */
+  --m-opposition: #1a1a1a;  --m-opposition-tint: #e8e4d6;   /* near-black — redacted */
+  --m-site:       #1f3e5a;  --m-site-tint:       #e4ecf2;   /* steel */
+  --m-events:     #6b3410;  --m-events-tint:     #f2e4d4;   /* rust */
+  --m-civic:      #2b4a2b;  --m-civic-tint:      #e2ece0;   /* parliament green */
+  --m-academy:    #12263f;  --m-academy-tint:    #e0e5ec;   /* midnight — Masterclass feel */
+  --m-command:    #0c0c0c;  --m-command-tint:    #e8e4d6;   /* ink */
+  --m-field:      #1e3a5f;  --m-field-tint:      #e7ecf2;
+
+  /* Status — desaturated to feel editorial */
+  --ok:      #2e6b3e;
+  --warn:    #8a6206;
+  --danger:  #8a1414;
+  --info:    #1e3a5f;
+
+  /* Geometry — tight, editorial */
+  --r-ctrl: 2px;
+  --r-card: 3px;
+  --r-modal: 4px;
+  --r-pill: 999px;
+
+  /* Scale */
+  --s-0: 2px; --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 64px; --s-9: 96px;
+
+  --border: 1px solid var(--rule);
+  --border-2: 1px solid var(--rule-2);
+  --border-ink: 1px solid var(--ink);
+  --border-hair: 1px solid rgba(12,12,12,0.08);
+
+  /* Grid — editorial measure */
+  --col: 72px;
+  --gutter: 16px;
+  --max-w: 1440px;
+
+  /* Chrome heights */
+  --bar-h: 48px;
+  --strip-h: 36px;
+
+  /* Shadows — almost none. Editorial work doesn't float. */
+  --shadow-1: 0 1px 0 rgba(12,12,12,0.04);
+  --shadow-2: 0 1px 2px rgba(12,12,12,0.06), 0 0 0 1px rgba(12,12,12,0.04);
+  --shadow-ink: 3px 3px 0 var(--ink);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-ui);
+  color: var(--text-1);
+  background: var(--paper);
+  font-size: 13.5px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+}
+
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, textarea, select { font: inherit; color: inherit; }
+
+::selection { background: var(--mark); color: var(--mark-ink); }
+
+/* Utility */
+.serif   { font-family: var(--font-serif); }
+.display { font-family: var(--font-display); }
+.mono    { font-family: var(--font-mono); font-feature-settings: 'tnum' 1, 'zero' 1, 'ss01' 1; }
+.tnum    { font-variant-numeric: tabular-nums; }
+.caps    { text-transform: uppercase; letter-spacing: 0.12em; }
+.hairline { height: 1px; background: var(--rule); }
+.rule-ink { height: 1px; background: var(--ink); }
+
+/* Shared "eyebrow" text style */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+/* Live dot — used in real-time surfaces */
+.live-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #e11d48;
+  box-shadow: 0 0 0 0 rgba(225,29,72,0.6);
+  animation: pulse-live 2s infinite;
+}
+@keyframes pulse-live {
+  0%   { box-shadow: 0 0 0 0   rgba(225,29,72,0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(225,29,72,0.0); }
+  100% { box-shadow: 0 0 0 0   rgba(225,29,72,0.0); }
+}
