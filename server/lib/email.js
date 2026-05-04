@@ -37,19 +37,26 @@ async function captureBackend(opts) {
 async function resendBackend(opts) {
   const key = process.env.MANDATE_RESEND_KEY;
   if (!key) throw new Error('MANDATE_RESEND_KEY is not set');
+  const body = {
+    from: opts.from,
+    to: [opts.to],
+    subject: opts.subject,
+    text: opts.text,
+    html: opts.html,
+  };
+  if (Array.isArray(opts.attachments) && opts.attachments.length) {
+    body.attachments = opts.attachments.map(a => ({
+      filename: a.filename,
+      content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : Buffer.from(a.content || '').toString('base64'),
+    }));
+  }
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from: opts.from,
-      to: [opts.to],
-      subject: opts.subject,
-      text: opts.text,
-      html: opts.html,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Resend API ${res.status}: ${await res.text()}`);
   const data = await res.json();
@@ -69,6 +76,7 @@ async function smtpBackend(opts) {
   }
   const info = await smtpTransporter.sendMail({
     from: opts.from, to: opts.to, subject: opts.subject, text: opts.text, html: opts.html,
+    attachments: opts.attachments,
   });
   return { ok: true, backend: 'smtp', id: info.messageId };
 }

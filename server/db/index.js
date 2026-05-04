@@ -227,6 +227,25 @@ function bootstrapTables() {
 
     CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(workspace_id, target, created_at);
 
+    CREATE TABLE IF NOT EXISTS scheduled_reports (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      params TEXT NOT NULL DEFAULT '{}',
+      target_email TEXT NOT NULL,
+      interval_minutes INTEGER NOT NULL DEFAULT 1440,
+      active INTEGER NOT NULL DEFAULT 1,
+      last_run_at INTEGER,
+      last_status TEXT,
+      last_error TEXT,
+      next_run_at INTEGER,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_scheduled_reports_due ON scheduled_reports(active, next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_reports_workspace ON scheduled_reports(workspace_id);
+
     CREATE INDEX IF NOT EXISTS idx_public_forms_workspace ON public_forms(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_public_forms_slug ON public_forms(slug);
     CREATE INDEX IF NOT EXISTS idx_oauth_providers_workspace ON oauth_providers(workspace_id);

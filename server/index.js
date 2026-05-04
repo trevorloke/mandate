@@ -4,6 +4,7 @@ import { serve } from '@hono/node-server';
 import { ensureTables } from './db/index.js';
 import { startWebhookWorker } from './lib/webhooks.js';
 import { startRetentionWorker } from './lib/retention.js';
+import { startReportsWorker } from './lib/reports.js';
 import { csrfMiddleware } from './middleware/csrf.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -24,10 +25,12 @@ import formsPublicRoutes from './routes/forms-public.js';
 import metricsRoutes from './routes/metrics.js';
 import oauthAdminRoutes, { publicApp as oauthPublicRoutes } from './routes/oauth.js';
 import commentsRoutes from './routes/comments.js';
+import reportsRoutes from './routes/reports.js';
 
 ensureTables();
 startWebhookWorker();
 startRetentionWorker();
+startReportsWorker();
 
 const app = new Hono();
 
@@ -42,6 +45,16 @@ app.use('/api/*', csrfMiddleware);
 
 // Health
 app.get('/api/health', (c) => c.json({ ok: true, time: new Date().toISOString() }));
+
+// Test-only: inspect captured emails. Enabled when MANDATE_EMAIL_BACKEND=capture.
+if (process.env.MANDATE_EMAIL_BACKEND === 'capture') {
+  app.get('/api/_test/emails', async (c) => {
+    const { getCapturedEmails, clearCapturedEmails } = await import('./lib/email.js');
+    const list = getCapturedEmails();
+    if (c.req.query('clear') === '1') clearCapturedEmails();
+    return c.json({ emails: list });
+  });
+}
 
 app.route('/api/auth', authRoutes);
 app.route('/api/users', userRoutes);
@@ -63,6 +76,7 @@ app.route('/api/metrics', metricsRoutes);
 app.route('/api/auth/oauth', oauthPublicRoutes);
 app.route('/api/oauth-providers', oauthAdminRoutes);
 app.route('/api/comments', commentsRoutes);
+app.route('/api/reports', reportsRoutes);
 
 app.onError((err, c) => {
   console.error('[server error]', err);

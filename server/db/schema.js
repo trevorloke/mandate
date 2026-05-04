@@ -212,7 +212,25 @@ export const comments = sqliteTable('comments', {
   createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
-// OAuth/OIDC providers per workspace. The client_secret is stored as plaintext for
+// Scheduled reports — recurring CSV exports emailed to a target address.
+// `kind` selects the generator. `params` is kind-specific JSON config.
+// `intervalMinutes` controls the cadence; nextRunAt is the wall-clock trigger.
+export const scheduledReports = sqliteTable('scheduled_reports', {
+  id:              text('id').primaryKey(),
+  workspaceId:     text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  createdById:     text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  name:            text('name').notNull(),
+  kind:            text('kind').notNull(),                 // 'bucket_csv' | 'audit_log'
+  params:          text('params').notNull().default('{}'), // JSON
+  targetEmail:     text('target_email').notNull(),
+  intervalMinutes: integer('interval_minutes').notNull().default(1440),  // default daily
+  active:          integer('active', { mode: 'boolean' }).notNull().default(true),
+  lastRunAt:       integer('last_run_at', { mode: 'timestamp' }),
+  lastStatus:      text('last_status'),                    // 'ok' | 'failed'
+  lastError:       text('last_error'),
+  nextRunAt:       integer('next_run_at', { mode: 'timestamp' }),
+  createdAt:       integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
 // prototype simplicity; in production, encrypt at rest with a KMS key.
 export const oauthProviders = sqliteTable('oauth_providers', {
   id:                text('id').primaryKey(),

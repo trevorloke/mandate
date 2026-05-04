@@ -137,5 +137,12 @@ export const api = {
   setRecordScope:   (id, scope) => fetchJson(`/api/data/_record/${id}/scope`, { method: 'PUT', body: { scope } }),
 
   verifyAuditChain: () => fetchJson('/api/audit/verify'),
+
+  // Scheduled reports
+  listReports:   () => fetchJson('/api/reports'),
+  createReport:  (body) => fetchJson('/api/reports', { method: 'POST', body }),
+  updateReport:  (id, body) => fetchJson(`/api/reports/${id}`, { method: 'PUT', body }),
+  deleteReport:  (id) => fetchJson(`/api/reports/${id}`, { method: 'DELETE' }),
+  runReportNow:  (id) => fetchJson(`/api/reports/${id}/run-now`, { method: 'POST' }),
   // Export uses a direct download (returns CSV/JSON file), not JSON parsing
 };

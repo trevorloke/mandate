@@ -15,6 +15,7 @@ import AdminWebhooks from './AdminWebhooks';
 import AdminActivity from './AdminActivity';
 import AdminForms from './AdminForms';
 import AdminOauth from './AdminOauth';
+import AdminReports from './AdminReports';
 
 const TABS = [
   { k: 'home',       label: 'Overview',    hint: 'dashboard', min: 'viewer' },
@@ -26,6 +27,7 @@ const TABS = [
   { k: 'tokens',     label: 'API tokens',  hint: 'integrations', min: 'viewer' },
   { k: 'webhooks',   label: 'Webhooks',    hint: 'event push', min: 'admin' },
   { k: 'forms',      label: 'Forms',       hint: 'public submit', min: 'admin' },
+  { k: 'reports',    label: 'Reports',     hint: 'scheduled email', min: 'admin' },
   { k: 'sso',        label: 'SSO',         hint: 'oauth', min: 'admin' },
   { k: 'activity',   label: 'Activity',    hint: 'live feed', min: 'admin' },
   { k: 'audit',      label: 'Audit log',   hint: 'history',   min: 'admin' },
@@ -70,6 +72,7 @@ export default function Admin() {
       {tab === 'tokens' && <AdminTokens />}
       {tab === 'webhooks' && has('admin') && <AdminWebhooks />}
       {tab === 'forms' && has('admin') && <AdminForms />}
+      {tab === 'reports' && has('admin') && <AdminReports />}
       {tab === 'sso' && has('admin') && <AdminOauth />}
       {tab === 'activity' && has('admin') && <AdminActivity />}
       {tab === 'audit' && has('admin') && <AdminAudit />}

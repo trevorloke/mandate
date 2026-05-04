@@ -13,7 +13,7 @@ import SharePanel from './SharePanel';
 
 // Catalogue of (module, kind) buckets the user can populate.
 // Modeled after the prototype's data shape.
-const MODULE_KINDS = [
+export const MODULE_KINDS = [
   { module: 'ground',    kinds: [
     { kind: 'voter',      label: 'Voters' },
     { kind: 'canvasser',  label: 'Canvassers' },
