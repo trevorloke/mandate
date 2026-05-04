@@ -10,8 +10,8 @@
 import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { db } from '../db/index.js';
-import { moduleData, auditLog } from '../db/schema.js';
-import { and, eq, desc, isNull, isNotNull } from 'drizzle-orm';
+import { moduleData, auditLog, recordShares, users } from '../db/schema.js';
+import { and, eq, or, inArray, desc, isNull, isNotNull } from 'drizzle-orm';
 import { requireAuth, requireRole, requireScope } from '../middleware/auth.js';
 import { emitWebhook } from '../lib/webhooks.js';
 import { broadcast } from '../lib/realtime.js';
@@ -59,6 +59,41 @@ const newId = () => 'd_' + randomBytes(12).toString('hex');
 const audit = (userId, action, target, meta = {}) =>
   db.insert(auditLog).values({ id: 'a_' + randomBytes(12).toString('hex'), userId, action, target, meta: JSON.stringify(meta) });
 
+// ── Per-record visibility ────────────────────────────────────────────────
+// A record is VISIBLE to a user when ANY of:
+//   - user is admin/super_admin
+//   - record.viewerScope = 'workspace' (default — everyone in the workspace reads)
+//   - user is the owner
+//   - there's a record_shares entry for (record, user) at any level
+// EDIT requires: admin, owner, or share with level='edit'.
+async function recordIdsSharedWith(userId) {
+  const rows = await db.select({ id: recordShares.recordId })
+    .from(recordShares).where(eq(recordShares.userId, userId));
+  return rows.map(r => r.id);
+}
+
+async function visibilityFilter(me) {
+  if (me.role === 'admin' || me.role === 'super_admin') return undefined;
+  const sharedIds = await recordIdsSharedWith(me.id);
+  const clauses = [
+    eq(moduleData.viewerScope, 'workspace'),
+    eq(moduleData.ownerId, me.id),
+  ];
+  if (sharedIds.length) clauses.push(inArray(moduleData.id, sharedIds));
+  return or(...clauses);
+}
+
+async function canAccessRecord(me, row, action) {
+  if (me.role === 'admin' || me.role === 'super_admin') return true;
+  if (row.ownerId === me.id) return true;
+  if (action === 'read' && row.viewerScope === 'workspace') return true;
+  const share = (await db.select().from(recordShares)
+    .where(and(eq(recordShares.recordId, row.id), eq(recordShares.userId, me.id)))
+    .limit(1))[0];
+  if (!share) return false;
+  return action === 'read' ? true : share.level === 'edit';
+}
+
 // Fire-and-forget: caller should not await.
 const fireWebhook = (workspaceId, event, payload) => {
   emitWebhook({ workspaceId, event, payload }).catch(() => {});
@@ -68,6 +103,108 @@ const fireWebhook = (workspaceId, event, payload) => {
 const fireRealtime = (workspaceId, event, payload) => {
   try { broadcast(workspaceId, event, { ...payload, at: new Date().toISOString() }); } catch {}
 };
+
+// ── Per-record share endpoints (registered before /:module/:kind/:id catch-alls) ──
+
+// GET /api/data/_record/:id/shares — list shares for a record (admin or owner)
+app.get('/_record/:id/shares', async (c) => {
+  const me = c.get('user');
+  const { id } = c.req.param();
+  const row = (await db.select().from(moduleData)
+    .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId)))
+    .limit(1))[0];
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (me.role !== 'admin' && me.role !== 'super_admin' && row.ownerId !== me.id) {
+    return c.json({ error: 'only owner or admin can view shares' }, 403);
+  }
+  const shares = await db.select({
+    id: recordShares.id,
+    userId: recordShares.userId,
+    level: recordShares.level,
+    grantedById: recordShares.grantedById,
+    createdAt: recordShares.createdAt,
+    userEmail: users.email,
+    userName: users.name,
+    userInitials: users.initials,
+  })
+    .from(recordShares)
+    .leftJoin(users, eq(users.id, recordShares.userId))
+    .where(eq(recordShares.recordId, id));
+  return c.json({
+    record: { id: row.id, ownerId: row.ownerId, viewerScope: row.viewerScope },
+    shares,
+  });
+});
+
+// POST /api/data/_record/:id/shares  { userId, level } — grant access (admin or owner)
+app.post('/_record/:id/shares', requireScope('write'), async (c) => {
+  const me = c.get('user');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({}));
+  const { userId, level = 'view' } = body;
+  if (!userId || !['view', 'edit'].includes(level)) {
+    return c.json({ error: 'userId required; level must be view or edit' }, 400);
+  }
+  const row = (await db.select().from(moduleData)
+    .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId)))
+    .limit(1))[0];
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (me.role !== 'admin' && me.role !== 'super_admin' && row.ownerId !== me.id) {
+    return c.json({ error: 'only owner or admin can share' }, 403);
+  }
+  // verify target user is in same workspace
+  const target = (await db.select().from(users)
+    .where(and(eq(users.id, userId), eq(users.workspaceId, me.workspaceId))).limit(1))[0];
+  if (!target) return c.json({ error: 'user not in this workspace' }, 400);
+
+  // Upsert: delete any existing then insert
+  await db.delete(recordShares)
+    .where(and(eq(recordShares.recordId, id), eq(recordShares.userId, userId)));
+  const shareId = 's_' + randomBytes(12).toString('hex');
+  await db.insert(recordShares).values({
+    id: shareId, recordId: id, userId, level, grantedById: me.id,
+  });
+  await audit(me.id, 'record.share', id, { userId, level });
+  fireRealtime(me.workspaceId, 'record.share', { recordId: id, userId, level });
+  return c.json({ ok: true, shareId });
+});
+
+// DELETE /api/data/_record/:id/shares/:userId — revoke access
+app.delete('/_record/:id/shares/:userId', requireScope('write'), async (c) => {
+  const me = c.get('user');
+  const { id, userId } = c.req.param();
+  const row = (await db.select().from(moduleData)
+    .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId)))
+    .limit(1))[0];
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (me.role !== 'admin' && me.role !== 'super_admin' && row.ownerId !== me.id) {
+    return c.json({ error: 'only owner or admin can revoke shares' }, 403);
+  }
+  await db.delete(recordShares)
+    .where(and(eq(recordShares.recordId, id), eq(recordShares.userId, userId)));
+  await audit(me.id, 'record.share_revoke', id, { userId });
+  fireRealtime(me.workspaceId, 'record.share_revoke', { recordId: id, userId });
+  return c.json({ ok: true });
+});
+
+// PUT /api/data/_record/:id/scope  { scope: 'workspace'|'private' } — change viewer scope
+app.put('/_record/:id/scope', requireScope('write'), async (c) => {
+  const me = c.get('user');
+  const { id } = c.req.param();
+  const { scope } = await c.req.json().catch(() => ({}));
+  if (!['workspace', 'private'].includes(scope)) return c.json({ error: 'scope must be workspace or private' }, 400);
+  const row = (await db.select().from(moduleData)
+    .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId)))
+    .limit(1))[0];
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (me.role !== 'admin' && me.role !== 'super_admin' && row.ownerId !== me.id) {
+    return c.json({ error: 'only owner or admin can change scope' }, 403);
+  }
+  await db.update(moduleData).set({ viewerScope: scope }).where(eq(moduleData.id, id));
+  await audit(me.id, 'record.scope', id, { scope });
+  fireRealtime(me.workspaceId, 'record.scope', { recordId: id, scope });
+  return c.json({ ok: true });
+});
 
 // ── Trash listing/operations come first, so /_trash isn't matched as :module ──
 
@@ -105,17 +242,20 @@ app.post('/_trash/_empty', requireRole('admin'), requireScope('write'), async (c
   return c.json({ ok: true, count: trash.length });
 });
 
-// GET /api/data/:module/:kind → list active records
+// GET /api/data/:module/:kind → list active records (filtered by per-record visibility)
 app.get('/:module/:kind', requireBucket('read'), async (c) => {
   const me = c.get('user');
   const { module, kind } = c.req.param();
+  const visClause = await visibilityFilter(me);
+  const baseClauses = [
+    eq(moduleData.workspaceId, me.workspaceId),
+    eq(moduleData.module, module),
+    eq(moduleData.kind, kind),
+    isNull(moduleData.deletedAt),
+  ];
+  if (visClause) baseClauses.push(visClause);
   const rows = await db.select().from(moduleData)
-    .where(and(
-      eq(moduleData.workspaceId, me.workspaceId),
-      eq(moduleData.module, module),
-      eq(moduleData.kind, kind),
-      isNull(moduleData.deletedAt),
-    ))
+    .where(and(...baseClauses))
     .orderBy(desc(moduleData.updatedAt));
   return c.json({ records: rows.map(parse) });
 });
@@ -146,7 +286,10 @@ app.post('/:module/:kind', requireRole('editor'), requireScope('write'), require
   const data = await c.req.json().catch(() => ({}));
   const id = newId();
   await db.insert(moduleData).values({
-    id, workspaceId: me.workspaceId, module, kind, data: JSON.stringify(data),
+    id, workspaceId: me.workspaceId, module, kind,
+    data: JSON.stringify(data),
+    ownerId: me.id,
+    viewerScope: 'workspace',
   });
   await audit(me.id, 'data.create', id, { module, kind });
   fireWebhook(me.workspaceId, 'data.create', { id, module, kind, data });
@@ -162,17 +305,25 @@ app.get('/:module/:kind/:id', async (c) => {
   const row = (await db.select().from(moduleData)
     .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId), isNull(moduleData.deletedAt))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
+  if (!(await canAccessRecord(me, row, 'read'))) return c.json({ error: 'not found' }, 404);
   return c.json({ record: parse(row) });
 });
 
 // PUT /api/data/:module/:kind/:id  (PRE: previous version captured into audit meta for diff)
-app.put('/:module/:kind/:id', requireRole('editor'), requireScope('write'), requireBucket('write'), async (c) => {
+// NOTE: role/bucket gate is checked inside — an explicit edit-share overrides them.
+app.put('/:module/:kind/:id', requireScope('write'), async (c) => {
   const me = c.get('user');
   const { id } = c.req.param();
   const data = await c.req.json().catch(() => ({}));
   const row = (await db.select().from(moduleData)
     .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId), isNull(moduleData.deletedAt))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
+  if (!(await canAccessRecord(me, row, 'edit'))) {
+    // Fall back to bucket-level role check
+    if (me.role === 'viewer') return c.json({ error: 'no edit access' }, 403);
+    const blocked = await checkBucketPermission(c, 'write');
+    if (blocked) return blocked;
+  }
   // Capture previous version for diff
   let prev = {}; try { prev = JSON.parse(row.data); } catch {}
   await db.update(moduleData)
@@ -186,12 +337,17 @@ app.put('/:module/:kind/:id', requireRole('editor'), requireScope('write'), requ
 });
 
 // DELETE /api/data/:module/:kind/:id  →  SOFT-delete (set deletedAt)
-app.delete('/:module/:kind/:id', requireRole('editor'), requireScope('write'), requireBucket('write'), async (c) => {
+app.delete('/:module/:kind/:id', requireScope('write'), async (c) => {
   const me = c.get('user');
   const { id } = c.req.param();
   const row = (await db.select().from(moduleData)
     .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId), isNull(moduleData.deletedAt))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
+  if (!(await canAccessRecord(me, row, 'edit'))) {
+    if (me.role === 'viewer') return c.json({ error: 'no edit access' }, 403);
+    const blocked = await checkBucketPermission(c, 'write');
+    if (blocked) return blocked;
+  }
   await db.update(moduleData)
     .set({ deletedAt: new Date() })
     .where(eq(moduleData.id, id));
@@ -222,6 +378,8 @@ function parse(row) {
   try { data = JSON.parse(row.data); } catch {}
   return {
     id: row.id, module: row.module, kind: row.kind, data,
+    ownerId: row.ownerId,
+    viewerScope: row.viewerScope || 'workspace',
     deletedAt: row.deletedAt,
     createdAt: row.createdAt, updatedAt: row.updatedAt,
   };

@@ -9,6 +9,7 @@ import { getSchema } from './schemas';
 import TypedForm from './TypedForm';
 import { toCSV, fromCSV, downloadFile, readFileAsText } from './csv';
 import CommentThread from './CommentThread';
+import SharePanel from './SharePanel';
 
 // Catalogue of (module, kind) buckets the user can populate.
 // Modeled after the prototype's data shape.
@@ -703,6 +704,13 @@ function RecordForm({ module, kind, record, onCancel, onSubmit }) {
           <button className="adm__btn adm__btn--ghost" type="button" onClick={onCancel}>Cancel</button>
         </div>
       </form>
+
+      {/* Per-record sharing (visible to owner + admins) */}
+      {!record.isNew && record.id && (
+        <div style={{ marginTop: 18 }}>
+          <SharePanel recordId={record.id} />
+        </div>
+      )}
 
       {/* Comments thread for existing records */}
       {!record.isNew && record.id && (

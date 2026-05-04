@@ -246,6 +246,8 @@ function bootstrapTables() {
 
   // Idempotent column adds for upgrading existing DBs
   alterIfMissing('module_data', 'deleted_at', 'INTEGER');
+  alterIfMissing('module_data', 'owner_id', 'TEXT REFERENCES users(id) ON DELETE SET NULL');
+  alterIfMissing('module_data', 'viewer_scope', "TEXT NOT NULL DEFAULT 'workspace'");
   alterIfMissing('api_tokens', 'scopes', "TEXT DEFAULT '[]'");
   alterIfMissing('users', 'totp_secret', 'TEXT');
   alterIfMissing('users', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0');
@@ -255,6 +257,20 @@ function bootstrapTables() {
   alterIfMissing('public_forms', 'captcha_secret', 'TEXT');
   alterIfMissing('audit_log', 'prev_hash', 'TEXT');
   alterIfMissing('audit_log', 'hash', 'TEXT');
+
+  // Per-record shares table
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS record_shares (
+      id            TEXT PRIMARY KEY,
+      record_id     TEXT NOT NULL,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      level         TEXT NOT NULL DEFAULT 'view',
+      granted_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_record_shares_record_user ON record_shares(record_id, user_id);
+    CREATE INDEX IF NOT EXISTS idx_record_shares_user ON record_shares(user_id);
+  `);
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.

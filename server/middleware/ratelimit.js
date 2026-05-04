@@ -12,6 +12,7 @@ function clientIp(c) {
 
 export function rateLimit({ key, max = 10, windowMs = 60_000 }) {
   return async (c, next) => {
+    if (process.env.MANDATE_DISABLE_RATELIMIT === '1') return next();
     const ip = clientIp(c);
     const k = `${key}:${ip}`;
     const now = Date.now();

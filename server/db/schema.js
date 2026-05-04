@@ -51,9 +51,24 @@ export const moduleData = sqliteTable('module_data', {
   module:      text('module').notNull(),       // ground, beacon, raise, ledger, ...
   kind:        text('kind').notNull(),         // voter, post, prospect, je, ...
   data:        text('data').notNull(),         // JSON
+  // Per-record permissions: ownerId is the user who created/owns the record.
+  // viewerScope: 'workspace' (everyone in workspace can read), 'private' (only owner+shares+admins).
+  ownerId:     text('owner_id').references(() => users.id, { onDelete: 'set null' }),
+  viewerScope: text('viewer_scope').notNull().default('workspace'),  // 'workspace' | 'private'
   deletedAt:   integer('deleted_at', { mode: 'timestamp' }),
   createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// Per-record shares — explicit grants for individual users on a single record.
+// Composite uniqueness on (recordId, userId) enforced via index.
+export const recordShares = sqliteTable('record_shares', {
+  id:        text('id').primaryKey(),
+  recordId:  text('record_id').notNull(),     // module_data.id (text FK declared inline below if needed)
+  userId:    text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  level:     text('level').notNull().default('view'),  // 'view' | 'edit'
+  grantedById: text('granted_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
 // Audit log for admin actions. `hash` chains: each row's hash =

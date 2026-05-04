@@ -130,6 +130,12 @@ export const api = {
 
   bulkInviteUsers: (rows) => fetchJson('/api/users/_bulk_invite', { method: 'POST', body: { rows } }),
 
+  // Per-record sharing
+  listRecordShares: (id) => fetchJson(`/api/data/_record/${id}/shares`),
+  shareRecord:      (id, userId, level) => fetchJson(`/api/data/_record/${id}/shares`, { method: 'POST', body: { userId, level } }),
+  unshareRecord:    (id, userId) => fetchJson(`/api/data/_record/${id}/shares/${userId}`, { method: 'DELETE' }),
+  setRecordScope:   (id, scope) => fetchJson(`/api/data/_record/${id}/scope`, { method: 'PUT', body: { scope } }),
+
   verifyAuditChain: () => fetchJson('/api/audit/verify'),
   // Export uses a direct download (returns CSV/JSON file), not JSON parsing
 };
