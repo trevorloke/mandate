@@ -2,8 +2,8 @@
 import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { db } from '../db/index.js';
-import { workspaces, auditLog } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { workspaces, moduleData, recordShares, auditLog } from '../db/schema.js';
+import { eq, and, inArray } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { PLANS, PLAN_KEYS, planFor, usageSnapshot } from '../lib/plans.js';
 
@@ -84,6 +84,24 @@ app.put('/', requireRole('admin'), async (c) => {
   let settings = {};
   try { settings = JSON.parse(fresh.settings || '{}'); } catch {}
   return c.json({ ok: true, workspace: { ...fresh, settings } });
+});
+
+// POST /api/workspace/wipe — hard-delete every module_data record + record_shares
+// in the current workspace. Useful for "clear sample data" or "start fresh".
+// admin-only (super_admin can also do it). Audited.
+app.post('/wipe', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  // collect ids first so we can clean up record_shares (no FK on record_id)
+  const recordIds = (await db.select({ id: moduleData.id }).from(moduleData)
+    .where(eq(moduleData.workspaceId, me.workspaceId))).map(r => r.id);
+  if (recordIds.length) await db.delete(recordShares).where(inArray(recordShares.recordId, recordIds));
+  await db.delete(moduleData).where(eq(moduleData.workspaceId, me.workspaceId));
+  await db.insert(auditLog).values({
+    id: 'a_' + randomBytes(12).toString('hex'),
+    userId: me.id, action: 'workspace.wipe',
+    target: me.workspaceId, meta: JSON.stringify({ recordsDeleted: recordIds.length }),
+  });
+  return c.json({ ok: true, deleted: recordIds.length });
 });
 
 export default app;

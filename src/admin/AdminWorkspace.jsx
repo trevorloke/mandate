@@ -233,6 +233,29 @@ export default function AdminWorkspace() {
           </tbody>
         </table>
       </div>
+
+      <div className="adm__panel" style={{ borderColor: '#c4a097' }}>
+        <div className="adm__panel-h" style={{ color: '#8b2418' }}>Workspace · danger zone</div>
+        <h3 className="adm__panel-title">Wipe records</h3>
+        <p className="adm__msg" style={{ marginBottom: 14 }}>
+          Permanently delete every module record (donors, voters, prospects, etc.) in this workspace. Users, settings, audit log, and webhooks are preserved.
+          Useful if you signed up to explore and now want to start with a clean slate.
+        </p>
+        <button className="adm__btn adm__btn--danger" onClick={async () => {
+          const yes = confirm('Permanently DELETE every module record in this workspace?\n\nThis cannot be undone.');
+          if (!yes) return;
+          try {
+            const r = await api.wipeWorkspace();
+            setMsg({ kind: 'ok', text: `Deleted ${r.deleted} records. The workspace is now empty.` });
+            const { invalidateLive } = await import('../auth/useLiveRecords');
+            invalidateLive();
+          } catch (e) {
+            setMsg({ kind: 'err', text: 'Wipe failed: ' + e.message });
+          }
+        }}>
+          Wipe all records
+        </button>
+      </div>
     </div>
   );
 }

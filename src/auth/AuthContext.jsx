@@ -41,6 +41,13 @@ export function AuthProvider({ children }) {
     setUser(r.user);
     setSetupComplete(true);
     try { const ws = await api.workspace(); setWorkspace(ws.workspace); } catch {}
+    // Fresh workspace: seed sample data so the app feels populated.
+    // The user can wipe it at any time via Admin → Workspace → Wipe sample data.
+    if (r.freshWorkspace) {
+      // Fire-and-forget — don't block the redirect on this. The user will see
+      // populated module pages within ~1-2s as records arrive.
+      import('../admin/seed').then(({ seedDemoData }) => seedDemoData()).catch(() => {});
+    }
     return r.user;
   };
 

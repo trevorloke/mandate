@@ -70,7 +70,11 @@ app.post('/signup', rateLimit({ key: 'signup', max: 5, windowMs: 60_000 }), asyn
 
   await db.insert(auditLog).values({ id: newId(), userId, action: 'auth.signup', target: userId });
 
-  return c.json({ ok: true, user: { id: userId, email, name, role: 'super_admin', workspaceId: wsId } });
+  return c.json({
+    ok: true,
+    user: { id: userId, email, name, role: 'super_admin', workspaceId: wsId },
+    freshWorkspace: true,   // signal to client: workspace is empty, OK to seed
+  });
 });
 
 // POST /api/auth/login

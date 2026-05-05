@@ -532,7 +532,7 @@ const Raise2 = () => {
             </div>
             <div className="r-donors-wrap">
               <div className="r-donor-grid">
-                <DonorTable donors={RAISE_DONORS} />
+                <DonorTable donors={allDonors} />
                 <GiftMix />
               </div>
             </div>

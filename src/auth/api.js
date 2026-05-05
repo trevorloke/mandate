@@ -164,6 +164,9 @@ export const api = {
   getPlan:    () => fetchJson('/api/workspace/plan'),
   setPlan:    (plan) => fetchJson('/api/workspace/plan', { method: 'PUT', body: { plan } }),
 
+  // Wipe all module records in the current workspace (admin+, irreversible)
+  wipeWorkspace: () => fetchJson('/api/workspace/wipe', { method: 'POST' }),
+
   // Webhook queue stats
   webhookQueueStats: () => fetchJson('/api/webhooks/_queue'),
   webhookQueueTick:  () => fetchJson('/api/webhooks/_queue/tick', { method: 'POST' }),
