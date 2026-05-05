@@ -1,0 +1,39 @@
+# Render Blueprint — defines the entire deploy declaratively.
+# When you connect this repo to a new Blueprint on Render, this file is
+# auto-detected and the service + disk are created for you.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: mandate
+    runtime: docker
+    plan: free                 # Bump to 'starter' ($7/mo) for always-on; free spins down after 15min idle.
+    region: oregon             # Change to 'frankfurt' / 'singapore' / 'ohio' / 'virginia' if closer.
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true           # Re-deploy on every push to main.
+
+    # Persistent disk for the SQLite file. The container writes to /data/mandate.db.
+    disk:
+      name: mandate-data
+      mountPath: /data
+      sizeGB: 1                # 1 GB easily holds tens of millions of records.
+
+    envVars:
+      # Render injects PORT automatically; the Dockerfile reads it.
+      - key: NODE_ENV
+        value: production
+      - key: MANDATE_DB
+        value: /data/mandate.db
+      - key: MANDATE_SERVE_STATIC
+        value: "1"
+      - key: MANDATE_FORCE_SECURE_COOKIES
+        value: "1"             # Render terminates TLS in front of us.
+      - key: MANDATE_EMAIL_BACKEND
+        value: console         # Switch to 'resend' or 'smtp' once you wire a real backend.
+      - key: MANDATE_EMAIL_FROM
+        value: Mandate <noreply@example.com>
+      # Add this in the Render dashboard (don't commit secrets to the repo):
+      # - key: MANDATE_RESEND_KEY
+      #   sync: false
