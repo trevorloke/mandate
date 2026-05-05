@@ -61,9 +61,13 @@ export const csrfMiddleware = async (c, next) => {
   // Set only if missing (avoid unnecessary churn).
   if (!getCsrfCookie(c)) {
     const tok = randomBytes(16).toString('hex');
-    // SameSite=Lax + not HttpOnly (so JS can mirror it into header)
+    // SameSite=Lax + not HttpOnly (so JS can mirror it into header). Add Secure on HTTPS.
+    const proto = c.req.header('x-forwarded-proto') || '';
+    let isHttps = process.env.MANDATE_FORCE_SECURE_COOKIES === '1' || proto.toLowerCase().startsWith('https');
+    if (!isHttps) { try { isHttps = new URL(c.req.url).protocol === 'https:'; } catch {} }
+    const secure = isHttps ? '; Secure' : '';
     const existing = c.res.headers.get('Set-Cookie');
-    const newCookie = `${CSRF_COOKIE}=${tok}; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}`;
+    const newCookie = `${CSRF_COOKIE}=${tok}; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}${secure}`;
     if (existing) c.res.headers.append('Set-Cookie', newCookie);
     else c.res.headers.set('Set-Cookie', newCookie);
   }

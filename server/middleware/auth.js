@@ -7,6 +7,16 @@ import { eq, and, gt } from 'drizzle-orm';
 const SESSION_COOKIE = 'mdt_session';
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
+// Detect HTTPS — either directly, or via X-Forwarded-Proto when behind a proxy/load balancer.
+// MANDATE_FORCE_SECURE_COOKIES=1 can force Secure even when detection misses.
+function isHttps(c) {
+  if (process.env.MANDATE_FORCE_SECURE_COOKIES === '1') return true;
+  const proto = c.req.header('x-forwarded-proto') || '';
+  if (proto.toLowerCase().startsWith('https')) return true;
+  try { return new URL(c.req.url).protocol === 'https:'; } catch { return false; }
+}
+function secureFlag(c) { return isHttps(c) ? '; Secure' : ''; }
+
 export function getSessionId(c) {
   const cookie = c.req.header('cookie') || '';
   const m = cookie.match(/(?:^|;\s*)mdt_session=([^;]+)/);
@@ -16,12 +26,12 @@ export function getSessionId(c) {
 export function setSessionCookie(c, sessionId, maxAgeSec = 60 * 60 * 24 * 14) {
   c.header(
     'Set-Cookie',
-    `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}`
+    `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${secureFlag(c)}`
   );
 }
 
 export function clearSessionCookie(c) {
-  c.header('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  c.header('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureFlag(c)}`);
 }
 
 // Resolves the current user from either a session cookie or a Bearer API token.

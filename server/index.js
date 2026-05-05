@@ -1,7 +1,16 @@
 // Mandate API server — Hono + SQLite
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { bodyLimit } from 'hono/body-limit';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ensureTables } from './db/index.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DIST_DIR = join(__dirname, '..', 'dist');
+const SERVE_STATIC = process.env.MANDATE_SERVE_STATIC === '1' || existsSync(DIST_DIR);
 import { startWebhookWorker } from './lib/webhooks.js';
 import { startRetentionWorker } from './lib/retention.js';
 import { startReportsWorker } from './lib/reports.js';
@@ -43,6 +52,15 @@ app.use('*', async (c, next) => {
   }
 });
 
+// Body-size cap on /api/*. Default 1 MB; backup-import path raises to 25 MB.
+const API_BODY_LIMIT    = Number(process.env.MANDATE_API_BODY_LIMIT    || 1_000_000);
+const IMPORT_BODY_LIMIT = Number(process.env.MANDATE_IMPORT_BODY_LIMIT || 25_000_000);
+app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  const limit = path === '/api/workspace/backup/import' ? IMPORT_BODY_LIMIT : API_BODY_LIMIT;
+  return bodyLimit({ maxSize: limit, onError: (c) => c.json({ error: 'request body too large' }, 413) })(c, next);
+});
+
 app.use('/api/*', csrfMiddleware);
 
 // Health
@@ -82,11 +100,46 @@ app.route('/api/reports', reportsRoutes);
 app.route('/api/auth/passkey', passkeyRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 
+// Static SPA serving (production deploys). When `dist/` exists OR
+// MANDATE_SERVE_STATIC=1 is set, the API also serves the built frontend
+// from the same origin. SPA fallback for client-side routes.
+if (SERVE_STATIC) {
+  app.use('/assets/*', serveStatic({ root: './dist' }));
+  app.use('/favicon.ico', serveStatic({ root: './dist' }));
+  // Anything not /api/* falls back to index.html so client-side routes work
+  app.get('*', async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (path.startsWith('/api/')) return next();
+    return serveStatic({ root: './dist', path: 'index.html' })(c, next);
+  });
+  console.log(`Static SPA: serving ${DIST_DIR}`);
+}
+
 app.onError((err, c) => {
   console.error('[server error]', err);
   return c.json({ error: err.message || 'internal error' }, 500);
 });
 
 const port = Number(process.env.PORT || 3000);
-serve({ fetch: app.fetch, port });
-console.log(`Mandate API → http://localhost:${port}/api`);
+const host = process.env.MANDATE_HOST || '0.0.0.0';
+const server = serve({ fetch: app.fetch, port, hostname: host });
+console.log(`Mandate API → http://${host}:${port}/api`);
+
+// Graceful shutdown — drain HTTP, then close DB.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received — draining HTTP…`);
+  // Hard exit after 10s if drain stalls
+  setTimeout(() => { console.warn('[shutdown] forced exit'); process.exit(1); }, 10_000).unref?.();
+  await new Promise((resolve) => server.close(resolve));
+  try {
+    const { sqlite } = await import('./db/index.js');
+    sqlite?.close?.();
+  } catch {}
+  console.log('[shutdown] done');
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
