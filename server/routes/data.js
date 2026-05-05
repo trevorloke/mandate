@@ -16,6 +16,7 @@ import { requireAuth, requireRole, requireScope } from '../middleware/auth.js';
 import { emitWebhook } from '../lib/webhooks.js';
 import { broadcast } from '../lib/realtime.js';
 import { workspaces } from '../db/schema.js';
+import { assertQuota, QuotaError } from '../lib/plans.js';
 
 const app = new Hono();
 app.use('*', requireAuth);
@@ -284,6 +285,8 @@ app.post('/:module/:kind', requireRole('editor'), requireScope('write'), require
   const me = c.get('user');
   const { module, kind } = c.req.param();
   const data = await c.req.json().catch(() => ({}));
+  try { await assertQuota(me.workspaceId, 'records'); }
+  catch (e) { if (e instanceof QuotaError) return c.json({ error: e.message, code: e.code, quota: e.quota, limit: e.limit, current: e.current }, 402); throw e; }
   const id = newId();
   await db.insert(moduleData).values({
     id, workspaceId: me.workspaceId, module, kind,

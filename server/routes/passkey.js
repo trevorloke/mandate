@@ -19,6 +19,7 @@ import { db } from '../db/index.js';
 import { users, sessions, passkeys, webauthnChallenges, auditLog } from '../db/schema.js';
 import { and, eq, lt } from 'drizzle-orm';
 import { requireAuth, setSessionCookie } from '../middleware/auth.js';
+import { planFor, hasFeature, FeatureGateError } from '../lib/plans.js';
 
 const newId = (p='') => p + randomBytes(12).toString('hex');
 const SESSION_DAYS = 14;
@@ -42,6 +43,10 @@ const app = new Hono();
 // ── REGISTER ───────────────────────────────────────────────────────────
 app.post('/register/begin', requireAuth, async (c) => {
   const me = c.get('user');
+  const plan = await planFor(me.workspaceId);
+  if (!hasFeature(plan, 'passkeys')) {
+    return c.json({ error: `Passkeys require a higher plan (current: ${plan.label}). Upgrade to enable.`, code: 'FEATURE_GATED', feature: 'passkeys', plan: plan.key }, 402);
+  }
   const { rpID, rpName } = rpFromRequest(c);
   const existing = await db.select().from(passkeys).where(eq(passkeys.userId, me.id));
 

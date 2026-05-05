@@ -17,10 +17,12 @@ import AdminActivity from './AdminActivity';
 import AdminForms from './AdminForms';
 import AdminOauth from './AdminOauth';
 import AdminReports from './AdminReports';
+import AdminPlan from './AdminPlan';
 
 const TAB_KEYS = [
   { k: 'home',       min: 'viewer' },
   { k: 'workspace',  min: 'viewer' },
+  { k: 'plan',       min: 'admin' },
   { k: 'workspaces', min: 'super_admin' },
   { k: 'users',      min: 'admin' },
   { k: 'data',       min: 'viewer' },
@@ -67,6 +69,7 @@ export default function Admin() {
 
       {tab === 'home'       && <AdminHome onNav={setTab} />}
       {tab === 'workspace'  && <AdminWorkspace />}
+      {tab === 'plan' && has('admin') && <AdminPlan />}
       {tab === 'workspaces' && has('super_admin') && <AdminWorkspaces />}
       {tab === 'users' && has('admin') && <AdminUsers />}
       {tab === 'data' && <AdminData />}

@@ -11,6 +11,7 @@ import { scheduledReports, auditLog } from '../db/schema.js';
 import { and, eq, desc } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { runReport } from '../lib/reports.js';
+import { assertQuota, QuotaError } from '../lib/plans.js';
 
 const VALID_KINDS = ['bucket_csv', 'audit_log'];
 
@@ -54,6 +55,9 @@ app.post('/', async (c) => {
   if (!name || !kind || !targetEmail) return c.json({ error: 'name, kind, targetEmail required' }, 400);
   if (!VALID_KINDS.includes(kind)) return c.json({ error: `kind must be one of ${VALID_KINDS.join(', ')}` }, 400);
   if (typeof intervalMinutes !== 'number' || intervalMinutes < 1) return c.json({ error: 'intervalMinutes must be >= 1' }, 400);
+
+  try { await assertQuota(me.workspaceId, 'scheduledReports'); }
+  catch (e) { if (e instanceof QuotaError) return c.json({ error: e.message, code: e.code, quota: e.quota, limit: e.limit, current: e.current }, 402); throw e; }
 
   const id = newId();
   const next = active ? new Date(Date.now() + intervalMinutes * 60_000) : null;

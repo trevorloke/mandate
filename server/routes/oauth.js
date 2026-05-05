@@ -9,6 +9,7 @@ import { db } from '../db/index.js';
 import { oauthProviders, users, sessions, workspaces, auditLog } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { requireAuth, requireRole, setSessionCookie } from '../middleware/auth.js';
+import { planFor, hasFeature, assertQuota, QuotaError } from '../lib/plans.js';
 import { getDiscovery, buildAuthorizeUrl, exchangeCodeForUser } from '../lib/oauth.js';
 
 const SESSION_DAYS = 14;
@@ -155,6 +156,11 @@ adminApp.post('/', async (c) => {
   if (!label || !kind || !clientId || !clientSecret) return c.json({ error: 'label, kind, clientId, clientSecret required' }, 400);
   if (!['google', 'oidc'].includes(kind)) return c.json({ error: 'kind must be google or oidc' }, 400);
   if (kind === 'oidc' && !issuerUrl) return c.json({ error: 'issuerUrl required for generic oidc' }, 400);
+
+  const plan = await planFor(me.workspaceId);
+  if (!hasFeature(plan, 'sso')) return c.json({ error: `SSO requires a higher plan (current: ${plan.label}). Upgrade to enable.`, code: 'FEATURE_GATED', feature: 'sso', plan: plan.key }, 402);
+  try { await assertQuota(me.workspaceId, 'oauthProviders'); }
+  catch (e) { if (e instanceof QuotaError) return c.json({ error: e.message, code: e.code, quota: e.quota, limit: e.limit, current: e.current }, 402); throw e; }
 
   const id = newId('oap_');
   await db.insert(oauthProviders).values({

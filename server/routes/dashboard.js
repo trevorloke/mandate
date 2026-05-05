@@ -15,6 +15,7 @@ import { db } from '../db/index.js';
 import { dashboardWidgets, moduleData, auditLog, users } from '../db/schema.js';
 import { and, eq, desc, isNull, asc } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
+import { assertQuota, QuotaError } from '../lib/plans.js';
 
 const VALID_KINDS = ['metric', 'list', 'audit', 'note'];
 const VALID_WIDTHS = ['third', 'half', 'full'];
@@ -130,6 +131,9 @@ app.post('/', async (c) => {
   if (!kind || !title) return c.json({ error: 'kind and title required' }, 400);
   if (!VALID_KINDS.includes(kind)) return c.json({ error: `kind must be one of ${VALID_KINDS.join(', ')}` }, 400);
   if (!VALID_WIDTHS.includes(width)) return c.json({ error: `width must be one of ${VALID_WIDTHS.join(', ')}` }, 400);
+
+  try { await assertQuota(me.workspaceId, 'dashboardWidgets'); }
+  catch (e) { if (e instanceof QuotaError) return c.json({ error: e.message, code: e.code, quota: e.quota, limit: e.limit, current: e.current }, 402); throw e; }
 
   const existing = await db.select({ position: dashboardWidgets.position })
     .from(dashboardWidgets).where(eq(dashboardWidgets.userId, me.id));

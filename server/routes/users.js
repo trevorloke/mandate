@@ -6,6 +6,7 @@ import { db } from '../db/index.js';
 import { users, auditLog, sessions } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { requireAuth, requireRole, ROLES } from '../middleware/auth.js';
+import { assertQuota, QuotaError } from '../lib/plans.js';
 
 const app = new Hono();
 
@@ -41,6 +42,9 @@ app.post('/', requireRole('admin'), async (c) => {
 
   const existing = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
   if (existing.length) return c.json({ error: 'email already in use' }, 409);
+
+  try { await assertQuota(me.workspaceId, 'users'); }
+  catch (e) { if (e instanceof QuotaError) return c.json({ error: e.message, code: e.code, quota: e.quota, limit: e.limit, current: e.current }, 402); throw e; }
 
   const id = newId('u_');
   const passwordHash = await bcrypt.hash(password, 10);

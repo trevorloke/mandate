@@ -58,6 +58,7 @@
     "tabs": {
       "home": "Aperçu",
       "workspace": "Espace de travail",
+      "plan": "Plan & usage",
       "workspaces": "Espaces",
       "users": "Utilisateurs",
       "data": "Données",
@@ -74,6 +75,7 @@
     "tab_hints": {
       "home": "tableau de bord",
       "workspace": "identité",
+      "plan": "facturation",
       "workspaces": "locataires",
       "users": "accès",
       "data": "enregistrements",

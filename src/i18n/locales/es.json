@@ -58,6 +58,7 @@
     "tabs": {
       "home": "Resumen",
       "workspace": "Espacio",
+      "plan": "Plan y uso",
       "workspaces": "Espacios",
       "users": "Usuarios",
       "data": "Datos",
@@ -74,6 +75,7 @@
     "tab_hints": {
       "home": "panel",
       "workspace": "identidad",
+      "plan": "facturación",
       "workspaces": "inquilinos",
       "users": "acceso",
       "data": "registros",

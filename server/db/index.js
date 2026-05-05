@@ -318,6 +318,8 @@ function bootstrapTables() {
   alterIfMissing('audit_log', 'hash', 'TEXT');
   alterIfMissing('webhook_deliveries', 'worker_id', 'TEXT');
   alterIfMissing('webhook_deliveries', 'lease_expires_at', 'INTEGER');
+  alterIfMissing('workspaces', 'plan', "TEXT NOT NULL DEFAULT 'free'");
+  alterIfMissing('workspaces', 'plan_changed_at', 'INTEGER');
   // Index now that the columns exist
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_lease ON webhook_deliveries(status, worker_id, lease_expires_at);`);
 

@@ -12,6 +12,8 @@ export const workspaces = sqliteTable('workspaces', {
   daysToVote:  integer('days_to_vote'),
   tz:          text('tz').default('PT'),
   settings:    text('settings').default('{}'),  // JSON: module enable flags, theme overrides
+  plan:        text('plan').notNull().default('free'),  // 'free' | 'pro' | 'enterprise'
+  planChangedAt: integer('plan_changed_at', { mode: 'timestamp' }),
   createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });

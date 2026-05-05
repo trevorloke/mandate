@@ -160,6 +160,10 @@ export const api = {
     return fetchJson('/api/auth/passkey/login/complete', { method: 'POST', body: { response } });
   },
 
+  // Plan + quotas
+  getPlan:    () => fetchJson('/api/workspace/plan'),
+  setPlan:    (plan) => fetchJson('/api/workspace/plan', { method: 'PUT', body: { plan } }),
+
   // Webhook queue stats
   webhookQueueStats: () => fetchJson('/api/webhooks/_queue'),
   webhookQueueTick:  () => fetchJson('/api/webhooks/_queue/tick', { method: 'POST' }),

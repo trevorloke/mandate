@@ -58,6 +58,7 @@
     "tabs": {
       "home": "Overview",
       "workspace": "Workspace",
+      "plan": "Plan & usage",
       "workspaces": "Workspaces",
       "users": "Users",
       "data": "Module data",
@@ -74,6 +75,7 @@
     "tab_hints": {
       "home": "dashboard",
       "workspace": "identity",
+      "plan": "billing",
       "workspaces": "tenants",
       "users": "access",
       "data": "records",
