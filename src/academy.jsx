@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import './academy.css';
-import { ACAD_COURSES, ACAD_ARTICLES, ACAD_FACULTY, ACAD_TRANSCRIPT } from './academy-data';
+import { ACAD_COURSES as ACAD_COURSES_FB, ACAD_ARTICLES as ACAD_ARTICLES_FB, ACAD_FACULTY as ACAD_FACULTY_FB, ACAD_TRANSCRIPT } from './academy-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 import { AcLibrary, AcCourse } from './academy-tabs';
 import { AcReading, AcPath, AcFaculty } from './academy-tabs2';
 
@@ -11,6 +12,9 @@ const ACAD_TABS = [
 ];
 
 function Academy() {
+  const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
+  const { records: ACAD_ARTICLES } = useLiveRecords('academy', 'article', ACAD_ARTICLES_FB);
+  const { records: ACAD_FACULTY } = useLiveRecords('academy', 'faculty', ACAD_FACULTY_FB);
   const [tab, setTab] = useState('library');
   const [courseId, setCourseId] = useState(null);
   const [articleId, setArticleId] = useState(null);

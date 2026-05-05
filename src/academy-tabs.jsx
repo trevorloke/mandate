@@ -1,11 +1,14 @@
 import React, { useState as acUS, useMemo as acUM } from 'react';
 import './academy.css';
-import { ACAD_COURSES, ACAD_CATEGORIES, ACAD_ARTICLES, ACAD_FACULTY, ACAD_TRANSCRIPT } from './academy-data';
+import { ACAD_COURSES as ACAD_COURSES_FB, ACAD_CATEGORIES, ACAD_ARTICLES as ACAD_ARTICLES_FB, ACAD_FACULTY as ACAD_FACULTY_FB, ACAD_TRANSCRIPT } from './academy-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Academy 2.0 — Library + Course tabs
 
 /* ─── LIBRARY ─── */
 function AcLibrary({ onPickCourse, onPickArticle }) {
+  const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
+  const { records: ACAD_ARTICLES } = useLiveRecords('academy', 'article', ACAD_ARTICLES_FB);
   const featured = ACAD_COURSES.find(c => c.featured);
   const byCat = acUM(() => {
     const m = {};
@@ -129,8 +132,10 @@ function CourseCard({ c, onPick }) {
 
 /* ─── COURSE PLAYER ─── */
 function AcCourse({ courseId, onBack }) {
+  const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
+  const { records: ACAD_FACULTY } = useLiveRecords('academy', 'faculty', ACAD_FACULTY_FB);
   const c = ACAD_COURSES.find(x => x.id === courseId) || ACAD_COURSES.find(x=>x.featured);
-  const instructor = ACAD_FACULTY.find(f => f.id === c.instructorId);
+  const instructor = ACAD_FACULTY.find(f => f.id === c?.instructorId);
   const chapters = c.chapterList || [
     { n:1, t:'Introduction', d:'08:00', done:true, sub:'Overview' },
     { n:2, t:'Foundations', d:'14:00', done:true, sub:'Core ideas' },

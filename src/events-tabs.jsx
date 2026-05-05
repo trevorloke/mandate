@@ -1,5 +1,6 @@
 import React from 'react';
-import { EV_LIST, EV_TYPES, EV_VENUES, EV_GALA_TICKETS, EV_GALA_ROS, EV_GALA_RSVPS, EV_SHIFTS, EV_HOSTS } from './events-data';
+import { EV_LIST as EV_LIST_FB, EV_TYPES, EV_VENUES as EV_VENUES_FB, EV_GALA_TICKETS, EV_GALA_ROS, EV_GALA_RSVPS, EV_SHIFTS, EV_HOSTS as EV_HOSTS_FB } from './events-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Events 2.0 — tab content components
 
@@ -16,6 +17,7 @@ const _evShortDay = (iso) => {
 
 /* ── SCHEDULE (list view) ── */
 function EvScheduleTab({ onPick }) {
+  const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
   const groups = evUM2(() => {
     const future = EV_LIST.filter(e => e.attended === null).sort((a,b)=> a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
     const past   = EV_LIST.filter(e => e.attended !== null).sort((a,b)=> b.date.localeCompare(a.date));
@@ -65,6 +67,7 @@ function EvScheduleTab({ onPick }) {
 }
 
 function EvRow({ e, onPick, past }) {
+  const { records: EV_VENUES } = useLiveRecords('events', 'venue', EV_VENUES_FB);
   const type = EV_TYPES[e.type];
   const venue = EV_VENUES.find(v => v.id === e.venue);
   const fillPct = Math.min(100, Math.round((e.rsvped / e.capacity) * 100));
@@ -118,6 +121,7 @@ function EvRow({ e, onPick, past }) {
 
 /* ── CALENDAR ── */
 function EvCalendarTab() {
+  const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
   // Render May 2026 (the active campaign month)
   // 1 May 2026 is a Friday
   const firstDay = 5; // 0=Sun, 5=Fri
@@ -174,6 +178,8 @@ function EvCalendarTab() {
 
 /* ── EVENT DETAIL (Gala) ── */
 function EvDetailTab() {
+  const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
+  const { records: EV_VENUES } = useLiveRecords('events', 'venue', EV_VENUES_FB);
   const e = EV_LIST.find(x => x.id === 'e-fund-gala');
   const venue = EV_VENUES.find(v => v.id === e.venue);
   const totalRev = EV_GALA_TICKETS.reduce((s,t)=>s+t.rev, 0);
@@ -280,6 +286,7 @@ function EvDetailTab() {
 
 /* ── VENUES ── */
 function EvVenuesTab() {
+  const { records: EV_VENUES } = useLiveRecords('events', 'venue', EV_VENUES_FB);
   return (
     <div className="ev2__venues">
       {EV_VENUES.map(v => (
@@ -303,6 +310,7 @@ function EvVenuesTab() {
 
 /* ── HOSTS ── */
 function EvHostsTab() {
+  const { records: EV_HOSTS } = useLiveRecords('events', 'host', EV_HOSTS_FB);
   return (
     <div className="ev2__hosts">
       <div className="ev2__host-row head">

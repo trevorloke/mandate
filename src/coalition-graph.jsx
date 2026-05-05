@@ -1,6 +1,7 @@
 import React from 'react';
 import './coalition-graph.css';
-import { COA_GRAPH, COA_LEDGER } from './coalition-data';
+import { COA_GRAPH, COA_LEDGER as COA_LEDGER_FB } from './coalition-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Coalition · GRAPH tab
 // Force graph of relationships — candidate, orgs, people, opposition
@@ -42,6 +43,7 @@ const FILTER_DEFS = [
 ];
 
 const CoaGraph = () => {
+  const { records: COA_LEDGER } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
   const [filter, setFilter] = cgUS('all');
   const [hover, setHover] = cgUS(null);
   const [selected, setSelected] = cgUS('bcfl');

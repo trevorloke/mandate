@@ -2,7 +2,8 @@
 
 import React, { useState as cUS, useEffect as cUE, useRef as cUR, useMemo as cUM } from 'react';
 import './command.css';
-import { CMD_WORKSPACES, CMD_GROUPS, CMD_MESSAGES, CMD_THREAD, CMD_SLASH } from './command-data';
+import { CMD_WORKSPACES, CMD_GROUPS as CMD_GROUPS_FB, CMD_MESSAGES as CMD_MESSAGES_FB, CMD_THREAD, CMD_SLASH } from './command-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // ── Sidebar item row
 function CmdItem({ it, active, onClick }) {
@@ -243,6 +244,8 @@ function ThreadPane({ root, onClose }) {
 
 // ── Root
 function Command() {
+  const { records: CMD_GROUPS } = useLiveRecords('command', 'channel', CMD_GROUPS_FB);
+  const { records: CMD_MESSAGES } = useLiveRecords('command', 'message', CMD_MESSAGES_FB);
   const [activeCh, setActiveCh] = cUS('c-warroom');
   const [threadRoot, setThreadRoot] = cUS(CMD_MESSAGES.find(m => m.id === 'm1'));
   const [activeWs, setActiveWs] = cUS('mw');

@@ -1,6 +1,7 @@
 import React from 'react';
 import './coalition-tabs.css';
-import { COA_ASKS, COA_ASKS_STAGES, COA_COMMS, COA_EVENTS, COA_OPS } from './coalition-data';
+import { COA_ASKS as COA_ASKS_FB, COA_ASKS_STAGES, COA_COMMS as COA_COMMS_FB, COA_EVENTS, COA_OPS } from './coalition-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Coalition · ASKS, OPS, COMMS, EVENTS tabs
 
@@ -10,6 +11,7 @@ const { useState: caUS } = React;
 const STAGE_TONES = ['#7a8a98','#c5874f','#6b8b73','#2a4d35','#9aa09a'];
 
 const CoaAsks = () => {
+  const { records: COA_ASKS } = useLiveRecords('coalition', 'ask', COA_ASKS_FB);
   const [hover, setHover] = caUS(null);
   const stages = COA_ASKS_STAGES;
   const asks = COA_ASKS;
@@ -206,6 +208,7 @@ const KIND_TONES = {
 };
 
 const CoaComms = () => {
+  const { records: COA_COMMS } = useLiveRecords('coalition', 'comm', COA_COMMS_FB);
   const [filter, setFilter] = caUS('all');
   const comms = COA_COMMS;
   const filtered = filter === 'all' ? comms : comms.filter(c => c.kind === filter);

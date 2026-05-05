@@ -1,6 +1,7 @@
 import React from 'react';
 import './raise-modals.css';
-import { RAISE_KPIS, RAISE_STAGES, RAISE_PROSPECTS, RAISE_DONORS, RAISE_PROSPECT_DETAIL } from './raise-data';
+import { RAISE_KPIS, RAISE_STAGES, RAISE_PROSPECTS as RAISE_PROSPECTS_FB, RAISE_DONORS as RAISE_DONORS_FB, RAISE_PROSPECT_DETAIL } from './raise-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Raise modals (Log Gift + Add Donor)
 
@@ -8,6 +9,8 @@ const { useState: rmUS, useEffect: rmUE, useMemo: rmUM, useRef: rmUR } = React;
 
 /* ── Donor lookup combobox ─────────────────────────── */
 const DonorCombo = ({ value, onPick, onAddNew }) => {
+  const { records: RAISE_DONORS } = useLiveRecords('raise', 'donor', RAISE_DONORS_FB);
+  const { records: RAISE_PROSPECTS } = useLiveRecords('raise', 'prospect', RAISE_PROSPECTS_FB);
   const [q, setQ] = rmUS(value || '');
   const [open, setOpen] = rmUS(false);
   rmUE(() => { setQ(value || ''); }, [value]);

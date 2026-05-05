@@ -1,6 +1,7 @@
 import React from 'react';
 import './beacon-tabs.css';
-import { BEACON_ACCOUNTS, BEACON_DAYS, BEACON_POSTS } from './beacon-data';
+import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB } from './beacon-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 import { BEACON_TRACKED_TERMS, BEACON_MENTION_TIMELINE, BEACON_AUTHORS, BEACON_SOV_HISTORY, BEACON_TOP_POSTS, BEACON_ENG_OVER_TIME, BEACON_BEST_TIME, BEACON_CONTENT_SCORE, BEACON_BOOSTS, BEACON_BOOST_SUGGESTIONS, BEACON_PRESS, BEACON_PRESS_OUTLETS } from './beacon-data2';
 
 // Mandate 2.0 — Beacon · Queue / Listening / Performance / Boost / Press tabs
@@ -22,6 +23,7 @@ const PLAT_TAB = {
 // ─────────────────────────────────────────────────────────────────────────
 
 function BTabQueue({ onOpenPost }) {
+  const { records: BEACON_POSTS } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
   const lanes = [
     { key:'DRAFT',     label:'Draft',     hint:'requires editing' },
     { key:'needs',     label:'Awaiting sign-off', hint:'5 items'  },

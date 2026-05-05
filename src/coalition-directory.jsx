@@ -1,6 +1,7 @@
 import React from 'react';
 import './coalition-directory.css';
-import { COA_LEDGER, COA_ORGS } from './coalition-data';
+import { COA_LEDGER as COA_LEDGER_FB, COA_ORGS } from './coalition-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Coalition · DIRECTORY tab
 // Org cards + deep file pane (history, contacts, asks, affiliations)
@@ -20,6 +21,7 @@ const fmtK = (n) => {
 };
 
 const CoaDirectory = () => {
+  const { records: COA_LEDGER } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
   const [sel, setSel] = cdUS('bcfl');
   const [filter, setFilter] = cdUS('all');
 

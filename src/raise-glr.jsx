@@ -1,6 +1,7 @@
 import React from 'react';
 import './raise-glr.css';
-import { RAISE_GIFTS_TODAY, RAISE_GIFTS, RAISE_GIFTS_HOURLY, RAISE_GIFTS_SOURCES, RAISE_LISTS, RAISE_REPORT_GOAL, RAISE_REPORT_ACQ, RAISE_REPORT_COHORTS, RAISE_REPORT_MIX, RAISE_REPORT_OFFICERS, RAISE_REPORT_AVG, RAISE_REPORT_PYRAMID } from './raise-glr-data';
+import { RAISE_GIFTS_TODAY, RAISE_GIFTS as RAISE_GIFTS_FB, RAISE_GIFTS_HOURLY, RAISE_GIFTS_SOURCES, RAISE_LISTS, RAISE_REPORT_GOAL, RAISE_REPORT_ACQ, RAISE_REPORT_COHORTS, RAISE_REPORT_MIX, RAISE_REPORT_OFFICERS, RAISE_REPORT_AVG, RAISE_REPORT_PYRAMID } from './raise-glr-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Raise · Gifts / Lists / Reports tab views
 
@@ -53,6 +54,7 @@ const GiftsSummary = () => {
 
 /* ── Gifts: filters ──────────────────────────────────────── */
 const GiftsFilters = ({ active, setActive }) => {
+  const { records: RAISE_GIFTS } = useLiveRecords('raise', 'gift', RAISE_GIFTS_FB);
   const sources = RAISE_GIFTS_SOURCES;
   return (
     <div className="r-gifts-filters">
@@ -77,6 +79,7 @@ const GiftsFilters = ({ active, setActive }) => {
 
 /* ── Gifts: journal table ─────────────────────────────────── */
 const GiftsJournal = ({ filter }) => {
+  const { records: RAISE_GIFTS } = useLiveRecords('raise', 'gift', RAISE_GIFTS_FB);
   const all = RAISE_GIFTS;
   const rows = filter === 'all' ? all : all.filter(g => g.src === filter);
   // group by date label

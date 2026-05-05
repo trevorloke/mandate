@@ -1,5 +1,6 @@
 import React from 'react';
-import { SITE_PAGES, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_EXPERIMENTS, SITE_FORMS, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH } from './site-data';
+import { SITE_PAGES as SITE_PAGES_FB, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_FORMS as SITE_FORMS_FB, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH } from './site-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Site 2.0 — tab content components
 // Builder canvas, CMS, Experiments, Forms, Audience, Deploys
@@ -8,6 +9,7 @@ const { useState: stUS2, useMemo: stUM2 } = React;
 
 /* ── PAGES ── */
 function SitePagesTab() {
+  const { records: SITE_PAGES } = useLiveRecords('site', 'page', SITE_PAGES_FB);
   return (
     <div className="site2__pages">
       <aside className="site2__pages-aside">
@@ -257,6 +259,7 @@ function SiteCMSTab() {
 
 /* ── EXPERIMENTS ── */
 function SiteExperimentsTab() {
+  const { records: SITE_EXPERIMENTS } = useLiveRecords('site', 'experiment', SITE_EXPERIMENTS_FB);
   return (
     <div className="site2__xp-grid">
       {SITE_EXPERIMENTS.map(x => {
@@ -319,6 +322,7 @@ function SiteExperimentsTab() {
 
 /* ── FORMS ── */
 function SiteFormsTab() {
+  const { records: SITE_FORMS } = useLiveRecords('site', 'form', SITE_FORMS_FB);
   return (
     <div className="site2__forms">
       <div className="site2__forms-list">

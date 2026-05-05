@@ -1,11 +1,13 @@
 import React, { useState as acUS2 } from 'react';
 import './academy.css';
-import { ACAD_ARTICLES, ACAD_COURSES, ACAD_FACULTY, ACAD_PATH_SCHED, ACAD_PATH_CERTS } from './academy-data';
+import { ACAD_ARTICLES as ACAD_ARTICLES_FB, ACAD_COURSES as ACAD_COURSES_FB, ACAD_FACULTY as ACAD_FACULTY_FB, ACAD_PATH_SCHED, ACAD_PATH_CERTS } from './academy-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Academy 2.0 — Reading + Path + Faculty tabs
 
 /* ─── READING (long-form article) ─── */
 function AcReading({ articleId, onBack }) {
+  const { records: ACAD_ARTICLES } = useLiveRecords('academy', 'article', ACAD_ARTICLES_FB);
   const a = ACAD_ARTICLES.find(x => x.id === articleId) || ACAD_ARTICLES[0];
 
   const sections = [
@@ -84,6 +86,7 @@ function AcReading({ articleId, onBack }) {
 
 /* ─── PATH (personal dashboard) ─── */
 function AcPath({ onPickCourse }) {
+  const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
   const inProgress = ACAD_COURSES.filter(c => c.progress > 0 && c.progress < 1);
   const featured = ACAD_COURSES.find(c => c.featured);
 
@@ -179,6 +182,7 @@ function AcPath({ onPickCourse }) {
 
 /* ─── FACULTY ─── */
 function AcFaculty() {
+  const { records: ACAD_FACULTY } = useLiveRecords('academy', 'faculty', ACAD_FACULTY_FB);
   return (
     <div>
       <div className="lyc__sect" style={{marginTop:0}}>

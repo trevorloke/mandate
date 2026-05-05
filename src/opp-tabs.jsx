@@ -1,5 +1,6 @@
 import React, { useState as opUS, useMemo as opUM } from 'react';
-import { OP_TARGETS, OP_CLAIMS, OP_LEADS, OP_LEAD_STAGES, OP_REBUTTALS, OP_MONITORS, OP_SOURCES } from './opp-data';
+import { OP_TARGETS as OP_TARGETS_FB, OP_CLAIMS as OP_CLAIMS_FB, OP_LEADS as OP_LEADS_FB, OP_LEAD_STAGES, OP_REBUTTALS, OP_MONITORS, OP_SOURCES } from './opp-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Opposition 2.0 — Leads / Rebuttals / Monitors / Sources
 
@@ -7,6 +8,8 @@ import { OP_TARGETS, OP_CLAIMS, OP_LEADS, OP_LEAD_STAGES, OP_REBUTTALS, OP_MONIT
 // LEADS — investigative kanban
 // ════════════════════════════════════════════════════════════
 function OpLeads() {
+  const { records: OP_LEADS } = useLiveRecords('opposition', 'lead', OP_LEADS_FB);
+  const { records: OP_TARGETS } = useLiveRecords('opposition', 'target', OP_TARGETS_FB);
   return (
     <div>
       <div className="op2__filters">
@@ -84,6 +87,8 @@ function OpLeads() {
 // REBUTTALS workshop
 // ════════════════════════════════════════════════════════════
 function OpRebuttals() {
+  const { records: OP_TARGETS } = useLiveRecords('opposition', 'target', OP_TARGETS_FB);
+  const { records: OP_CLAIMS } = useLiveRecords('opposition', 'claim', OP_CLAIMS_FB);
   const [sfilter, setSfilter] = opUS('all');
   const statuses = ['all', 'drafted', 'in-review', 'published', 'spike'];
 

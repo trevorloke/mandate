@@ -1,5 +1,6 @@
 import React, { useState as cvUS, useMemo as cvUM } from 'react';
-import { CV_MEMBER, CV_BILLS, CV_COMMITTEES, CV_HEARINGS, CV_PROMISES, CV_OFFICE_WEEK, CV_LETTERS, CV_STAFF, CV_SPEND, CV_TRENDS } from './civic-data';
+import { CV_MEMBER, CV_BILLS as CV_BILLS_FB, CV_COMMITTEES, CV_HEARINGS, CV_PROMISES as CV_PROMISES_FB, CV_OFFICE_WEEK, CV_LETTERS, CV_STAFF, CV_SPEND, CV_TRENDS } from './civic-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Civic 2.0 — Committees, Promises, Community, Letters, Spend, Staff, Trends
 
@@ -78,6 +79,8 @@ function CvCommittees() {
 // PROMISES — campaign → governing ledger
 // ════════════════════════════════════════════════════════════
 function CvPromises() {
+  const { records: CV_PROMISES } = useLiveRecords('civic', 'promise', CV_PROMISES_FB);
+  const { records: CV_BILLS } = useLiveRecords('civic', 'bill', CV_BILLS_FB);
   const kept = CV_PROMISES.filter(p => p.status === 'kept').length;
   const onTrack = CV_PROMISES.filter(p => p.status === 'on-track').length;
   const slipping = CV_PROMISES.filter(p => p.status === 'slipping' || p.status === 'at-risk').length;

@@ -1,6 +1,7 @@
 import React from 'react';
 import './ledger-tabs1.css';
-import { LEDGER_BILLS, LEDGER_COA, LEDGER_JOURNAL, LEDGER_RECONCILE } from './ledger-data';
+import { LEDGER_BILLS as LEDGER_BILLS_FB, LEDGER_COA as LEDGER_COA_FB, LEDGER_JOURNAL as LEDGER_JOURNAL_FB, LEDGER_RECONCILE } from './ledger-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Ledger tabs (Chart, Reconcile, Bills, Filings, Reports)
 
@@ -10,6 +11,8 @@ const { useState: lTUS, useMemo: lTUM } = React;
    CHART OF ACCOUNTS
    ────────────────────────────────────────────────────── */
 const LedgerChart = () => {
+  const { records: LEDGER_COA } = useLiveRecords('ledger', 'account', LEDGER_COA_FB);
+  const { records: LEDGER_JOURNAL } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL_FB);
   const [collapsed, setCollapsed] = lTUS({ '6000': false }); // expense expanded
   const [picked, setPicked] = lTUS('1010');
 
@@ -20,7 +23,7 @@ const LedgerChart = () => {
       else if (a.parent && by[a.parent]) by[a.parent].kids.push(a);
     });
     return Object.values(by);
-  }, []);
+  }, [LEDGER_COA]);
 
   const fmt = (n) => {
     const neg = n < 0;
@@ -252,6 +255,7 @@ const LedgerReconcile = () => {
    BILLS (Accounts Payable)
    ────────────────────────────────────────────────────── */
 const LedgerBills = () => {
+  const { records: LEDGER_BILLS } = useLiveRecords('ledger', 'bill', LEDGER_BILLS_FB);
   const [filter, setFilter] = lTUS('all');
   const [picked, setPicked] = lTUS([]);
 

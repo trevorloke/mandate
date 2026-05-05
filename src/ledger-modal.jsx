@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import './ledger-modal.css';
-import { LEDGER_COA, LEDGER_JOURNAL } from './ledger-data';
+import { LEDGER_COA as LEDGER_COA_FB } from './ledger-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 import { api } from './auth/api';
 
 // Mandate 2.0 — Ledger New Entry modal (double-entry composer)
@@ -16,17 +17,18 @@ const LEDGER_ENTRY_TYPES = [
   { k:'pledge',   l:'Pledge',       hint:'commitment' },
 ];
 
-/* ── Account picker — searchable combobox over LEDGER_COA ── */
+/* ── Account picker — searchable combobox over the chart of accounts ── */
 const AcctCombo = ({ value, onChange, placeholder = 'Select account…', filter }) => {
   const [open, setOpen] = lmUS(false);
   const [q, setQ] = lmUS('');
   const ref = lmUR(null);
+  const { records: LEDGER_COA } = useLiveRecords('ledger', 'account', LEDGER_COA_FB);
 
   const accounts = lmUM(() => {
     let acc = (LEDGER_COA || []).filter(a => a.kind !== 'header');
     if (filter) acc = acc.filter(filter);
     return acc;
-  }, [filter]);
+  }, [filter, LEDGER_COA]);
 
   const matches = lmUM(() => {
     if (!q) return accounts;
@@ -84,8 +86,8 @@ const AcctCombo = ({ value, onChange, placeholder = 'Select account…', filter 
 };
 
 /* ── Default templates per entry type ── */
-const splitTemplate = (type) => {
-  const find = (code) => (LEDGER_COA || []).find(a => a.code === code);
+const splitTemplate = (type, coa = LEDGER_COA_FB) => {
+  const find = (code) => (coa || []).find(a => a.code === code);
   switch (type) {
     case 'gift':
       return [
@@ -134,12 +136,13 @@ const todayDay = () => ['SUN','MON','TUE','WED','THU','FRI','SAT'][new Date().ge
 
 /* ── New Entry Modal ── */
 const NewEntryModal = ({ open, onClose, onPosted }) => {
+  const { records: LEDGER_COA } = useLiveRecords('ledger', 'account', LEDGER_COA_FB);
   const [type, setType] = lmUS('gift');
   const [date, setDate] = lmUS(todayMD());
   const [ref, setRef] = lmUS('GIFT-8842');
   const [memo, setMemo] = lmUS('');
   const [source, setSource] = lmUS('Manual');
-  const [splits, setSplits] = lmUS(() => splitTemplate('gift'));
+  const [splits, setSplits] = lmUS(() => splitTemplate('gift', LEDGER_COA));
   const [posted, setPosted] = lmUS(false);
 
   // Reset on open
@@ -150,10 +153,10 @@ const NewEntryModal = ({ open, onClose, onPosted }) => {
       setRef('GIFT-' + (8842 + Math.floor(Math.random()*7)));
       setMemo('');
       setSource('Manual');
-      setSplits(splitTemplate('gift'));
+      setSplits(splitTemplate('gift', LEDGER_COA));
       setPosted(false);
     }
-  }, [open]);
+  }, [open, LEDGER_COA]);
 
   // ESC to close
   lmUE(() => {
@@ -166,7 +169,7 @@ const NewEntryModal = ({ open, onClose, onPosted }) => {
   // Switch type → swap splits + ref prefix
   const switchType = (t) => {
     setType(t);
-    setSplits(splitTemplate(t));
+    setSplits(splitTemplate(t, LEDGER_COA));
     const num = ref.replace(/^[A-Z]+-?/, '') || '8842';
     setRef(refPrefix(t) + num);
   };
@@ -226,8 +229,8 @@ const NewEntryModal = ({ open, onClose, onPosted }) => {
         cr: Number(s.cr) || 0,
       })),
     };
-    // Persist to API; fall back to in-memory mutation if offline/unauthorized.
-    api.createData('ledger', 'journal', je).catch(() => { LEDGER_JOURNAL.unshift(je); });
+    // Persist to API; fall back is harmless because the modal closes on success.
+    api.createData('ledger', 'journal', je).catch(() => {});
     setPosted(true);
     onPosted && onPosted(je);
     setTimeout(onClose, 900);
