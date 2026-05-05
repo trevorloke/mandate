@@ -1,6 +1,6 @@
 // DashboardBoard — per-user custom widget board.
 // Renders inside admin Overview. Lets the user add/remove/reorder/edit widgets.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../auth/api';
 import { MODULE_KINDS } from './AdminData';
 import './DashboardBoard.css';
@@ -180,14 +180,19 @@ function WidgetEditor({ widget, onSaved, onCancel }) {
     setBusy(false);
   };
 
-  // Default-pick a sensible (module, kind) tuple for metric/list widgets.
-  const defaultBucket = () => MODULE_KINDS[0]?.kinds[0] && { module: MODULE_KINDS[0].module, kind: MODULE_KINDS[0].kinds[0].kind };
-  if ((kind === 'metric' || kind === 'list') && !params.module) {
-    const d = defaultBucket();
-    if (d) setParams({ ...params, ...d });
-  }
+  // Default-pick a sensible (module, kind) tuple when the user picks metric/list with no params yet.
+  // Must run in an effect — calling setParams during render would loop forever.
+  useEffect(() => {
+    if ((kind !== 'metric' && kind !== 'list') || params.module) return;
+    const first = MODULE_KINDS[0];
+    if (!first?.kinds[0]) return;
+    setParams(p => ({ ...p, module: first.module, kind: first.kinds[0].kind }));
+  }, [kind, params.module]);
 
-  const moduleOpts = MODULE_KINDS.find(m => m.module === params.module)?.kinds || [];
+  const moduleOpts = useMemo(
+    () => MODULE_KINDS.find(m => m.module === params.module)?.kinds || [],
+    [params.module]
+  );
 
   return (
     <form className="dash__editor" onSubmit={submit}>

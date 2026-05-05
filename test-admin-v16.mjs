@@ -44,6 +44,8 @@ await step('Sign up admin + seed donors', async () => {
 
   const csrf = await csrfFromPage();
   const api = apiAs(csrf);
+  // Pro plan: free is capped at 1 scheduled report and the test creates 2 below
+  await api('PUT', '/api/workspace/plan', { plan: 'pro' });
   for (let i = 0; i < 5; i++) {
     await api('POST', '/api/data/raise/donor', { name: `Donor ${i+1}`, amount: (i+1) * 100, tier: i < 2 ? 'major' : 'small' });
   }

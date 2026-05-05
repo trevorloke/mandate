@@ -85,6 +85,16 @@ await step('Sign up (super_admin)', async () => {
   await page.fill('input[placeholder="Meridian West — Assembly"]', 'Meridian West');
   await page.click('button:has-text("Create workspace & sign in")');
   await page.waitForSelector('.home2__greeting', { timeout: 10000 });
+  // SSO is gated to Pro+
+  await page.evaluate(async () => {
+    const m = document.cookie.match(/(?:^|;\s*)mdt_csrf=([^;]+)/);
+    const csrf = m ? decodeURIComponent(m[1]) : '';
+    await fetch('/api/workspace/plan', {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ plan: 'pro' }),
+    });
+  });
 });
 
 let providerId = null;

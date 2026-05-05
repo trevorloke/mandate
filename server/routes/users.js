@@ -13,7 +13,11 @@ const app = new Hono();
 const newId = (prefix = '') => prefix + randomBytes(12).toString('hex');
 const initialsOf = (name) => name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
-const sanitize = (u) => { if (!u) return null; const { passwordHash, ...rest } = u; return rest; };
+const sanitize = (u) => {
+  if (!u) return null;
+  const { passwordHash, totpSecret, recoveryCodesHash, ...rest } = u;
+  return rest;
+};
 
 app.use('*', requireAuth);
 

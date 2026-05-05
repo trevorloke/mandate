@@ -5,8 +5,8 @@
 import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { db } from '../db/index.js';
-import { workspaces, users, moduleData, auditLog } from '../db/schema.js';
-import { and, eq, count, isNull } from 'drizzle-orm';
+import { workspaces, users, moduleData, recordShares, auditLog } from '../db/schema.js';
+import { and, eq, count, isNull, inArray } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const newId = (p='') => p + randomBytes(12).toString('hex');
@@ -114,6 +114,9 @@ app.delete('/:id', requireRole('super_admin'), async (c) => {
   if (id === me.workspaceId) return c.json({ error: 'cannot delete your current workspace' }, 400);
   const [{ n }] = await db.select({ n: count() }).from(users).where(eq(users.workspaceId, id));
   if (n > 0) return c.json({ error: `workspace has ${n} users — remove them first` }, 400);
+  // Clean up record_shares first — no FK on record_id, so they'd orphan after the cascade.
+  const recordIds = (await db.select({ id: moduleData.id }).from(moduleData).where(eq(moduleData.workspaceId, id))).map(r => r.id);
+  if (recordIds.length) await db.delete(recordShares).where(inArray(recordShares.recordId, recordIds));
   await db.delete(workspaces).where(eq(workspaces.id, id));
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'workspace.delete', target: id });
   return c.json({ ok: true });

@@ -226,6 +226,8 @@ app.delete('/_trash/:id', requireRole('admin'), requireScope('write'), async (c)
     .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId), isNotNull(moduleData.deletedAt)))
     .limit(1))[0];
   if (!row) return c.json({ error: 'not found in trash' }, 404);
+  // Clean up orphaned record_shares — there's no FK to cascade them.
+  await db.delete(recordShares).where(eq(recordShares.recordId, id));
   await db.delete(moduleData).where(eq(moduleData.id, id));
   await audit(me.id, 'data.purge', id, { module: row.module, kind: row.kind });
   return c.json({ ok: true });
@@ -237,6 +239,7 @@ app.post('/_trash/_empty', requireRole('admin'), requireScope('write'), async (c
   const trash = await db.select().from(moduleData)
     .where(and(eq(moduleData.workspaceId, me.workspaceId), isNotNull(moduleData.deletedAt)));
   for (const r of trash) {
+    await db.delete(recordShares).where(eq(recordShares.recordId, r.id));
     await db.delete(moduleData).where(eq(moduleData.id, r.id));
   }
   await audit(me.id, 'data.purge_all', '_trash', { count: trash.length });
@@ -268,12 +271,32 @@ app.put('/:module/:kind/_bulk', requireRole('editor'), requireScope('write'), re
   const { module, kind } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const records = Array.isArray(body) ? body : (body.records || []);
+
+  // Quota: count current total minus what's about to be replaced + the new size.
+  const currentBucket = (await db.select().from(moduleData).where(and(
+    eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind),
+  ))).length;
+  const currentTotal = (await db.select().from(moduleData).where(and(
+    eq(moduleData.workspaceId, me.workspaceId), isNull(moduleData.deletedAt),
+  ))).length;
+  const projected = currentTotal - currentBucket + records.length;
+  const { planFor } = await import('../lib/plans.js');
+  const plan = await planFor(me.workspaceId);
+  const limit = plan.limits.records;
+  if (limit !== Infinity && projected > limit) {
+    return c.json({
+      error: `Bulk replace would exceed plan limit for records: ${projected}/${limit}. Upgrade or reduce payload.`,
+      code: 'QUOTA_EXCEEDED', quota: 'records', limit, current: projected,
+    }, 402);
+  }
+
   await db.delete(moduleData)
     .where(and(eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind)));
   for (const r of records) {
     await db.insert(moduleData).values({
       id: newId(), workspaceId: me.workspaceId, module, kind,
       data: JSON.stringify(r),
+      ownerId: me.id,
     });
   }
   await audit(me.id, 'data.bulk_replace', `${module}.${kind}`, { count: records.length });
@@ -322,7 +345,8 @@ app.put('/:module/:kind/:id', requireScope('write'), async (c) => {
     .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId), isNull(moduleData.deletedAt))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
   if (!(await canAccessRecord(me, row, 'edit'))) {
-    // Fall back to bucket-level role check
+    // Private records are owner+share+admin only — bucket permission can't override.
+    if (row.viewerScope === 'private') return c.json({ error: 'private record — owner or admin only' }, 403);
     if (me.role === 'viewer') return c.json({ error: 'no edit access' }, 403);
     const blocked = await checkBucketPermission(c, 'write');
     if (blocked) return blocked;
@@ -347,6 +371,7 @@ app.delete('/:module/:kind/:id', requireScope('write'), async (c) => {
     .where(and(eq(moduleData.id, id), eq(moduleData.workspaceId, me.workspaceId), isNull(moduleData.deletedAt))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
   if (!(await canAccessRecord(me, row, 'edit'))) {
+    if (row.viewerScope === 'private') return c.json({ error: 'private record — owner or admin only' }, 403);
     if (me.role === 'viewer') return c.json({ error: 'no edit access' }, 403);
     const blocked = await checkBucketPermission(c, 'write');
     if (blocked) return blocked;

@@ -35,7 +35,7 @@ await page.addInitScript(() => {
   window.prompt = (msg, dflt) => 'Test Device';
 });
 
-await step('Sign up', async () => {
+await step('Sign up + upgrade workspace to Pro (passkeys are gated on Free)', async () => {
   await page.goto('http://localhost:5174/', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.auth-screen__title');
   await page.fill('input[placeholder="Marcus Reyes"]', 'Pass Key');
@@ -44,6 +44,18 @@ await step('Sign up', async () => {
   await page.fill('input[placeholder="Meridian West — Assembly"]', 'WS');
   await page.click('button:has-text("Create workspace & sign in")');
   await page.waitForSelector('.mdt__bar', { timeout: 10000 });
+  // Passkeys require Pro+
+  const csrf = await page.evaluate(() => {
+    const m = document.cookie.match(/(?:^|;\s*)mdt_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  });
+  await page.evaluate(async ({ csrf }) => {
+    await fetch('/api/workspace/plan', {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ plan: 'pro' }),
+    });
+  }, { csrf });
 });
 
 await step('Open profile, register a passkey', async () => {

@@ -2,7 +2,7 @@
 // the workspace's `settings.retention.trashDays` value.
 // Default: keep forever (0 means disabled).
 import { db } from '../db/index.js';
-import { workspaces, moduleData, auditLog } from '../db/schema.js';
+import { workspaces, moduleData, auditLog, recordShares } from '../db/schema.js';
 import { and, eq, lte, isNotNull } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 
@@ -31,6 +31,7 @@ async function runOnce() {
     if (!due.length) continue;
 
     for (const r of due) {
+      await db.delete(recordShares).where(eq(recordShares.recordId, r.id));
       await db.delete(moduleData).where(eq(moduleData.id, r.id));
     }
     await db.insert(auditLog).values({
