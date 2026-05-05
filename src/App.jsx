@@ -16,6 +16,7 @@ import { Events2 } from './events';
 import { Command } from './command';
 import { Academy } from './academy';
 import Admin from './admin/Admin';
+import OnboardingWizard from './admin/OnboardingWizard';
 import { useAuth } from './auth/AuthContext';
 import { useLocale } from './i18n';
 import { api } from './auth/api';
@@ -118,6 +119,13 @@ export default function App2() {
     return authView === 'signup'
       ? <Signup onSwitchToLogin={() => setAuthView('login')} />
       : <Login  onSwitchToSignup={() => setAuthView('signup')} />;
+  }
+
+  // Onboarding gate — show the wizard until settings.onboarded === true.
+  // Only super_admins can complete it (since they own the workspace settings).
+  const isOnboarded = workspace?.settings?.onboarded === true;
+  if (workspace && !isOnboarded && user.role === 'super_admin') {
+    return <OnboardingWizard onComplete={() => { /* state already refreshed by setWorkspace */ }} />;
   }
 
   // Compose workspace from API (with prototype defaults as fallback)

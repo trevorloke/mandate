@@ -1,0 +1,246 @@
+/* Full-page modal — covers the whole app until the wizard finishes. */
+.onb {
+  position: fixed; inset: 0;
+  background: var(--paper);
+  z-index: 9999;
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 24px 80px;
+}
+.onb__card {
+  width: 100%;
+  max-width: 720px;
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  padding: 36px 40px 32px;
+  margin-top: 40px;
+}
+
+.onb__head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 30px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.onb__brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--font-display);
+  color: var(--ink);
+}
+.onb__brand b {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px;
+  background: var(--mark);
+  color: var(--mark-ink);
+  font-weight: 500;
+  font-size: 14px;
+}
+.onb__brand span { font-size: 16px; }
+
+.onb__progress {
+  display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  min-width: 220px;
+}
+.onb__progress-step {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+.onb__progress-bar {
+  width: 200px;
+  height: 4px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.onb__progress-fill {
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.3s;
+}
+
+.onb__step { display: flex; flex-direction: column; gap: 14px; }
+.onb__step--done { align-items: center; text-align: center; padding: 20px 0; }
+
+.onb__title {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  color: var(--ink);
+}
+.onb__title em { font-style: italic; }
+.onb__lede {
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+.onb__lede em { font-style: italic; color: var(--ink); }
+.onb__lede b { color: var(--ink); font-weight: 500; }
+.onb__hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-5);
+  letter-spacing: 0.04em;
+  margin: 4px 0 0;
+}
+
+.onb__field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.onb__field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+.onb__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+.onb__input {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  outline: none;
+  width: 100%;
+  appearance: none;
+}
+.onb__input:focus { border-color: var(--ink); }
+
+.onb__modules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.onb__mod {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  cursor: pointer;
+  align-items: start;
+  transition: border-color 0.15s;
+}
+.onb__mod input { margin-top: 3px; }
+.onb__mod.is-on { border-color: var(--ink); background: var(--paper-0); }
+.onb__mod-label { font-weight: 500; color: var(--ink); font-size: 14px; }
+.onb__mod-desc { font-size: 12px; color: var(--ink-5); margin-top: 2px; }
+
+.onb__invites { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.onb__invite-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 110px 30px;
+  gap: 8px;
+  align-items: center;
+}
+.onb__icon-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--rule);
+  width: 30px; height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--ink-5);
+}
+.onb__icon-btn:hover { color: #b03030; border-color: #c4a097; }
+
+.onb__choices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.onb__choice {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  cursor: pointer;
+  align-items: start;
+}
+.onb__choice input { margin-top: 4px; }
+.onb__choice.is-on { border-color: var(--ink); background: var(--paper-0); }
+.onb__choice-label {
+  font-weight: 500; color: var(--ink); font-size: 15px;
+  display: flex; align-items: center; gap: 8px;
+}
+.onb__choice-desc { font-size: 13px; color: var(--ink-4); margin-top: 4px; line-height: 1.5; }
+.onb__tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: var(--mark);
+  color: var(--mark-ink);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+.onb__file {
+  margin-top: 10px;
+  display: block;
+  font-size: 13px;
+}
+
+.onb__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--paper-2);
+}
+.onb__btn {
+  appearance: none;
+  background: var(--ink);
+  color: var(--paper-0);
+  border: 0;
+  padding: 12px 22px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.onb__btn:hover:not(:disabled) { background: var(--ink-1); }
+.onb__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.onb__btn--ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+.onb__btn--ghost:hover { border-color: var(--ink); background: transparent; }
+
+.onb__err {
+  background: #fbeae6;
+  border-left: 3px solid #b03030;
+  padding: 10px 14px;
+  color: #8b2418;
+  font-size: 13px;
+  margin: 12px 0;
+}
+
+.onb__check {
+  width: 64px; height: 64px;
+  background: #234a2c;
+  color: var(--paper-0);
+  display: inline-grid; place-items: center;
+  border-radius: 50%;
+  font-size: 32px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+  .onb { padding: 16px; }
+  .onb__card { padding: 24px 20px; margin-top: 0; }
+  .onb__title { font-size: 28px; }
+  .onb__field-row { grid-template-columns: 1fr; gap: 8px; }
+  .onb__modules { grid-template-columns: 1fr; }
+  .onb__invite-row { grid-template-columns: 1fr 1fr; }
+  .onb__invite-row .onb__icon-btn { grid-column: 2; justify-self: end; }
+  .onb__actions { flex-direction: column-reverse; }
+  .onb__btn { width: 100%; text-align: center; }
+}
