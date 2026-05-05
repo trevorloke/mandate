@@ -507,3 +507,152 @@
   .home2__break { padding: 0; }
   .home2__break img { max-width: 100%; height: auto; }
 }
+
+/* ── New home: workspace summary ─────────────────────────────────────── */
+.home2__masthead {
+  border-bottom: 1px solid var(--rule);
+  padding: 36px 32px 28px;
+  margin-bottom: 32px;
+  background: var(--paper-0);
+}
+.home2__masthead-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 32px;
+  align-items: end;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.home2__total {
+  text-align: right;
+  border-left: 1px solid var(--rule);
+  padding-left: 24px;
+}
+.home2__total-num {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1;
+}
+.home2__total-lbl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  margin-top: 6px;
+}
+.home2__sect {
+  max-width: 1200px;
+  margin: 0 auto 36px;
+  padding: 0 32px;
+}
+.home2__sect-h {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  margin: 0 0 16px;
+  font-weight: 500;
+}
+.home2__msg { color: var(--ink-5); font-style: italic; }
+
+.home2__empty {
+  background: var(--paper-0);
+  border: 1px dashed var(--rule);
+  padding: 48px 32px;
+  text-align: center;
+}
+.home2__empty p { font-size: 16px; color: var(--ink-2); margin: 0 0 12px; }
+.home2__hint { color: var(--ink-5); font-size: 14px; max-width: 540px; margin: 0 auto 20px !important; line-height: 1.6; }
+.home2__hint b { color: var(--ink-3); font-weight: 500; }
+.home2__cta {
+  appearance: none;
+  background: var(--ink); color: var(--paper-0); border: 0;
+  padding: 12px 22px;
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  cursor: pointer;
+}
+
+.home2__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.home2__card {
+  appearance: none;
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  padding: 18px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.home2__card:hover { border-color: var(--ink); transform: translateY(-1px); }
+.home2__card--empty { opacity: 0.55; }
+.home2__card-mod {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  margin-bottom: 10px;
+}
+.home2__card-num {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1;
+}
+.home2__card-num--zero { color: var(--ink-5); }
+.home2__card-lbl { font-size: 11px; color: var(--ink-5); margin-top: 6px; font-style: italic; }
+
+.home2__activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  padding: 16px 20px;
+}
+.home2__activity li {
+  display: flex; align-items: baseline; gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--paper-2);
+  font-size: 13px;
+}
+.home2__activity li:last-child { border-bottom: 0; padding-bottom: 0; }
+.home2__act-when {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-5);
+  min-width: 36px;
+}
+.home2__activity code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--paper-2);
+  padding: 1px 6px;
+  border-radius: 2px;
+  color: var(--ink-2);
+}
+.home2__act-who { color: var(--ink-5); font-style: italic; }
+
+@media (max-width: 1100px) {
+  .home2__grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .home2__masthead { padding: 24px 16px 20px; }
+  .home2__masthead-row { grid-template-columns: 1fr; gap: 20px; }
+  .home2__total { text-align: left; border-left: 0; border-top: 1px solid var(--rule); padding-left: 0; padding-top: 16px; }
+  .home2__total-num { font-size: 40px; }
+  .home2__sect { padding: 0 16px; }
+  .home2__grid { grid-template-columns: 1fr; }
+}

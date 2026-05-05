@@ -241,20 +241,40 @@ export default function AdminWorkspace() {
           Permanently delete every module record (donors, voters, prospects, etc.) in this workspace. Users, settings, audit log, and webhooks are preserved.
           Useful if you signed up to explore and now want to start with a clean slate.
         </p>
-        <button className="adm__btn adm__btn--danger" onClick={async () => {
-          const yes = confirm('Permanently DELETE every module record in this workspace?\n\nThis cannot be undone.');
-          if (!yes) return;
-          try {
-            const r = await api.wipeWorkspace();
-            setMsg({ kind: 'ok', text: `Deleted ${r.deleted} records. The workspace is now empty.` });
-            const { invalidateLive } = await import('../auth/useLiveRecords');
-            invalidateLive();
-          } catch (e) {
-            setMsg({ kind: 'err', text: 'Wipe failed: ' + e.message });
-          }
-        }}>
-          Wipe all records
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="adm__btn adm__btn--danger" onClick={async () => {
+            const yes = confirm('Permanently DELETE every module record in this workspace?\n\nThis cannot be undone.');
+            if (!yes) return;
+            try {
+              const r = await api.wipeWorkspace();
+              setMsg({ kind: 'ok', text: `Deleted ${r.deleted} records. The workspace is now empty.` });
+              const { invalidateLive } = await import('../auth/useLiveRecords');
+              invalidateLive();
+            } catch (e) {
+              setMsg({ kind: 'err', text: 'Wipe failed: ' + e.message });
+            }
+          }}>
+            Wipe all records
+          </button>
+          <button className="adm__btn adm__btn--danger" onClick={async () => {
+            const yes = confirm('Wipe records AND reset the onboarding wizard?\n\nThis deletes every module record and re-runs the onboarding wizard at your next page load. Your account stays active.');
+            if (!yes) return;
+            try {
+              const r = await api.wipeWorkspace();
+              await api.updateWorkspace({
+                settings: { ...(workspace?.settings || {}), onboarded: false },
+              });
+              setMsg({ kind: 'ok', text: `Deleted ${r.deleted} records and reset onboarding. Reload to see the wizard.` });
+              const { invalidateLive } = await import('../auth/useLiveRecords');
+              invalidateLive();
+              setTimeout(() => window.location.reload(), 1500);
+            } catch (e) {
+              setMsg({ kind: 'err', text: 'Reset failed: ' + e.message });
+            }
+          }}>
+            Wipe + restart onboarding
+          </button>
+        </div>
       </div>
     </div>
   );

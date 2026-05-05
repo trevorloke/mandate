@@ -2,6 +2,7 @@ import React from 'react';
 import './civic.css';
 import { CV_MEMBER, CV_ORDER_TODAY, CV_BILLS as CV_BILLS_FB, CV_CASES as CV_CASES_FB, CV_CASE_CATS, CV_VOTES, CV_MOTIONS, CV_SPEECHES, CV_PROMISES as CV_PROMISES_FB, CV_LETTERS, CV_CASE_PIPE_STAGES } from './civic-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 import { CvCommittees, CvPromises, CvCommunity, CvLetters, CvSpend, CvStaff, CvTrends } from './civic-tabs';
 import { TODAY } from './data';
 
@@ -26,9 +27,10 @@ const CV_TABS = [
 function Civic2() {
   const [tab, setTab] = cvUS('today');
   const [mode, setMode] = cvUS('member'); // member | candidate
-  const { records: CV_BILLS } = useLiveRecords('civic', 'bill', CV_BILLS_FB);
-  const { records: CV_CASES } = useLiveRecords('civic', 'case', CV_CASES_FB);
-  const { records: CV_PROMISES } = useLiveRecords('civic', 'promise', CV_PROMISES_FB);
+  const { records: CV_BILLS, isEmpty: noBills } = useLiveRecords('civic', 'bill', CV_BILLS_FB);
+  const { records: CV_CASES, isEmpty: noCases } = useLiveRecords('civic', 'case', CV_CASES_FB);
+  const { records: CV_PROMISES, isEmpty: noPromises } = useLiveRecords('civic', 'promise', CV_PROMISES_FB);
+  if (noBills && noCases && noPromises) return <EmptyModule module="CIVIC" label="Civic" accent="var(--m-civic)" />;
 
   return (
     <div className="cv2" data-screen-label="09 Civic · MLA Desk">

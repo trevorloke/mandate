@@ -3,6 +3,7 @@ import './coalition.css';
 import './coalition-ledger.css';
 import { COA_KPIS, COA_LEDGER as COA_LEDGER_FB } from './coalition-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 import { Shell } from './shell';
 import { CoaGraph } from './coalition-graph';
 import { CoaDirectory } from './coalition-directory';
@@ -306,6 +307,8 @@ const CoaLedger = () => {
 /* ── Main shell ───────────────────────────────────── */
 const Coalition2 = () => {
   const [tab, setTab] = cUS('ledger');
+  const { isEmpty: noEndorsements } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
+  if (noEndorsements) return <EmptyModule module="COALITION" label="Coalition" accent="var(--m-coalition)" />;
 
   return (
     <div className="coa">

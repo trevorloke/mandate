@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import './ledger.css';
 import { LEDGER_JOURNAL, LEDGER_KPIS } from './ledger-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 import { NewEntryModal } from './ledger-modal';
 import { LedgerChart, LedgerReconcile, LedgerBills } from './ledger-tabs1';
 import { LedgerFilings, LedgerReports } from './ledger-tabs2';
@@ -229,6 +230,8 @@ const Ledger2 = () => {
   const [tab, setTab] = lUS('journal');
   const [newOpen, setNewOpen] = lUS(false);
   const [toast, setToast] = lUS(null);
+  const { isEmpty: noJournal } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL);
+  if (noJournal) return <EmptyModule module="LEDGER" label="Ledger" accent="var(--m-ledger)" />;
 
   const handlePosted = (je) => {
     setTab('journal');

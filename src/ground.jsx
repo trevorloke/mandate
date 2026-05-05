@@ -2,6 +2,7 @@ import React from 'react';
 import './ground.css';
 import { GROUND_VOCAB, UNIVERSE_DEFAULT, PDS, RIVER, LANDMARKS, VOTERS, CANVASSERS, SHIFTS, SCRIPTS, MODES } from './ground-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 
 // Mandate 2.0 — Ground module (Desk + Field tabs)
 
@@ -584,7 +585,7 @@ function StreetScreen({ mode }) {
 
 // ── Main Ground page
 function Ground() {
-  const { records: voters } = useLiveRecords('ground', 'voter', VOTERS);
+  const { records: voters, isEmpty: noVoters } = useLiveRecords('ground', 'voter', VOTERS);
   const [tab, setTab] = gUS('desk'); // desk | field | script
   const [cuts, setCuts] = gUS(UNIVERSE_DEFAULT);
   const [activePd, setActivePd] = gUS('PD-009');
@@ -594,6 +595,7 @@ function Ground() {
   const [scriptOpen, setScriptOpen] = gUS(false);
   const [activeScript, setActiveScript] = gUS(SCRIPTS[0]);
   const [mode, setMode] = gUS('door-knock');
+  if (noVoters) return <EmptyModule module="GROUND" label="Ground" accent="var(--m-ground)" />;
 
   // Filter voters to active PD for the list
   const filtered = gUM(() => voters.filter(v => v.pd === activePd || activePd === 'ALL').slice(0, 18), [activePd, voters]);

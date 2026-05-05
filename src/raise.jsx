@@ -2,6 +2,7 @@ import React from 'react';
 import './raise.css';
 import { RAISE_KPIS, RAISE_TODAY, RAISE_PULSE, RAISE_GIFTMIX, RAISE_PROSPECT_DETAIL, RAISE_DONORS, RAISE_STAGES, RAISE_PROSPECTS, RAISE_STORIES, RAISE_FEED, RAISE_COMPLIANCE } from './raise-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 import { RaiseGifts, RaiseLists, RaiseReports } from './raise-glr';
 import { LogGiftModal, AddDonorModal, RaiseToast } from './raise-modals';
 import { api } from './auth/api';
@@ -420,7 +421,7 @@ const ProspectDrawer = ({ prospect, onClose, onLogGift }) => {
 /* ── Page ── */
 const Raise2 = () => {
   const { records: liveProspects } = useLiveRecords('raise', 'prospect', RAISE_PROSPECTS);
-  const { records: liveDonors } = useLiveRecords('raise', 'donor', RAISE_DONORS);
+  const { records: liveDonors, isEmpty: noDonors } = useLiveRecords('raise', 'donor', RAISE_DONORS);
   const [tab, setTab] = rUS('moves');
   const [drawer, setDrawer] = rUS(null);
   const [giftOpen, setGiftOpen] = rUS(false);
@@ -429,6 +430,10 @@ const Raise2 = () => {
   const [donorPrefill, setDonorPrefill] = rUS('');
   const [extraDonors, setExtraDonors] = rUS([]);
   const [toast, setToast] = rUS(null);
+  // Empty-state: check AFTER all hooks (React rule: hook order must be stable).
+  if (noDonors && (!liveProspects || liveProspects.length === 0)) {
+    return <EmptyModule module="RAISE" label="Raise" accent="var(--m-raise)" />;
+  }
 
   const openGift = (prefill = null) => { setGiftPrefill(prefill); setGiftOpen(true); };
   const openDonor = (prefill = '') => { setDonorPrefill(prefill); setDonorOpen(true); };

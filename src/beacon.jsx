@@ -2,6 +2,7 @@ import React from 'react';
 import './beacon.css';
 import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB, BEACON_LISTENING, BEACON_APPROVALS, BEACON_METRICS } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 import { BTabQueue, BTabListening, BTabPerformance, BTabBoost, BTabPress } from './beacon-tabs';
 
 // Mandate 2.0 — Beacon
@@ -232,8 +233,9 @@ function Beacon() {
   const [activeAcct, setActiveAcct] = bUS('x-marcus');
   const [tab, setTab] = bUS('calendar');
   const [openPost, setOpenPost] = bUS(null);
-  const { records: BEACON_ACCOUNTS } = useLiveRecords('beacon', 'account', BEACON_ACCOUNTS_FB);
-  const { records: BEACON_POSTS } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
+  const { records: BEACON_ACCOUNTS, isEmpty: noAccounts } = useLiveRecords('beacon', 'account', BEACON_ACCOUNTS_FB);
+  const { records: BEACON_POSTS, isEmpty: noPosts } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
+  if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
 
   bUE(() => {
     const esc = (e) => { if (e.key === 'Escape') setOpenPost(null); };

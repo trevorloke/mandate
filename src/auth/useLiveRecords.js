@@ -55,7 +55,10 @@ export function invalidateLive(module, kind) {
   }
 }
 
-export function useLiveRecords(module, kind, fallback = []) {
+// `fallback` is now ignored by default — fresh workspaces show empty arrays so
+// modules can render proper empty states. Pass `useDemoFallback: true` opt-in
+// in the rare component that genuinely wants the static demo when empty.
+export function useLiveRecords(module, kind, fallback = [], { useDemoFallback = false } = {}) {
   const { user } = useAuth();
   const key = `${module}.${kind}`;
   const cached = cache.get(key);
@@ -80,7 +83,11 @@ export function useLiveRecords(module, kind, fallback = []) {
     };
   }, [module, kind, user?.workspaceId, key]);
 
-  const records = live && live.length > 0 ? live : fallback;
+  // Default: live records or empty array. Use the static fallback only when explicitly opted in.
+  const records = (live && live.length > 0)
+    ? live
+    : (useDemoFallback ? fallback : []);
+  const isEmpty = !records || records.length === 0;
   const refresh = () => { cache.delete(key); fetchOnce(module, kind); };
-  return { records, loading: live === undefined, refresh };
+  return { records, loading: live === undefined, isEmpty, refresh };
 }

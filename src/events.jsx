@@ -3,6 +3,7 @@ import './events.css';
 import { EvScheduleTab, EvCalendarTab, EvDetailTab, EvVenuesTab, EvHostsTab, EvShiftsTab } from './events-tabs';
 import { EV_LIST as EV_LIST_FB, EV_TYPES, EV_VENUES as EV_VENUES_FB, EV_HOSTS as EV_HOSTS_FB, EV_SUMMARY, EV_SHIFTS } from './events-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import EmptyModule from './EmptyModule';
 
 // Events 2.0 — main shell
 
@@ -19,9 +20,10 @@ const EV_TAB_DEFS = [
 
 function Events2() {
   const [tab, setTab] = evUS('schedule');
-  const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
+  const { records: EV_LIST, isEmpty: noEvents } = useLiveRecords('events', 'event', EV_LIST_FB);
   const { records: EV_VENUES } = useLiveRecords('events', 'venue', EV_VENUES_FB);
   const { records: EV_HOSTS } = useLiveRecords('events', 'host', EV_HOSTS_FB);
+  if (noEvents) return <EmptyModule module="EVENTS" label="Events" accent="var(--m-events)" />;
 
   const upcoming = EV_LIST.filter(e => e.attended === null).length;
   const totalRsvp = EV_LIST.filter(e => e.attended === null).reduce((s,e)=>s+e.rsvped, 0);
