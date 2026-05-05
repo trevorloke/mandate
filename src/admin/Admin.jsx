@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import './admin.css';
 import { useAuth } from '../auth/AuthContext';
+import { useT } from '../i18n';
 import AdminHome from './AdminHome';
 import AdminUsers from './AdminUsers';
 import AdminWorkspace from './AdminWorkspace';
@@ -17,26 +18,27 @@ import AdminForms from './AdminForms';
 import AdminOauth from './AdminOauth';
 import AdminReports from './AdminReports';
 
-const TABS = [
-  { k: 'home',       label: 'Overview',    hint: 'dashboard', min: 'viewer' },
-  { k: 'workspace',  label: 'Workspace',   hint: 'identity',  min: 'viewer' },
-  { k: 'workspaces', label: 'Workspaces',  hint: 'tenants',   min: 'super_admin' },
-  { k: 'users',      label: 'Users',       hint: 'access',    min: 'admin' },
-  { k: 'data',       label: 'Module data', hint: 'records',   min: 'viewer' },
-  { k: 'trash',      label: 'Trash',       hint: 'restore',   min: 'editor' },
-  { k: 'tokens',     label: 'API tokens',  hint: 'integrations', min: 'viewer' },
-  { k: 'webhooks',   label: 'Webhooks',    hint: 'event push', min: 'admin' },
-  { k: 'forms',      label: 'Forms',       hint: 'public submit', min: 'admin' },
-  { k: 'reports',    label: 'Reports',     hint: 'scheduled email', min: 'admin' },
-  { k: 'sso',        label: 'SSO',         hint: 'oauth', min: 'admin' },
-  { k: 'activity',   label: 'Activity',    hint: 'live feed', min: 'admin' },
-  { k: 'audit',      label: 'Audit log',   hint: 'history',   min: 'admin' },
-  { k: 'profile',    label: 'My account',  hint: 'profile',   min: 'viewer' },
+const TAB_KEYS = [
+  { k: 'home',       min: 'viewer' },
+  { k: 'workspace',  min: 'viewer' },
+  { k: 'workspaces', min: 'super_admin' },
+  { k: 'users',      min: 'admin' },
+  { k: 'data',       min: 'viewer' },
+  { k: 'trash',      min: 'editor' },
+  { k: 'tokens',     min: 'viewer' },
+  { k: 'webhooks',   min: 'admin' },
+  { k: 'forms',      min: 'admin' },
+  { k: 'reports',    min: 'admin' },
+  { k: 'sso',        min: 'admin' },
+  { k: 'activity',   min: 'admin' },
+  { k: 'audit',      min: 'admin' },
+  { k: 'profile',    min: 'viewer' },
 ];
 
 export default function Admin() {
   const { user, has } = useAuth();
-  const visible = TABS.filter(t => has(t.min));
+  const t = useT();
+  const visible = TAB_KEYS.filter(x => has(x.min));
   const [tab, setTab] = useState('home');
 
   return (
@@ -44,11 +46,11 @@ export default function Admin() {
       <header className="adm__head">
         <div>
           <div className="adm__plate">Mandate · Administration</div>
-          <h1 className="adm__title">Settings &amp; <em>access</em></h1>
-          <p className="adm__sub">Configure the workspace, manage users, populate module data.</p>
+          <h1 className="adm__title">{t('admin.title').split('{em_access}')[0]}<em>{t('admin.title_em')}</em>{t('admin.title').split('{em_access}')[1] || ''}</h1>
+          <p className="adm__sub">{t('admin.sub')}</p>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div className="adm__plate">Signed in as</div>
+          <div className="adm__plate">{t('admin.signed_in_as')}</div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, marginTop: 2 }}>
             {user.name} <span style={{ color: 'var(--ink-5)', fontSize: 13 }}>· {user.role.replace('_', ' ')}</span>
           </div>
@@ -56,9 +58,9 @@ export default function Admin() {
       </header>
 
       <nav className="adm__nav">
-        {visible.map(t => (
-          <button key={t.k} className={`adm__nav-btn ${tab === t.k ? 'is-on' : ''}`} onClick={() => setTab(t.k)}>
-            {t.label} <small>{t.hint}</small>
+        {visible.map(x => (
+          <button key={x.k} className={`adm__nav-btn ${tab === x.k ? 'is-on' : ''}`} onClick={() => setTab(x.k)}>
+            {t(`admin.tabs.${x.k}`)} <small>{t(`admin.tab_hints.${x.k}`)}</small>
           </button>
         ))}
       </nav>

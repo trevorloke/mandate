@@ -1,0 +1,99 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "remove": "Remove",
+    "language": "Language",
+    "loading": "Loading…",
+    "ok": "OK",
+    "back": "Back"
+  },
+  "shell": {
+    "home": "Home",
+    "command": "Command",
+    "jump": "Jump to anything…",
+    "pulse": "PULSE"
+  },
+  "auth": {
+    "signin": {
+      "title": "Sign in.",
+      "sub": "The control room for the campaign — desk, field, ledger, chamber. Continue your session.",
+      "email": "Email",
+      "password": "Password",
+      "totp": "Authenticator code",
+      "totp_hint": "From your authenticator app, or use a recovery code (xxxx-xxxx).",
+      "btn_signin": "Sign in",
+      "btn_signing_in": "Signing in…",
+      "btn_verify": "Verify & sign in",
+      "or": "or",
+      "passkey": "Sign in with a passkey",
+      "with_provider": "Sign in with {provider}",
+      "forgot": "Forgot password?",
+      "setup_link": "Set up your workspace →",
+      "fail": "Sign in failed",
+      "passkey_cancelled": "Cancelled.",
+      "passkey_fail": "Passkey sign-in failed"
+    },
+    "signup": {
+      "title": "Set up your workspace.",
+      "sub": "Create the first super-admin and your campaign workspace. You can invite teammates after."
+    },
+    "reset": {
+      "title": "Reset password.",
+      "sub": "Enter your email; we'll generate a reset link.",
+      "btn": "Send reset link",
+      "btn_busy": "Generating…",
+      "back_to_signin": "← Back to sign in",
+      "generic": "If that email is registered, a reset link has been sent."
+    }
+  },
+  "admin": {
+    "title": "Settings & {em_access}",
+    "title_em": "access",
+    "sub": "Configure the workspace, manage users, populate module data.",
+    "signed_in_as": "Signed in as",
+    "tabs": {
+      "home": "Overview",
+      "workspace": "Workspace",
+      "workspaces": "Workspaces",
+      "users": "Users",
+      "data": "Module data",
+      "trash": "Trash",
+      "tokens": "API tokens",
+      "webhooks": "Webhooks",
+      "forms": "Forms",
+      "reports": "Reports",
+      "sso": "SSO",
+      "activity": "Activity",
+      "audit": "Audit log",
+      "profile": "My account"
+    },
+    "tab_hints": {
+      "home": "dashboard",
+      "workspace": "identity",
+      "workspaces": "tenants",
+      "users": "access",
+      "data": "records",
+      "trash": "restore",
+      "tokens": "integrations",
+      "webhooks": "event push",
+      "forms": "public submit",
+      "reports": "scheduled email",
+      "sso": "oauth",
+      "activity": "live feed",
+      "audit": "history",
+      "profile": "profile"
+    }
+  },
+  "user_menu": {
+    "my_account": "My account",
+    "profile_sub": "Profile · password",
+    "admin": "Admin",
+    "admin_sub": "Workspace · users · data",
+    "language": "Language",
+    "sign_out": "Sign out"
+  }
+}

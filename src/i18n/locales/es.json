@@ -1,0 +1,99 @@
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "create": "Crear",
+    "remove": "Quitar",
+    "language": "Idioma",
+    "loading": "Cargando…",
+    "ok": "OK",
+    "back": "Atrás"
+  },
+  "shell": {
+    "home": "Inicio",
+    "command": "Mando",
+    "jump": "Ir a…",
+    "pulse": "PULSO"
+  },
+  "auth": {
+    "signin": {
+      "title": "Iniciar sesión.",
+      "sub": "La sala de control de la campaña — escritorio, terreno, libro mayor, cámara. Continúa tu sesión.",
+      "email": "Correo",
+      "password": "Contraseña",
+      "totp": "Código de autenticación",
+      "totp_hint": "De tu app de autenticación, o usa un código de recuperación (xxxx-xxxx).",
+      "btn_signin": "Iniciar sesión",
+      "btn_signing_in": "Iniciando…",
+      "btn_verify": "Verificar e iniciar",
+      "or": "o",
+      "passkey": "Iniciar con una passkey",
+      "with_provider": "Iniciar con {provider}",
+      "forgot": "¿Contraseña olvidada?",
+      "setup_link": "Configurar tu espacio →",
+      "fail": "Error al iniciar sesión",
+      "passkey_cancelled": "Cancelado.",
+      "passkey_fail": "Error al iniciar con passkey"
+    },
+    "signup": {
+      "title": "Configura tu espacio de trabajo.",
+      "sub": "Crea el primer super-administrador y tu espacio de campaña. Después puedes invitar al equipo."
+    },
+    "reset": {
+      "title": "Restablecer contraseña.",
+      "sub": "Ingresa tu correo; generaremos un enlace.",
+      "btn": "Enviar enlace",
+      "btn_busy": "Generando…",
+      "back_to_signin": "← Volver a iniciar sesión",
+      "generic": "Si ese correo está registrado, se ha enviado un enlace."
+    }
+  },
+  "admin": {
+    "title": "Ajustes & {em_access}",
+    "title_em": "acceso",
+    "sub": "Configura el espacio, gestiona usuarios, puebla los módulos.",
+    "signed_in_as": "Conectado como",
+    "tabs": {
+      "home": "Resumen",
+      "workspace": "Espacio",
+      "workspaces": "Espacios",
+      "users": "Usuarios",
+      "data": "Datos",
+      "trash": "Papelera",
+      "tokens": "Tokens API",
+      "webhooks": "Webhooks",
+      "forms": "Formularios",
+      "reports": "Informes",
+      "sso": "SSO",
+      "activity": "Actividad",
+      "audit": "Auditoría",
+      "profile": "Mi cuenta"
+    },
+    "tab_hints": {
+      "home": "panel",
+      "workspace": "identidad",
+      "workspaces": "inquilinos",
+      "users": "acceso",
+      "data": "registros",
+      "trash": "restaurar",
+      "tokens": "integraciones",
+      "webhooks": "eventos",
+      "forms": "envío público",
+      "reports": "correo programado",
+      "sso": "oauth",
+      "activity": "en vivo",
+      "audit": "historial",
+      "profile": "perfil"
+    }
+  },
+  "user_menu": {
+    "my_account": "Mi cuenta",
+    "profile_sub": "Perfil · contraseña",
+    "admin": "Admin",
+    "admin_sub": "Espacio · usuarios · datos",
+    "language": "Idioma",
+    "sign_out": "Cerrar sesión"
+  }
+}

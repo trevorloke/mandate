@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import './shell.css';
+import { useT } from './i18n';
 
 // ── Module registry (ink/paper, per-module chromatic territory)
 const MOD2 = [
@@ -47,6 +48,7 @@ const useNav2 = () => React.useContext(Nav2Ctx);
 const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conductorCount = 8, userMenu, notifications, enabledModules, children }) => {
   const isEnabled = (k) => !enabledModules || enabledModules[k] !== false;
   const active = route === 'home' ? null : modByKey(route);
+  const t = useT();
   const clock = useClock();
   const beats = useHeartbeat();
   const stripStyle = active
@@ -73,7 +75,7 @@ const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conduc
           <button
             className={'mdt__tab' + (route==='home' ? ' is-active' : '')}
             onClick={() => onGo('home')}>
-            <span className="mdt__tab-dot" />Home
+            <span className="mdt__tab-dot" />{t('shell.home')}
           </button>
           <span className="mdt__nav-sep" />
           {MOD2.filter(m => isEnabled(m.k)).map(m => (
@@ -88,7 +90,7 @@ const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conduc
           {isEnabled('command') && <button
             className={'mdt__tab mdt__tab--peer' + (route==='command' ? ' is-active' : '')}
             onClick={() => onGo('command')}>
-            <span className="live-dot" />Command
+            <span className="live-dot" />{t('shell.command')}
           </button>}
           </nav>
         </div>
@@ -101,7 +103,7 @@ const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conduc
           </div>
           <button className="mdt__cmd" onClick={onCmd}>
             <span style={{ opacity:0.7 }}>⌕</span>
-            <span className="mdt__cmd-label">Jump to anything…</span>
+            <span className="mdt__cmd-label">{t('shell.jump')}</span>
             <kbd>⌘K</kbd>
           </button>
           {notifications}

@@ -44,3 +44,23 @@
 }
 .usrm__item--danger .usrm__k { color: #8b2418; }
 .usrm__item--danger:hover { background: #fbeae6; }
+
+.usrm__locale {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px;
+  gap: 10px;
+}
+.usrm__locale select {
+  appearance: none;
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 18px 4px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  color: var(--ink-2);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'><path d='M0 0h8L4 6z' fill='%23858272'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}

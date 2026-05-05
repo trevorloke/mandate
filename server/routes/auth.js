@@ -144,6 +144,10 @@ app.put('/me', requireAuth, async (c) => {
   if (typeof body.email === 'string' && body.email.trim()) {
     updates.email = body.email.trim().toLowerCase();
   }
+  if (typeof body.locale === 'string') {
+    if (!['en', 'fr', 'es'].includes(body.locale)) return c.json({ error: 'unsupported locale' }, 400);
+    updates.locale = body.locale;
+  }
   if (typeof body.password === 'string' && body.password) {
     if (!body.currentPassword) return c.json({ error: 'currentPassword required to change password' }, 400);
     const ok = await bcrypt.compare(body.currentPassword, me.passwordHash);

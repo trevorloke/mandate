@@ -222,3 +222,19 @@
   color: var(--ink-5);
   background: var(--paper);
 }
+
+.auth-form__locale {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dotted var(--ink-5);
+  color: var(--ink-5);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 16px 1px 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'><path d='M0 0h8L4 6z' fill='%23858272'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right center;
+}
+.auth-form__locale:hover { color: var(--ink); }

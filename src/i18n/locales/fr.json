@@ -1,0 +1,99 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "create": "Créer",
+    "remove": "Retirer",
+    "language": "Langue",
+    "loading": "Chargement…",
+    "ok": "OK",
+    "back": "Retour"
+  },
+  "shell": {
+    "home": "Accueil",
+    "command": "Commande",
+    "jump": "Aller à…",
+    "pulse": "PULSE"
+  },
+  "auth": {
+    "signin": {
+      "title": "Connexion.",
+      "sub": "La salle de commande de la campagne — bureau, terrain, registre, chambre. Reprenez votre session.",
+      "email": "Courriel",
+      "password": "Mot de passe",
+      "totp": "Code d'authentification",
+      "totp_hint": "Depuis votre application d'authentification, ou utilisez un code de récupération (xxxx-xxxx).",
+      "btn_signin": "Se connecter",
+      "btn_signing_in": "Connexion…",
+      "btn_verify": "Vérifier & se connecter",
+      "or": "ou",
+      "passkey": "Se connecter avec une clé d'accès",
+      "with_provider": "Se connecter avec {provider}",
+      "forgot": "Mot de passe oublié?",
+      "setup_link": "Configurer votre espace de travail →",
+      "fail": "Échec de la connexion",
+      "passkey_cancelled": "Annulé.",
+      "passkey_fail": "Échec de la connexion par clé d'accès"
+    },
+    "signup": {
+      "title": "Configurez votre espace de travail.",
+      "sub": "Créez le premier super-administrateur et votre espace de campagne. Vous pourrez inviter votre équipe ensuite."
+    },
+    "reset": {
+      "title": "Réinitialiser le mot de passe.",
+      "sub": "Entrez votre courriel; nous générerons un lien de réinitialisation.",
+      "btn": "Envoyer le lien",
+      "btn_busy": "Génération…",
+      "back_to_signin": "← Retour à la connexion",
+      "generic": "Si ce courriel est enregistré, un lien de réinitialisation a été envoyé."
+    }
+  },
+  "admin": {
+    "title": "Réglages & {em_access}",
+    "title_em": "accès",
+    "sub": "Configurez l'espace de travail, gérez les utilisateurs, remplissez les modules.",
+    "signed_in_as": "Connecté en tant que",
+    "tabs": {
+      "home": "Aperçu",
+      "workspace": "Espace de travail",
+      "workspaces": "Espaces",
+      "users": "Utilisateurs",
+      "data": "Données",
+      "trash": "Corbeille",
+      "tokens": "Jetons API",
+      "webhooks": "Webhooks",
+      "forms": "Formulaires",
+      "reports": "Rapports",
+      "sso": "SSO",
+      "activity": "Activité",
+      "audit": "Journal d'audit",
+      "profile": "Mon compte"
+    },
+    "tab_hints": {
+      "home": "tableau de bord",
+      "workspace": "identité",
+      "workspaces": "locataires",
+      "users": "accès",
+      "data": "enregistrements",
+      "trash": "restaurer",
+      "tokens": "intégrations",
+      "webhooks": "événements",
+      "forms": "soumission publique",
+      "reports": "courriel planifié",
+      "sso": "oauth",
+      "activity": "flux en direct",
+      "audit": "historique",
+      "profile": "profil"
+    }
+  },
+  "user_menu": {
+    "my_account": "Mon compte",
+    "profile_sub": "Profil · mot de passe",
+    "admin": "Admin",
+    "admin_sub": "Espace · utilisateurs · données",
+    "language": "Langue",
+    "sign_out": "Se déconnecter"
+  }
+}

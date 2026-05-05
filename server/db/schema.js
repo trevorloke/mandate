@@ -28,6 +28,7 @@ export const users = sqliteTable('users', {
   totpSecret:   text('totp_secret'),                  // base32-encoded; null until enrolled
   totpEnabled:  integer('totp_enabled', { mode: 'boolean' }).notNull().default(false),
   recoveryCodesHash: text('recovery_codes_hash'),      // JSON array of bcrypt hashes
+  locale:       text('locale').notNull().default('en'),
   lastLoginAt:  integer('last_login_at', { mode: 'timestamp' }),
   createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt:    integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

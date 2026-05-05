@@ -17,6 +17,8 @@ import { Command } from './command';
 import { Academy } from './academy';
 import Admin from './admin/Admin';
 import { useAuth } from './auth/AuthContext';
+import { useLocale } from './i18n';
+import { api } from './auth/api';
 import Login from './auth/Login';
 import Signup from './auth/Signup';
 import AcceptInvite from './auth/AcceptInvite';
@@ -43,10 +45,37 @@ const PAGE_MAP2 = {
 export default function App2() {
   const { user, workspace, loading, setupComplete } = useAuth();
   const [authView, setAuthView] = useState(setupComplete ? 'login' : 'signup');
+  const [locale, setLocale] = useLocale();
 
   useEffect(() => {
     setAuthView(setupComplete ? 'login' : 'signup');
   }, [setupComplete]);
+
+  // Locale sync: when authed and the active (browser) locale differs from
+  // user.locale, push the active locale up to the backend. Pull happens only
+  // on a fresh device — handled in LocaleProvider via localStorage absence.
+  const lastSyncedLocale = React.useRef(null);
+  const localeRestoredRef = React.useRef(false);
+  useEffect(() => {
+    if (!user?.id) {
+      lastSyncedLocale.current = null;
+      localeRestoredRef.current = false;
+      return;
+    }
+    // First time we see this user: if no local choice was ever made AND user has a server preference, adopt it.
+    if (!localeRestoredRef.current) {
+      localeRestoredRef.current = true;
+      const hadLocal = typeof window !== 'undefined' && window.localStorage.getItem('mdt_locale');
+      if (!hadLocal && user.locale && user.locale !== locale) {
+        setLocale(user.locale);
+        return;  // wait for the locale state to settle, next effect tick will sync if needed
+      }
+    }
+    if (lastSyncedLocale.current === locale) return;
+    if (user.locale === locale) { lastSyncedLocale.current = locale; return; }
+    lastSyncedLocale.current = locale;
+    api.updateMe({ locale }).catch(() => {});
+  }, [user?.id, user?.locale, locale, setLocale]);
 
   const initial = (() => { try { return localStorage.getItem('mandate2:route') || 'home'; } catch { return 'home'; } })();
   const [route, setRoute] = useState(initial);

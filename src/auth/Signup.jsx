@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import './auth.css';
 import { useAuth } from './AuthContext';
+import { useT } from '../i18n';
 
 export default function Signup({ onSwitchToLogin }) {
   const { signup } = useAuth();
+  const t = useT();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,11 +28,8 @@ export default function Signup({ onSwitchToLogin }) {
       <div className="auth-screen__form-side">
         <div className="auth-screen__brand"><b>M</b><span>mandate</span></div>
 
-        <h1 className="auth-screen__title">First, <em>your</em> workspace.</h1>
-        <p className="auth-screen__sub">
-          Create the workspace and the founding administrator. You can invite
-          your team after sign-in.
-        </p>
+        <h1 className="auth-screen__title">{t('auth.signup.title')}</h1>
+        <p className="auth-screen__sub">{t('auth.signup.sub')}</p>
 
         <form className="auth-form" onSubmit={submit}>
           {err && <div className="auth-form__error">{err}</div>}

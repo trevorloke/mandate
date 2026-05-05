@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import './auth.css';
 import { useAuth } from './AuthContext';
 import { api } from './api';
+import { useT, useLocale, LOCALES } from '../i18n';
 
 export default function Login({ onSwitchToSignup }) {
   const { login, setupComplete, refresh } = useAuth();
+  const t = useT();
+  const [locale, setLocale] = useLocale();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
@@ -38,7 +41,7 @@ export default function Login({ onSwitchToSignup }) {
       await api.passkeyLogin(email || undefined);
       await refresh();
     } catch (e) {
-      setErr(e.message?.includes('NotAllowed') ? 'Cancelled.' : (e.message || 'Passkey sign-in failed'));
+      setErr(e.message?.includes('NotAllowed') ? t('auth.signin.passkey_cancelled') : (e.message || t('auth.signin.passkey_fail')));
     } finally { setBusy(false); }
   };
 
@@ -80,23 +83,20 @@ export default function Login({ onSwitchToSignup }) {
 
         {!forgotMode ? (
           <>
-            <h1 className="auth-screen__title">Sign in.</h1>
-            <p className="auth-screen__sub">
-              The control room for the campaign — desk, field, ledger, chamber.
-              Continue your session.
-            </p>
+            <h1 className="auth-screen__title">{t('auth.signin.title')}</h1>
+            <p className="auth-screen__sub">{t('auth.signin.sub')}</p>
 
             <form className="auth-form" onSubmit={submit} autoComplete="on">
               {err && <div className="auth-form__error">{err}</div>}
               <div className="auth-form__row">
-                <label className="auth-form__label" htmlFor="email">Email</label>
+                <label className="auth-form__label" htmlFor="email">{t('auth.signin.email')}</label>
                 <input id="email" type="email" autoComplete="email" required autoFocus
                   className="auth-form__input"
                   placeholder="you@mandate.app"
                   value={email} onChange={e => setEmail(e.target.value)} />
               </div>
               <div className="auth-form__row">
-                <label className="auth-form__label" htmlFor="password">Password</label>
+                <label className="auth-form__label" htmlFor="password">{t('auth.signin.password')}</label>
                 <input id="password" type="password" autoComplete="current-password" required
                   className="auth-form__input"
                   placeholder="••••••••"
@@ -104,26 +104,26 @@ export default function Login({ onSwitchToSignup }) {
               </div>
               {totpRequired && (
                 <div className="auth-form__row">
-                  <label className="auth-form__label" htmlFor="totp">Authenticator code</label>
+                  <label className="auth-form__label" htmlFor="totp">{t('auth.signin.totp')}</label>
                   <input id="totp" inputMode="numeric" autoComplete="one-time-code" required autoFocus
                     className="auth-form__input"
                     placeholder="6-digit code · or recovery code"
                     value={totpCode} onChange={e => setTotpCode(e.target.value)} />
-                  <span className="auth-form__hint">From your authenticator app, or use a recovery code (xxxx-xxxx).</span>
+                  <span className="auth-form__hint">{t('auth.signin.totp_hint')}</span>
                 </div>
               )}
               <button className="auth-form__btn" disabled={busy} type="submit">
-                {busy ? 'Signing in…' : (totpRequired ? 'Verify & sign in' : 'Sign in')}
+                {busy ? t('auth.signin.btn_signing_in') : (totpRequired ? t('auth.signin.btn_verify') : t('auth.signin.btn_signin'))}
               </button>
               {(passkeySupported || oauthProviders.length > 0) && !totpRequired && (
-                <div className="auth-form__divider"><span>or</span></div>
+                <div className="auth-form__divider"><span>{t('auth.signin.or')}</span></div>
               )}
               {passkeySupported && !totpRequired && (
                 <button type="button"
                   className="auth-form__btn auth-form__btn--ghost"
                   disabled={busy}
                   onClick={passkeySignIn}>
-                  🔑 Sign in with a passkey
+                  🔑 {t('auth.signin.passkey')}
                 </button>
               )}
               {oauthProviders.length > 0 && !totpRequired && (
@@ -131,39 +131,43 @@ export default function Login({ onSwitchToSignup }) {
                   <a key={p.id} className="auth-form__btn auth-form__btn--ghost auth-form__btn--oauth"
                      href={`/api/auth/oauth/start/${p.id}`}>
                     <span className={`auth-form__oauth-mark auth-form__oauth-mark--${p.kind}`}></span>
-                    Sign in with {p.label}
+                    {t('auth.signin.with_provider', { provider: p.label })}
                   </a>
                 ))
               )}
               <div className="auth-screen__footer">
-                <button type="button" onClick={() => { setForgotMode(true); setErr(''); setForgotMsg(null); }}>Forgot password?</button>
+                <button type="button" onClick={() => { setForgotMode(true); setErr(''); setForgotMsg(null); }}>{t('auth.signin.forgot')}</button>
                 {!setupComplete && (
                   <>
                     <span>·</span>
-                    <button type="button" onClick={onSwitchToSignup}>Set up your workspace →</button>
+                    <button type="button" onClick={onSwitchToSignup}>{t('auth.signin.setup_link')}</button>
                   </>
                 )}
+                <span>·</span>
+                <select className="auth-form__locale" value={locale} onChange={e => setLocale(e.target.value)} aria-label={t('common.language')}>
+                  {LOCALES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
               </div>
             </form>
           </>
         ) : (
           <>
-            <h1 className="auth-screen__title">Reset <em>password</em>.</h1>
-            <p className="auth-screen__sub">Enter your email; we'll generate a reset link.</p>
+            <h1 className="auth-screen__title">{t('auth.reset.title')}</h1>
+            <p className="auth-screen__sub">{t('auth.reset.sub')}</p>
 
             <form className="auth-form" onSubmit={requestReset}>
               {forgotMsg && <div className={`auth-form__error`} style={{ background: '#ecf5ed', color: '#234a2c', borderLeftColor: '#0d4f3c', wordBreak: 'break-all' }}>{forgotMsg.text}</div>}
               <div className="auth-form__row">
-                <label className="auth-form__label">Email</label>
+                <label className="auth-form__label">{t('auth.signin.email')}</label>
                 <input className="auth-form__input" type="email" required autoFocus
                   placeholder="you@mandate.app"
                   value={email} onChange={e => setEmail(e.target.value)} />
               </div>
               <button className="auth-form__btn" disabled={busy} type="submit">
-                {busy ? 'Generating…' : 'Send reset link'}
+                {busy ? t('auth.reset.btn_busy') : t('auth.reset.btn')}
               </button>
               <div className="auth-screen__footer">
-                <button type="button" onClick={() => { setForgotMode(false); setForgotMsg(null); }}>← Back to sign in</button>
+                <button type="button" onClick={() => { setForgotMode(false); setForgotMsg(null); }}>{t('auth.reset.back_to_signin')}</button>
               </div>
             </form>
           </>

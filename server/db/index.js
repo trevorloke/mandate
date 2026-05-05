@@ -310,6 +310,7 @@ function bootstrapTables() {
   alterIfMissing('users', 'totp_secret', 'TEXT');
   alterIfMissing('users', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0');
   alterIfMissing('users', 'recovery_codes_hash', 'TEXT');
+  alterIfMissing('users', 'locale', "TEXT NOT NULL DEFAULT 'en'");
   alterIfMissing('public_forms', 'captcha_provider', 'TEXT');
   alterIfMissing('public_forms', 'captcha_sitekey', 'TEXT');
   alterIfMissing('public_forms', 'captcha_secret', 'TEXT');
