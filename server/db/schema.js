@@ -160,19 +160,24 @@ export const passwordResets = sqliteTable('password_resets', {
 
 // Per-attempt webhook delivery log. Retried deliveries share an `event_id` (the original event UUID).
 // Status: 'queued' | 'success' | 'failed' | 'giving_up'.
+//
+// Distributed processing: a worker atomically claims rows by stamping its `worker_id` and a
+// `lease_expires_at`. If the worker dies, the lease expires and another worker re-claims.
 export const webhookDeliveries = sqliteTable('webhook_deliveries', {
-  id:           text('id').primaryKey(),
-  webhookId:    text('webhook_id').notNull().references(() => webhooks.id, { onDelete: 'cascade' }),
-  eventId:      text('event_id').notNull(),       // groups retries for the same event
-  event:        text('event').notNull(),
-  payload:      text('payload').notNull(),        // raw JSON sent
-  attempt:      integer('attempt').notNull().default(1),
-  status:       text('status').notNull(),         // queued | success | failed | giving_up
-  httpStatus:   integer('http_status'),
-  error:        text('error'),
-  nextRetryAt:  integer('next_retry_at', { mode: 'timestamp' }),
-  createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  completedAt:  integer('completed_at', { mode: 'timestamp' }),
+  id:              text('id').primaryKey(),
+  webhookId:       text('webhook_id').notNull().references(() => webhooks.id, { onDelete: 'cascade' }),
+  eventId:         text('event_id').notNull(),       // groups retries for the same event
+  event:           text('event').notNull(),
+  payload:         text('payload').notNull(),        // raw JSON sent
+  attempt:         integer('attempt').notNull().default(1),
+  status:          text('status').notNull(),         // queued | success | failed | giving_up
+  httpStatus:      integer('http_status'),
+  error:           text('error'),
+  nextRetryAt:     integer('next_retry_at', { mode: 'timestamp' }),
+  workerId:        text('worker_id'),                // who currently owns this delivery
+  leaseExpiresAt:  integer('lease_expires_at', { mode: 'timestamp' }),
+  createdAt:       integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  completedAt:     integer('completed_at', { mode: 'timestamp' }),
 });
 
 // Public forms — workspace-issued endpoints for collecting anonymous submissions.

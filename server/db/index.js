@@ -316,6 +316,10 @@ function bootstrapTables() {
   alterIfMissing('public_forms', 'captcha_secret', 'TEXT');
   alterIfMissing('audit_log', 'prev_hash', 'TEXT');
   alterIfMissing('audit_log', 'hash', 'TEXT');
+  alterIfMissing('webhook_deliveries', 'worker_id', 'TEXT');
+  alterIfMissing('webhook_deliveries', 'lease_expires_at', 'INTEGER');
+  // Index now that the columns exist
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_lease ON webhook_deliveries(status, worker_id, lease_expires_at);`);
 
   // Per-record shares table
   sqlite.exec(`

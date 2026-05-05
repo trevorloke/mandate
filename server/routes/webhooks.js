@@ -5,12 +5,22 @@ import { db } from '../db/index.js';
 import { webhooks, webhookDeliveries, auditLog } from '../db/schema.js';
 import { and, eq, desc } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { emitWebhook, retryDelivery } from '../lib/webhooks.js';
+import { emitWebhook, retryDelivery, queueStats, processRetries } from '../lib/webhooks.js';
 
 const newId = (p='') => p + randomBytes(12).toString('hex');
 
 const app = new Hono();
 app.use('*', requireAuth);
+
+// Queue stats — registered before /:id so the literal `_queue` doesn't match :id.
+app.get('/_queue', requireRole('admin'), async (c) => {
+  return c.json(await queueStats());
+});
+
+// Trigger one processRetries tick on demand (admin) — useful for tests + ops.
+app.post('/_queue/tick', requireRole('admin'), async (c) => {
+  return c.json(await processRetries());
+});
 
 const sanitize = (w) => {
   if (!w) return null;

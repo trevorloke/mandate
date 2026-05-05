@@ -56,6 +56,8 @@ export default function AdminWebhooks() {
 
   return (
     <div>
+      <QueuePanel />
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
         <p className="adm__msg" style={{ margin: 0, flex: 1 }}>
           Webhooks deliver events (data create/update/delete) to your URL. Each delivery is HMAC-SHA256 signed using the webhook's secret.
@@ -281,4 +283,93 @@ function statusStyle(s) {
   if (s >= 200 && s < 300) return { color: '#234a2c', borderColor: '#b6cdb9', background: '#ecf5ed' };
   if (s >= 400) return { color: '#8b2418', borderColor: '#c4a097', background: '#fbeae6' };
   return {};
+}
+
+function QueuePanel() {
+  const [stats, setStats] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = async () => {
+    setErr('');
+    try { setStats(await api.webhookQueueStats()); }
+    catch (e) { setErr(e.message); }
+  };
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const tickNow = async () => {
+    setBusy(true);
+    try { await api.webhookQueueTick(); await load(); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  if (!stats) return null;
+  const { counts, activeWorkers, workerId, leaseMs, tickMs, batchSize } = stats;
+
+  return (
+    <div className="adm__panel" style={{ marginBottom: 18 }}>
+      <div className="adm__panel-h">Webhooks · queue</div>
+      <h3 className="adm__panel-title">Distributed delivery queue</h3>
+      <p className="adm__msg" style={{ marginBottom: 12 }}>
+        This server is worker <code>{workerId}</code>. Lease {leaseMs/1000}s · tick {tickMs/1000}s · batch {batchSize}.
+        Multiple Node processes can run side-by-side; rows are claimed atomically so each delivery is processed exactly once.
+      </p>
+
+      {err && <div className="adm__msg adm__msg--err" style={{ marginBottom: 8 }}>{err}</div>}
+
+      <div className="adm__stats" style={{ marginBottom: 16 }}>
+        <div className="adm__stat-card">
+          <div className="adm__stat-lbl">Due now</div>
+          <div className="adm__stat-v">{counts.due ?? 0}</div>
+          <div className="adm__stat-sub">ready for retry</div>
+        </div>
+        <div className="adm__stat-card">
+          <div className="adm__stat-lbl">In flight</div>
+          <div className="adm__stat-v">{counts.in_flight ?? 0}</div>
+          <div className="adm__stat-sub">being processed</div>
+        </div>
+        <div className="adm__stat-card">
+          <div className="adm__stat-lbl">Waiting</div>
+          <div className="adm__stat-v">{counts.waiting ?? 0}</div>
+          <div className="adm__stat-sub">scheduled, not yet due</div>
+        </div>
+        <div className="adm__stat-card">
+          <div className="adm__stat-lbl">Total delivered</div>
+          <div className="adm__stat-v">{counts.success_total ?? 0}</div>
+          <div className="adm__stat-sub">{counts.giving_up_total ?? 0} gave up · {counts.total ?? 0} total rows</div>
+        </div>
+      </div>
+
+      {activeWorkers?.length > 0 && (
+        <>
+          <div className="adm__plate" style={{ marginBottom: 8 }}>Active workers</div>
+          <table className="adm__table" style={{ marginBottom: 12 }}>
+            <thead>
+              <tr><th>Worker ID</th><th>In-flight</th><th>Lease expires</th></tr>
+            </thead>
+            <tbody>
+              {activeWorkers.map(w => (
+                <tr key={w.workerId}>
+                  <td><code>{w.workerId}</code>{w.workerId === workerId && <em style={{ color: 'var(--ink-5)' }}> · this process</em>}</td>
+                  <td>{w.in_flight}</td>
+                  <td>{w.lease_expires_at ? new Date(w.lease_expires_at * 1000).toLocaleTimeString() : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <div className="adm__actions" style={{ marginTop: 0 }}>
+        <button className="adm__btn adm__btn--ghost adm__btn-sm" onClick={tickNow} disabled={busy}>
+          {busy ? 'Ticking…' : 'Run tick now'}
+        </button>
+      </div>
+    </div>
+  );
 }

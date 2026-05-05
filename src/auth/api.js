@@ -160,6 +160,10 @@ export const api = {
     return fetchJson('/api/auth/passkey/login/complete', { method: 'POST', body: { response } });
   },
 
+  // Webhook queue stats
+  webhookQueueStats: () => fetchJson('/api/webhooks/_queue'),
+  webhookQueueTick:  () => fetchJson('/api/webhooks/_queue/tick', { method: 'POST' }),
+
   // Dashboard widgets
   listWidgets:    () => fetchJson('/api/dashboard'),
   createWidget:   (body) => fetchJson('/api/dashboard', { method: 'POST', body }),
