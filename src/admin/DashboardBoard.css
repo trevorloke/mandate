@@ -1,0 +1,157 @@
+.dash {
+  margin-bottom: 32px;
+}
+.dash__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.dash__title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+  margin: 0;
+}
+.dash__empty {
+  background: var(--paper-0);
+  border: 1px dashed var(--rule);
+  padding: 28px;
+  text-align: center;
+  color: var(--ink-5);
+  font-style: italic;
+  font-size: 14px;
+}
+
+.dash__grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+.dash__card {
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+.dash__card--third { grid-column: span 2; }
+.dash__card--half  { grid-column: span 3; }
+.dash__card--full  { grid-column: span 6; }
+
+.dash__card-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--paper-2);
+  position: relative;
+}
+.dash__card-kind {
+  position: absolute; top: 6px; left: 14px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+.dash__card-title {
+  margin: 12px 0 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.dash__card-actions {
+  display: inline-flex; gap: 4px;
+  margin-top: 8px;
+}
+.dash__card-actions button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--rule);
+  width: 22px; height: 22px;
+  font-size: 11px; line-height: 1;
+  cursor: pointer;
+  color: var(--ink-4);
+  border-radius: 2px;
+  padding: 0;
+}
+.dash__card-actions button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
+.dash__card-actions button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.dash__card-body {
+  padding: 14px;
+  flex: 1;
+  font-size: 13px;
+}
+
+/* Kind-specific renderers */
+.dash__metric { text-align: center; padding: 4px 0 8px; }
+.dash__metric-num {
+  font-family: var(--font-display);
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.dash__metric-delta {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+
+.dash__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dash__list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--paper-2);
+}
+.dash__list li:last-child { border-bottom: 0; }
+.dash__list b { font-weight: 500; color: var(--ink); }
+.dash__list em { font-style: italic; color: var(--ink-5); font-size: 11.5px; }
+
+.dash__audit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dash__audit li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.dash__audit-when {
+  font-family: var(--font-mono); font-size: 10px; color: var(--ink-5);
+  min-width: 60px;
+}
+.dash__audit code {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--paper-2); padding: 1px 6px; border-radius: 2px;
+}
+.dash__audit-who { color: var(--ink-5); font-size: 11.5px; font-style: italic; }
+
+.dash__note { line-height: 1.5; color: var(--ink-2); }
+.dash__note b { color: var(--ink); font-weight: 500; }
+
+.dash__empty-inline { color: var(--ink-5); font-style: italic; margin: 0; font-size: 12px; }
+.dash__err { color: #b03030; font-size: 12px; font-style: italic; }
+
+.dash__editor {
+  grid-column: 1 / -1;
+  background: var(--paper-0);
+  border: 1px solid var(--ink);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1024px) {
+  .dash__grid { grid-template-columns: repeat(2, 1fr); }
+  .dash__card--third { grid-column: span 1; }
+  .dash__card--half  { grid-column: span 2; }
+  .dash__card--full  { grid-column: span 2; }
+}
+@media (max-width: 640px) {
+  .dash__grid { grid-template-columns: 1fr; }
+  .dash__card--third, .dash__card--half, .dash__card--full { grid-column: span 1; }
+  .dash__metric-num { font-size: 36px; }
+}

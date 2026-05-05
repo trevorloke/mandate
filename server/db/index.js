@@ -271,6 +271,20 @@ function bootstrapTables() {
     );
     CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_expires ON webauthn_challenges(expires_at);
 
+    CREATE TABLE IF NOT EXISTS dashboard_widgets (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      params TEXT NOT NULL DEFAULT '{}',
+      position INTEGER NOT NULL DEFAULT 0,
+      width TEXT NOT NULL DEFAULT 'half',
+      created_at INTEGER DEFAULT (unixepoch()),
+      updated_at INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_dashboard_widgets_user ON dashboard_widgets(user_id, position);
+
     CREATE INDEX IF NOT EXISTS idx_public_forms_workspace ON public_forms(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_public_forms_slug ON public_forms(slug);
     CREATE INDEX IF NOT EXISTS idx_oauth_providers_workspace ON oauth_providers(workspace_id);

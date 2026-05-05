@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import { SCHEMAS } from './schemas';
+import DashboardBoard from './DashboardBoard';
 
 const KIND_LIST = [
   'ground.voter','ground.canvasser','ground.shift',
@@ -57,6 +58,9 @@ export default function AdminHome({ onNav }) {
 
   return (
     <div>
+      {/* User-customizable widgets */}
+      <DashboardBoard />
+
       {/* Hero stats */}
       <div className="adm__stats">
         <div className="adm__stat-card">

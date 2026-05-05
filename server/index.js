@@ -27,6 +27,7 @@ import oauthAdminRoutes, { publicApp as oauthPublicRoutes } from './routes/oauth
 import commentsRoutes from './routes/comments.js';
 import reportsRoutes from './routes/reports.js';
 import passkeyRoutes from './routes/passkey.js';
+import dashboardRoutes from './routes/dashboard.js';
 
 ensureTables();
 startWebhookWorker();
@@ -79,6 +80,7 @@ app.route('/api/oauth-providers', oauthAdminRoutes);
 app.route('/api/comments', commentsRoutes);
 app.route('/api/reports', reportsRoutes);
 app.route('/api/auth/passkey', passkeyRoutes);
+app.route('/api/dashboard', dashboardRoutes);
 
 app.onError((err, c) => {
   console.error('[server error]', err);

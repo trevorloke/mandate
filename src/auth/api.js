@@ -160,6 +160,13 @@ export const api = {
     return fetchJson('/api/auth/passkey/login/complete', { method: 'POST', body: { response } });
   },
 
+  // Dashboard widgets
+  listWidgets:    () => fetchJson('/api/dashboard'),
+  createWidget:   (body) => fetchJson('/api/dashboard', { method: 'POST', body }),
+  updateWidget:   (id, body) => fetchJson(`/api/dashboard/${id}`, { method: 'PUT', body }),
+  deleteWidget:   (id) => fetchJson(`/api/dashboard/${id}`, { method: 'DELETE' }),
+  reorderWidgets: (items) => fetchJson('/api/dashboard/_reorder', { method: 'PUT', body: { items } }),
+
   // Scheduled reports
   listReports:   () => fetchJson('/api/reports'),
   createReport:  (body) => fetchJson('/api/reports', { method: 'POST', body }),

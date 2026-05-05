@@ -212,6 +212,22 @@ export const comments = sqliteTable('comments', {
   createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+// Dashboard widgets — per-user custom layout shown on the admin overview.
+// Each widget knows its kind (metric, list, audit, note) and stores kind-specific params.
+// Position controls vertical order within the user's board.
+export const dashboardWidgets = sqliteTable('dashboard_widgets', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId:      text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind:        text('kind').notNull(),                  // metric | list | audit | note
+  title:       text('title').notNull(),
+  params:      text('params').notNull().default('{}'),  // JSON
+  position:    integer('position').notNull().default(0),
+  width:       text('width').notNull().default('half'), // 'half' | 'full' | 'third'
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
 // Passkeys (WebAuthn credentials) — phishing-resistant 2nd factor or password-replacement.
 // One user can register many passkeys (phone Face ID, laptop Touch ID, hardware key, etc.).
 export const passkeys = sqliteTable('passkeys', {
