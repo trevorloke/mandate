@@ -32,7 +32,7 @@ function EvScheduleTab({ onPick }) {
   return (
     <div className="ev2__schedule">
       <div style={{padding:'14px 22px', borderBottom:'1px solid var(--ev-rule)', display:'flex', justifyContent:'space-between', alignItems:'baseline', background:'var(--paper-0)'}}>
-        <div className="ev2__title-sub" style={{margin:0}}>Upcoming · 13 events · next 14 days</div>
+        <div className="ev2__title-sub" style={{margin:0}}>Upcoming · {EV_LIST.filter(e => e.attended === null).length} events · next 14 days</div>
         <div style={{fontFamily:'var(--font-mono)', fontSize:11, color:'var(--text-3)', letterSpacing:'0.06em'}}>List · Week · Month</div>
       </div>
 

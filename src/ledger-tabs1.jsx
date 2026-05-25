@@ -361,7 +361,7 @@ const LedgerBills = () => {
 
       <div className="lbills__foot">
         <div>
-          <span>9 bills</span> · <span>$31,762 total</span> · <span>$12,400 due ≤7d</span>
+          <span>{bills.length} bills</span> · <span>${total.toLocaleString()} total</span> · <span>${dueSoon$.toLocaleString()} due ≤7d</span>
         </div>
         <div>
           <button>Export to QBO</button>

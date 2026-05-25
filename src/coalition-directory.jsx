@@ -40,7 +40,7 @@ const CoaDirectory = () => {
       <div className="cd__head">
         <div>
           <div className="cd__eyebrow">Coalition · directory</div>
-          <h2>Organisation files <em>— 22 in network</em></h2>
+          <h2>Organisation files <em>— {orgs.length} in network</em></h2>
         </div>
         <div className="cd__filters">
           {['all','public','committed','warm','prospect','hostile'].map(k => (

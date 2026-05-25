@@ -25,7 +25,7 @@ const LedgerFilings = () => {
       <div className="lfile__head">
         <div>
           <div className="lfile__eyebrow">Ledger · regulatory filings</div>
-          <h2>Filings <em>— 5 regulators · 1 in flight</em></h2>
+          <h2>Filings <em>— {regs.length} regulators · {f ? 1 : 0} in flight</em></h2>
         </div>
         <div className="lfile__head-r">
           <div className="lfile__count">
@@ -188,7 +188,7 @@ const LedgerFilings = () => {
 
       {/* History */}
       <div className="lfile__history">
-        <div className="lfile__h">FILING HISTORY <em>— all regulators · 10 prior</em></div>
+        <div className="lfile__h">FILING HISTORY <em>— all regulators · {history.length} prior</em></div>
         <div className="lfile__hist-table">
           <div className="lfile__hist-head">
             <span>PERIOD</span>

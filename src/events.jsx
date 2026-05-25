@@ -47,7 +47,7 @@ function Events2() {
             <span className="ev2__title">The Programme</span>
             <span className="ev2__title-deco"></span>
           </div>
-          <div className="ev2__title-sub">Apr 28 → E-Day · 14 days · 13 events · 22 venues on file</div>
+          <div className="ev2__title-sub">Apr 28 → E-Day · 14 days · {upcoming} events · {EV_VENUES.length} venues on file</div>
         </div>
         <div className="ev2__metrics">
           <div className="ev2__metric"><span className="ev2__metric-v">{upcoming}</span><span className="ev2__metric-k">upcoming</span></div>

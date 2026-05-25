@@ -422,6 +422,9 @@ const ProspectDrawer = ({ prospect, onClose, onLogGift }) => {
 const Raise2 = () => {
   const { records: liveProspects } = useLiveRecords('raise', 'prospect', RAISE_PROSPECTS);
   const { records: liveDonors, isEmpty: noDonors } = useLiveRecords('raise', 'donor', RAISE_DONORS);
+  const parseAsk = (a) => { const m = /\$([\d.]+)([KM])/.exec(a || ''); return m ? parseFloat(m[1]) * (m[2] === 'M' ? 1e6 : 1e3) : 0; };
+  const pipeOpen = liveProspects.reduce((s, p) => s + parseAsk(p.ask), 0);
+  const fmtPipe = pipeOpen >= 1e6 ? `$${(pipeOpen / 1e6).toFixed(1)}M` : `$${Math.round(pipeOpen / 1e3)}K`;
   const [tab, setTab] = rUS('moves');
   const [drawer, setDrawer] = rUS(null);
   const [giftOpen, setGiftOpen] = rUS(false);
@@ -505,7 +508,7 @@ const Raise2 = () => {
             <div className="r-sec">
               <span className="r-sec__num">02</span>
               <span className="r-sec__h">Pipeline</span>
-              <span className="r-sec__sub">— 52 prospects, $486K open across five stages</span>
+              <span className="r-sec__sub">— {liveProspects.length} prospects, {fmtPipe} open across {RAISE_STAGES.length} stages</span>
               <button className="r-sec__action">Open board →</button>
             </div>
             <div className="r-pipe-wrap">

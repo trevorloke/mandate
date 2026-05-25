@@ -13,7 +13,7 @@ function SitePagesTab() {
   return (
     <div className="site2__pages">
       <aside className="site2__pages-aside">
-        <h3 className="site2__aside-h">Sitemap · 12 routes</h3>
+        <h3 className="site2__aside-h">Sitemap · {SITE_PAGES.length} routes</h3>
         <div className="site2__sitemap">
           {SITE_PAGES.map(p => (
             <div key={p.id} className={`site2__sitemap-row ${p.id==='p-home'?'is-on':''}`}>

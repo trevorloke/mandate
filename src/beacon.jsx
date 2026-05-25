@@ -268,7 +268,7 @@ function Beacon() {
           >{l}</div>
         ))}
         <div className="beacon__tabs-right">
-          <span style={{ color: 'var(--text-3)' }}>This week · 18 posts · 5 awaiting</span>
+          <span style={{ color: 'var(--text-3)' }}>This week · {BEACON_POSTS.length} posts · {BEACON_POSTS.filter(p => p.status !== 'LIVE' && p.status !== 'SCHEDULED').length} awaiting</span>
           <div className="beacon__compose">◇ Compose</div>
         </div>
       </div>
