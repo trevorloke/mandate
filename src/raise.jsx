@@ -38,9 +38,9 @@ const KPI_SPARKS = {
   pledgesdue:  [50, 60, 65, 70, 72, 75, 80, 78, 80, 82, 84, 84],
 };
 
-const RaiseKpiStrip = () => (
+const RaiseKpiStrip = ({ kpis }) => (
   <div className="raise__kpis">
-    {Object.entries(RAISE_KPIS).map(([k, v]) => (
+    {Object.entries(kpis).map(([k, v]) => (
       <div className="raise__kpi" key={k}>
         <div className="raise__kpi-lbl">{v.label}</div>
         <div className="raise__kpi-val">{v.value}</div>
@@ -422,9 +422,12 @@ const ProspectDrawer = ({ prospect, onClose, onLogGift }) => {
 const Raise2 = () => {
   const { records: liveProspects } = useLiveRecords('raise', 'prospect', RAISE_PROSPECTS);
   const { records: liveDonors, isEmpty: noDonors } = useLiveRecords('raise', 'donor', RAISE_DONORS);
+  const { records: liveGifts } = useLiveRecords('raise', 'gift', []);
+  const { records: livePledges } = useLiveRecords('raise', 'pledge', []);
   const parseAsk = (a) => { const m = /\$([\d.]+)([KM])/.exec(a || ''); return m ? parseFloat(m[1]) * (m[2] === 'M' ? 1e6 : 1e3) : 0; };
+  const fmtMoney = (n) => n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${n}`;
   const pipeOpen = liveProspects.reduce((s, p) => s + parseAsk(p.ask), 0);
-  const fmtPipe = pipeOpen >= 1e6 ? `$${(pipeOpen / 1e6).toFixed(1)}M` : `$${Math.round(pipeOpen / 1e3)}K`;
+  const fmtPipe = fmtMoney(pipeOpen);
   const [tab, setTab] = rUS('moves');
   const [drawer, setDrawer] = rUS(null);
   const [giftOpen, setGiftOpen] = rUS(false);
@@ -468,13 +471,24 @@ const Raise2 = () => {
 
   const allDonors = [...extraDonors, ...liveDonors];
 
+  const giftTotal = liveGifts.reduce((s, g) => s + (g.amt || 0), 0);
+  const avgGift = liveGifts.length ? Math.round(giftTotal / liveGifts.length) : 0;
+  const pledgeTotal = livePledges.reduce((s, p) => s + parseAsk(p.ask), 0);
+  const kpis = {
+    ...RAISE_KPIS,
+    ytd:         { ...RAISE_KPIS.ytd,         value: fmtMoney(giftTotal) },
+    pipeline:    { ...RAISE_KPIS.pipeline,    value: fmtPipe, delta: `${liveProspects.length} prospects` },
+    averagegift: { ...RAISE_KPIS.averagegift, value: fmtMoney(avgGift), sub: `${liveDonors.length} donors` },
+    pledgesdue:  { ...RAISE_KPIS.pledgesdue,  value: fmtMoney(pledgeTotal), delta: `${livePledges.length} outstanding` },
+  };
+
   return (
     <div className="raise">
-      <RaiseKpiStrip />
+      <RaiseKpiStrip kpis={kpis} />
 
       <div className="raise__tabs">
         <button className={`raise__tab ${tab==='moves' ? 'is-active' : ''}`} onClick={() => setTab('moves')}>
-          Moves <span className="raise__tab-count">52</span>
+          Moves <span className="raise__tab-count">{liveProspects.length}</span>
         </button>
         <button className={`raise__tab ${tab==='stories' ? 'is-active' : ''}`} onClick={() => setTab('stories')}>
           Stories <span className="raise__tab-count">3</span>

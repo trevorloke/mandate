@@ -244,11 +244,14 @@ function Beacon() {
     return () => window.removeEventListener('keydown', esc);
   }, []);
 
+  const awaiting = BEACON_POSTS.filter(p => p.status !== 'LIVE' && p.status !== 'SCHEDULED').length;
+  const metrics = BEACON_METRICS.map(m => m.key === 'approval' ? { ...m, val: String(awaiting) } : m);
+
   return (
     <div className="beacon">
       {/* Ribbon */}
       <div className="beacon__ribbon">
-        {BEACON_METRICS.map(m => <BMetric key={m.key} m={m} />)}
+        {metrics.map(m => <BMetric key={m.key} m={m} />)}
       </div>
 
       {/* Tabs */}

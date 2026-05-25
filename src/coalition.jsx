@@ -40,9 +40,9 @@ const COA_KPI_SPARKS = {
   events:    [2, 3, 4, 5, 6, 7, 8, 9, 9, 10, 11, 11],
 };
 
-const CoaKpiStrip = () => (
+const CoaKpiStrip = ({ kpis }) => (
   <div className="coa__kpis">
-    {Object.entries(COA_KPIS).map(([k, v]) => (
+    {Object.entries(kpis).map(([k, v]) => (
       <div className="coa__kpi" key={k}>
         <div className="coa__kpi-lbl">{v.label}</div>
         <div className={`coa__kpi-val ${v.tone}`}>{v.value}</div>
@@ -307,13 +307,21 @@ const CoaLedger = () => {
 /* ── Main shell ───────────────────────────────────── */
 const Coalition2 = () => {
   const [tab, setTab] = cUS('ledger');
-  const { isEmpty: noEndorsements } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
+  const { records: COA_LEDGER, isEmpty: noEndorsements } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
   if (noEndorsements) return <EmptyModule module="COALITION" label="Coalition" accent="var(--m-coalition)" />;
+
+  const committed = COA_LEDGER.filter(r => r.status === 'committed' || r.status === 'public').length;
+  const publicCount = COA_LEDGER.filter(r => r.status === 'public').length;
+  const kpis = {
+    ...COA_KPIS,
+    committed: { ...COA_KPIS.committed, value: `${committed} / ${COA_LEDGER.length}` },
+    public:    { ...COA_KPIS.public,    value: String(publicCount) },
+  };
 
   return (
     <div className="coa">
       <CoaCrumbs tab={tab} />
-      <CoaKpiStrip />
+      <CoaKpiStrip kpis={kpis} />
       <CoaTabs tab={tab} setTab={setTab} />
 
       <div className="coa__body">

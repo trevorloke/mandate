@@ -40,9 +40,9 @@ const LKPI_SPARKS = {
   comp:    [96, 96.5, 97, 97.2, 97.4, 97.6, 97.8, 98, 98.1, 98.2, 98.3, 98.4],
 };
 
-const LedgerKpiStrip = () => (
+const LedgerKpiStrip = ({ kpis }) => (
   <div className="ledger__kpis">
-    {Object.entries(LEDGER_KPIS).map(([k, v]) => (
+    {Object.entries(kpis).map(([k, v]) => (
       <div className="ledger__kpi" key={k}>
         <div className="ledger__kpi-lbl">{v.label}</div>
         <div className={`ledger__kpi-val ${v.tone}`}>{v.value}</div>
@@ -231,7 +231,15 @@ const Ledger2 = () => {
   const [newOpen, setNewOpen] = lUS(false);
   const [toast, setToast] = lUS(null);
   const { isEmpty: noJournal } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL);
+  const { records: bills } = useLiveRecords('ledger', 'bill', []);
   if (noJournal) return <EmptyModule module="LEDGER" label="Ledger" accent="var(--m-ledger)" />;
+
+  const billsTotal = bills.reduce((s, b) => s + (b.amt || 0), 0);
+  const vendorCount = new Set(bills.map(b => b.vendor)).size;
+  const kpis = {
+    ...LEDGER_KPIS,
+    ap: { ...LEDGER_KPIS.ap, value: `$${billsTotal.toLocaleString()}`, delta: `${vendorCount} ${vendorCount === 1 ? 'vendor' : 'vendors'}` },
+  };
 
   const handlePosted = (je) => {
     setTab('journal');
@@ -243,7 +251,7 @@ const Ledger2 = () => {
 
   return (
     <div className="ledger">
-      <LedgerKpiStrip />
+      <LedgerKpiStrip kpis={kpis} />
       <LedgerTabs tab={tab} setTab={setTab} onNewEntry={() => setNewOpen(true)} />
 
       <div className="ledger__body">
