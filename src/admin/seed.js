@@ -33,7 +33,7 @@ function buildBuckets(d) {
     { module: 'ground', kind: 'canvasser', records: d.ground.CANVASSERS || [] },
     { module: 'ground', kind: 'shift',     records: d.ground.SHIFTS || [] },
     { module: 'ground', kind: 'pd',        records: d.ground.PDS || [] },
-    { module: 'ground', kind: 'script',    records: Object.entries(d.ground.SCRIPTS || {}).map(([k, v]) => ({ id: k, ...v })) },
+    { module: 'ground', kind: 'script',    records: d.ground.SCRIPTS || [] },
 
     // beacon
     { module: 'beacon', kind: 'account',      records: d.beacon1.BEACON_ACCOUNTS || [] },
@@ -51,7 +51,9 @@ function buildBuckets(d) {
     { module: 'ledger', kind: 'journal', records: d.ledger.LEDGER_JOURNAL || [] },
     { module: 'ledger', kind: 'account', records: d.ledger.LEDGER_COA || [] },
     { module: 'ledger', kind: 'bill',    records: d.ledger.LEDGER_BILLS || [] },
-    { module: 'ledger', kind: 'filing',  records: (d.ledger.LEDGER_FILINGS && d.ledger.LEDGER_FILINGS.queue) || [] },
+    { module: 'ledger', kind: 'filing',         records: (d.ledger.LEDGER_FILINGS && d.ledger.LEDGER_FILINGS.queue) || [] },
+    { module: 'ledger', kind: 'filing_history', records: (d.ledger.LEDGER_FILINGS && d.ledger.LEDGER_FILINGS.history) || [] },
+    { module: 'ledger', kind: 'filing_current', records: (d.ledger.LEDGER_FILINGS && d.ledger.LEDGER_FILINGS.current) ? [d.ledger.LEDGER_FILINGS.current] : [] },
     { module: 'ledger', kind: 'asset',   records: (d.ledger.LEDGER_ASSETS && d.ledger.LEDGER_ASSETS.items) || [] },
 
     // coalition
@@ -89,7 +91,7 @@ function buildBuckets(d) {
 
     // command
     { module: 'command', kind: 'channel', records: (d.command.CMD_GROUPS || []).flatMap(g => (g.items || []).map(i => ({ ...i, group: g.label }))) },
-    { module: 'command', kind: 'message', records: d.command.CMD_THREAD || [] },
+    { module: 'command', kind: 'message', records: [...(d.command.CMD_MESSAGES || []), ...((d.command.CMD_THREAD || []).map(t => ({ ...t, parentId: 'm1' })))] },
   ];
 }
 

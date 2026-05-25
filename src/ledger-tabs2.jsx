@@ -1,6 +1,7 @@
 import React from 'react';
 import './ledger-tabs2.css';
 import { LEDGER_FILINGS, LEDGER_REGULATORS, LEDGER_REPORTS } from './ledger-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Ledger tabs (Filings, Reports)
 
@@ -10,11 +11,13 @@ const { useState: lT2US, useMemo: lT2UM } = React;
    FILINGS — multi-jurisdiction regulatory
    ────────────────────────────────────────────────────── */
 const LedgerFilings = () => {
-  const f = LEDGER_FILINGS.current;
-  const passed = f.checks.filter(c => c.pass).length;
+  const { records: queue } = useLiveRecords('ledger', 'filing', LEDGER_FILINGS.queue);
+  const { records: history } = useLiveRecords('ledger', 'filing_history', LEDGER_FILINGS.history);
+  const { records: currentRecs } = useLiveRecords('ledger', 'filing_current', [LEDGER_FILINGS.current]);
+  const f = currentRecs[0];
+  const passed = f ? f.checks.filter(c => c.pass).length : 0;
   const regs = LEDGER_REGULATORS;
   const regBy = Object.fromEntries(regs.map(r => [r.id, r]));
-  const queue = LEDGER_FILINGS.queue;
   const primary = regs.find(r => r.role === 'primary');
 
   return (
@@ -26,12 +29,12 @@ const LedgerFilings = () => {
         </div>
         <div className="lfile__head-r">
           <div className="lfile__count">
-            <b>{f.daysToFile}</b>
+            <b>{f?.daysToFile ?? '—'}</b>
             <em>days · primary filing</em>
           </div>
           <div className="lfile__due">
             <span>NEXT DUE</span>
-            <b>{f.due}</b>
+            <b>{f?.due ?? '—'}</b>
           </div>
           <button className="lfile__submit">Submit to {primary.short}</button>
         </div>
@@ -70,7 +73,7 @@ const LedgerFilings = () => {
           <span>STATUS</span>
         </div>
         {queue.map(q => (
-          <div key={q.id} className={`lfile__qrow ${q.urgent ? 'urgent' : ''} ${q.id === f.id ? 'current' : ''}`}>
+          <div key={q.id} className={`lfile__qrow ${q.urgent ? 'urgent' : ''} ${q.id === f?.id ? 'current' : ''}`}>
             <span className="lfile__qreg">{regBy[q.regulator].short}</span>
             <span className="lfile__qname">
               <b>{q.period}</b>
@@ -91,6 +94,7 @@ const LedgerFilings = () => {
       </div>
 
       {/* Current filing spotlight */}
+      {f && (
       <div className="lfile__current">
         <div className="lfile__current-h">
           <div>
@@ -180,6 +184,7 @@ const LedgerFilings = () => {
         </div>
       </div>
       </div>
+      )}
 
       {/* History */}
       <div className="lfile__history">
@@ -194,7 +199,7 @@ const LedgerFilings = () => {
             <span>AUDITOR</span>
             <span>STATUS</span>
           </div>
-          {LEDGER_FILINGS.history.map(h => (
+          {history.map(h => (
             <div key={h.id} className={`lfile__hist-row ${h.annual ? 'annual' : ''}`}>
               <span className="lfile__hist-period">
                 <b>{h.period}</b>

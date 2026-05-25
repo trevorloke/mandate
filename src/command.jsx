@@ -6,6 +6,10 @@ import { CMD_WORKSPACES, CMD_GROUPS as CMD_GROUPS_FB, CMD_MESSAGES as CMD_MESSAG
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 
+// Channel messages + thread replies live in one 'message' bucket;
+// replies are linked to their root message via parentId.
+const CMD_MSGS_FB = [...CMD_MESSAGES_FB, ...CMD_THREAD.map(t => ({ ...t, parentId: 'm1' }))];
+
 // ── Sidebar item row
 function CmdItem({ it, active, onClick }) {
   const cls = ['cmd__item'];
@@ -212,13 +216,13 @@ function Composer({ channelName }) {
 }
 
 // ── Thread pane
-function ThreadPane({ root, onClose }) {
+function ThreadPane({ root, replies, onClose }) {
   return (
     <aside className="cmd__thread">
       <div className="cmd__thread-hd">
         <div>
           <div className="cmd__thread-hd-title">Thread</div>
-          <div className="cmd__thread-hd-sub">#war-room · 4 replies</div>
+          <div className="cmd__thread-hd-sub">#war-room · {replies.length} {replies.length === 1 ? 'reply' : 'replies'}</div>
         </div>
         <div className="cmd__thread-x" onClick={onClose}>✕</div>
       </div>
@@ -226,7 +230,7 @@ function ThreadPane({ root, onClose }) {
         <div className="cmd__thread-root">
           <Msg m={root} showHover={false} />
         </div>
-        {CMD_THREAD.map(t => (
+        {replies.map(t => (
           <Msg key={t.id} m={{...t, role:''}} showHover={false} />
         ))}
       </div>
@@ -246,7 +250,7 @@ function ThreadPane({ root, onClose }) {
 // ── Root
 function Command() {
   const { records: CMD_GROUPS, isEmpty: noChannels } = useLiveRecords('command', 'channel', CMD_GROUPS_FB);
-  const { records: CMD_MESSAGES, isEmpty: noMessages } = useLiveRecords('command', 'message', CMD_MESSAGES_FB);
+  const { records: CMD_MESSAGES, isEmpty: noMessages } = useLiveRecords('command', 'message', CMD_MSGS_FB);
   const [activeCh, setActiveCh] = cUS('c-warroom');
   const [threadRoot, setThreadRoot] = cUS(CMD_MESSAGES.find(m => m.id === 'm1'));
   const [activeWs, setActiveWs] = cUS('mw');
@@ -352,7 +356,7 @@ function Command() {
 
         <div className="cmd__stream" ref={streamRef}>
           <div className="cmd__day-sep"><span className="cmd__day-sep-lbl">Today · Monday, April 14</span></div>
-          {CMD_MESSAGES.map(m => (
+          {CMD_MESSAGES.filter(m => !m.parentId).map(m => (
             <Msg key={m.id} m={m} onThread={setThreadRoot} />
           ))}
         </div>
@@ -361,7 +365,7 @@ function Command() {
       </main>
 
       {/* Thread pane */}
-      {threadRoot && <ThreadPane root={threadRoot} onClose={() => setThreadRoot(null)} />}
+      {threadRoot && <ThreadPane root={threadRoot} replies={CMD_MESSAGES.filter(m => m.parentId === threadRoot.id)} onClose={() => setThreadRoot(null)} />}
     </div>
   );
 }

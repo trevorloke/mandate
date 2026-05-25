@@ -322,11 +322,12 @@ function ScriptDock({ open, script, onClose }) {
 function FieldView({ mode, setMode }) {
   const { records: voters } = useLiveRecords('ground', 'voter', VOTERS);
   const { records: shifts } = useLiveRecords('ground', 'shift', SHIFTS);
+  const { records: scripts } = useLiveRecords('ground', 'script', SCRIPTS);
   const [activeSub, setActiveSub] = gUS('door-knock');
   const activeGroup = MODES.find(g => g.sub.some(s => s.k === activeSub));
   const activeSubObj = activeGroup?.sub.find(s => s.k === activeSub);
 
-  const script = SCRIPTS.find(s => s.mode === activeSub) || SCRIPTS[0];
+  const script = scripts.find(s => s.mode === activeSub) || scripts[0];
   const voter = voters[0]; // first voter from live data
 
   return (
@@ -374,8 +375,8 @@ function FieldView({ mode, setMode }) {
               <div className="field__hd-count">12 / 20</div>
             </div>
             <div className="field__body">
-              {activeSub.startsWith('door') && <DoorScreen voter={voter} script={script} mode={activeSub}/>}
-              {activeSub.startsWith('phone') && <PhoneScreen voter={voter} script={script} mode={activeSub}/>}
+              {activeSub.startsWith('door') && script && <DoorScreen voter={voter} script={script} mode={activeSub}/>}
+              {activeSub.startsWith('phone') && script && <PhoneScreen voter={voter} script={script} mode={activeSub}/>}
               {activeSub.startsWith('text') && <TextScreen mode={activeSub}/>}
               {activeSub.startsWith('street') && <StreetScreen mode={activeSub}/>}
             </div>
@@ -587,6 +588,7 @@ function StreetScreen({ mode }) {
 // ── Main Ground page
 function Ground() {
   const { records: voters, isEmpty: noVoters } = useLiveRecords('ground', 'voter', VOTERS);
+  const { records: scripts } = useLiveRecords('ground', 'script', SCRIPTS);
   const [tab, setTab] = gUS('desk'); // desk | field | script
   const [cuts, setCuts] = gUS(UNIVERSE_DEFAULT);
   const [activePd, setActivePd] = gUS('PD-009');
@@ -594,9 +596,11 @@ function Ground() {
   const [openVoter, setOpenVoter] = gUS('V-1000');
   const [selected, setSelected] = gUS(new Set());
   const [scriptOpen, setScriptOpen] = gUS(false);
-  const [activeScript, setActiveScript] = gUS(SCRIPTS[0]);
+  const [activeScriptId, setActiveScriptId] = gUS(null);
   const [mode, setMode] = gUS('door-knock');
   if (noVoters) return <EmptyModule module="GROUND" label="Ground" accent="var(--m-ground)" />;
+
+  const activeScript = scripts.find(s => s.id === activeScriptId) || scripts[0];
 
   // Filter voters to active PD for the list
   const filtered = gUM(() => voters.filter(v => v.pd === activePd || activePd === 'ALL').slice(0, 18), [activePd, voters]);
@@ -671,11 +675,11 @@ function Ground() {
         <div style={{ padding: 30, display:'grid', gridTemplateColumns:'300px 1fr', gap:0, background:'var(--paper)', minHeight:'70vh' }}>
           <div style={{ borderRight:'1px solid var(--rule)', paddingRight:20 }}>
             <h3 style={{ fontFamily:'var(--font-mono)', fontSize:10, letterSpacing:'0.2em', color:'var(--text-3)', textTransform:'uppercase', margin:'0 0 14px' }}>Scripts</h3>
-            {SCRIPTS.map(s => (
+            {scripts.map(s => (
               <div
                 key={s.id}
-                onClick={() => { setActiveScript(s); }}
-                style={{ padding:'12px 14px', border:'1px solid var(--rule)', marginBottom:8, cursor:'pointer', background: activeScript.id === s.id ? 'var(--g-tint)' : 'var(--paper)', borderColor: activeScript.id === s.id ? 'var(--ink)' : 'var(--rule)' }}
+                onClick={() => { setActiveScriptId(s.id); }}
+                style={{ padding:'12px 14px', border:'1px solid var(--rule)', marginBottom:8, cursor:'pointer', background: activeScript?.id === s.id ? 'var(--g-tint)' : 'var(--paper)', borderColor: activeScript?.id === s.id ? 'var(--ink)' : 'var(--rule)' }}
               >
                 <div style={{ fontFamily:'var(--font-mono)', fontSize:9.5, letterSpacing:'0.14em', color:'var(--text-3)', textTransform:'uppercase' }}>{s.mode}</div>
                 <div style={{ fontFamily:'var(--font-display)', fontSize:17, marginTop:2 }}>{s.title}</div>
@@ -686,6 +690,7 @@ function Ground() {
           </div>
           <div>
             <div style={{ padding:'0 30px' }}>
+              {activeScript ? (<>
               <div style={{ fontFamily:'var(--font-mono)', fontSize:10, letterSpacing:'0.2em', color:'var(--text-3)' }}>SCRIPT · {activeScript.mode.toUpperCase()}</div>
               <div style={{ fontFamily:'var(--font-display)', fontSize:34, letterSpacing:'-0.01em', margin:'4px 0 6px' }}>{activeScript.title}</div>
               <div style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--text-3)' }}>{activeScript.author} · {activeScript.updated}</div>
@@ -709,6 +714,9 @@ function Ground() {
                   ))}
                 </div>
               ))}
+              </>) : (
+                <div style={{ color:'var(--text-3)', fontFamily:'var(--font-mono)', fontSize:12, padding:'40px 0' }}>No scripts yet.</div>
+              )}
             </div>
           </div>
         </div>
