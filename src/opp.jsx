@@ -1,6 +1,6 @@
 import React from 'react';
 import './opp.css';
-import { OP_TARGETS as OP_TARGETS_FB, OP_CLAIMS as OP_CLAIMS_FB, OP_EVIDENCE as OP_EVIDENCE_FB, OP_LEADS, OP_REBUTTALS, OP_MONITORS } from './opp-data';
+import { OP_TARGETS as OP_TARGETS_FB, OP_CLAIMS as OP_CLAIMS_FB, OP_EVIDENCE as OP_EVIDENCE_FB, OP_LEADS as OP_LEADS_FB, OP_REBUTTALS, OP_MONITORS } from './opp-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 import { OpLeads, OpRebuttals, OpMonitors, OpSources } from './opp-tabs';
@@ -24,6 +24,7 @@ function Opposition2() {
   const { records: OP_TARGETS, isEmpty: noTargets } = useLiveRecords('opposition', 'target', OP_TARGETS_FB);
   const { records: OP_CLAIMS, isEmpty: noClaims } = useLiveRecords('opposition', 'claim', OP_CLAIMS_FB);
   const { records: OP_EVIDENCE } = useLiveRecords('opposition', 'evidence', OP_EVIDENCE_FB);
+  const { records: OP_LEADS } = useLiveRecords('opposition', 'lead', OP_LEADS_FB);
   if (noTargets && noClaims) return <EmptyModule module="OPPOSITION" label="Opposition" accent="var(--m-opp)" />;
 
   const liveSpikes  = OP_MONITORS.filter(m => m.spike).length;

@@ -1,6 +1,6 @@
 import React from 'react';
 import './beacon.css';
-import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB, BEACON_LISTENING, BEACON_APPROVALS, BEACON_METRICS } from './beacon-data';
+import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB, BEACON_LISTENING as BEACON_LISTENING_FB, BEACON_APPROVALS, BEACON_METRICS } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 import { BTabQueue, BTabListening, BTabPerformance, BTabBoost, BTabPress } from './beacon-tabs';
@@ -235,6 +235,7 @@ function Beacon() {
   const [openPost, setOpenPost] = bUS(null);
   const { records: BEACON_ACCOUNTS, isEmpty: noAccounts } = useLiveRecords('beacon', 'account', BEACON_ACCOUNTS_FB);
   const { records: BEACON_POSTS, isEmpty: noPosts } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
+  const { records: BEACON_LISTENING } = useLiveRecords('beacon', 'mention', BEACON_LISTENING_FB);
   if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
 
   bUE(() => {

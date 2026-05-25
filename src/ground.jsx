@@ -95,6 +95,7 @@ function UniverseSentence({ cuts, onChange, count }) {
 
 // ── Map
 function GroundMap({ activePd, onPickPd, shade }) {
+  const { records: pds } = useLiveRecords('ground', 'pd', PDS);
   const { records: canvassers } = useLiveRecords('ground', 'canvasser', CANVASSERS);
   const shadeFor = (pd) => {
     if (shade === 'support') {
@@ -131,7 +132,7 @@ function GroundMap({ activePd, onPickPd, shade }) {
       <path d={RIVER} fill="none" stroke="#c2d5e2" strokeWidth="4" opacity="0.7"/>
 
       {/* PD polygons */}
-      {PDS.map(pd => (
+      {pds.map(pd => (
         <polygon
           key={pd.id}
           className={`pd-poly ${activePd === pd.id ? 'pd-poly--active' : ''} ${pd.target ? 'pd-poly--target' : ''}`}
@@ -142,7 +143,7 @@ function GroundMap({ activePd, onPickPd, shade }) {
       ))}
 
       {/* PD labels — only a few key ones */}
-      {PDS.filter(pd => pd.target || ['PD-001','PD-007','PD-015','PD-017','PD-021'].includes(pd.id)).map(pd => {
+      {pds.filter(pd => pd.target || ['PD-001','PD-007','PD-015','PD-017','PD-021'].includes(pd.id)).map(pd => {
         // centroid-ish
         const pts = pd.points.split(' ').map(p => p.split(',').map(Number));
         const cx = pts.reduce((a,p) => a+p[0], 0) / pts.length;

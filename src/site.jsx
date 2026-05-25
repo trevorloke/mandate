@@ -1,6 +1,6 @@
 import React from 'react';
 import './site.css';
-import { SITE_PAGES as SITE_PAGES_FB, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_FORMS, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH } from './site-data';
+import { SITE_PAGES as SITE_PAGES_FB, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_FORMS as SITE_FORMS_FB, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH } from './site-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 import { SitePagesTab, SiteBuilderTab, SiteCMSTab, SiteExperimentsTab, SiteFormsTab, SiteAudienceTab, SiteDeploysTab } from './site-tabs';
@@ -23,6 +23,7 @@ function Site2() {
   const [tab, setTab] = stUS('pages');
   const { records: SITE_PAGES, isEmpty: noPages } = useLiveRecords('site', 'page', SITE_PAGES_FB);
   const { records: SITE_EXPERIMENTS, isEmpty: noExperiments } = useLiveRecords('site', 'experiment', SITE_EXPERIMENTS_FB);
+  const { records: SITE_FORMS } = useLiveRecords('site', 'form', SITE_FORMS_FB);
   if (noPages && noExperiments) return <EmptyModule module="SITE" label="Site" accent="var(--m-site)" />;
 
   const totalViews = SITE_PAGES.reduce((s,p)=>s+(p.views7d||0), 0);

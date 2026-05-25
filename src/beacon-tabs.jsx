@@ -2,7 +2,7 @@ import React from 'react';
 import './beacon-tabs.css';
 import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
-import { BEACON_TRACKED_TERMS, BEACON_MENTION_TIMELINE, BEACON_AUTHORS, BEACON_SOV_HISTORY, BEACON_TOP_POSTS, BEACON_ENG_OVER_TIME, BEACON_BEST_TIME, BEACON_CONTENT_SCORE, BEACON_BOOSTS, BEACON_BOOST_SUGGESTIONS, BEACON_PRESS, BEACON_PRESS_OUTLETS } from './beacon-data2';
+import { BEACON_TRACKED_TERMS, BEACON_MENTION_TIMELINE, BEACON_AUTHORS, BEACON_SOV_HISTORY, BEACON_TOP_POSTS, BEACON_ENG_OVER_TIME, BEACON_BEST_TIME, BEACON_CONTENT_SCORE, BEACON_BOOSTS, BEACON_BOOST_SUGGESTIONS, BEACON_PRESS, BEACON_PRESS_OUTLETS as BEACON_PRESS_OUTLETS_FB } from './beacon-data2';
 
 // Mandate 2.0 — Beacon · Queue / Listening / Performance / Boost / Press tabs
 
@@ -527,6 +527,7 @@ function BTabBoost() {
 // ─────────────────────────────────────────────────────────────────────────
 
 function BTabPress() {
+  const { records: BEACON_PRESS_OUTLETS } = useLiveRecords('beacon', 'press_outlet', BEACON_PRESS_OUTLETS_FB);
   const totalReplies = BEACON_PRESS.reduce((a,p) => a+p.replies, 0);
   const totalEmails = BEACON_PRESS.reduce((a,p) => a+p.emails, 0);
   const replyRate = ((totalReplies/totalEmails)*100).toFixed(0);

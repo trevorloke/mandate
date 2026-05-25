@@ -1,6 +1,6 @@
 import React from 'react';
 import './civic.css';
-import { CV_MEMBER, CV_ORDER_TODAY, CV_BILLS as CV_BILLS_FB, CV_CASES as CV_CASES_FB, CV_CASE_CATS, CV_VOTES, CV_MOTIONS, CV_SPEECHES, CV_PROMISES as CV_PROMISES_FB, CV_LETTERS, CV_CASE_PIPE_STAGES } from './civic-data';
+import { CV_MEMBER, CV_ORDER_TODAY, CV_BILLS as CV_BILLS_FB, CV_CASES as CV_CASES_FB, CV_CASE_CATS, CV_VOTES, CV_MOTIONS, CV_SPEECHES as CV_SPEECHES_FB, CV_PROMISES as CV_PROMISES_FB, CV_LETTERS, CV_CASE_PIPE_STAGES } from './civic-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 import { CvCommittees, CvPromises, CvCommunity, CvLetters, CvSpend, CvStaff, CvTrends } from './civic-tabs';
@@ -443,6 +443,7 @@ function CvCases() {
 // HANSARD — votes + motions + speeches
 // ════════════════════════════════════════════════════════════
 function CvHansard() {
+  const { records: CV_SPEECHES } = useLiveRecords('civic', 'speech', CV_SPEECHES_FB);
   return (
     <div>
       <div style={{ marginBottom: 16, display:'flex', gap:24, fontFamily:'var(--font-mono)', fontSize:10, color:'var(--cv-accent-2)', letterSpacing:'0.1em', textTransform:'uppercase' }}>
