@@ -1,6 +1,7 @@
 import React from 'react';
 import './ledger-tabs3.css';
 import { LEDGER_ASSETS, LEDGER_COMPLIANCE } from './ledger-data';
+import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Ledger tabs (Compliance, Assets)
 
@@ -184,28 +185,34 @@ const LedgerCompliance = () => {
    ASSETS — inventory
    ────────────────────────────────────────────────────── */
 const LedgerAssets = () => {
-  const a = LEDGER_ASSETS;
+  const { records: items } = useLiveRecords('ledger', 'asset', LEDGER_ASSETS.items);
   const [catFilter, setCatFilter] = lT3US('all');
   const [openId, setOpenId] = lT3US(null);
 
-  const filtered = catFilter === 'all' ? a.items : a.items.filter(i => i.cat === catFilter);
-  const catBy = Object.fromEntries(a.categories.map(c => [c.id, c]));
+  const categories = LEDGER_ASSETS.categories;
+  const filtered = catFilter === 'all' ? items : items.filter(i => i.cat === catFilter);
+  const catBy = Object.fromEntries(categories.map(c => [c.id, c]));
+  const totalValue = items.reduce((s, i) => s + (i.book || 0), 0);
+  const catAgg = Object.fromEntries(categories.map(c => {
+    const inCat = items.filter(i => i.cat === c.id);
+    return [c.id, { items: inCat.length, value: inCat.reduce((s, i) => s + (i.book || 0), 0) }];
+  }));
 
   return (
     <div className="lasset">
       <div className="lasset__head">
         <div>
           <div className="lasset__eyebrow">Ledger · asset register</div>
-          <h2>Asset inventory <em>— {a.summary.items} items · ${a.summary.totalValue.toLocaleString()} book</em></h2>
+          <h2>Asset inventory <em>— {items.length} items · ${totalValue.toLocaleString()} book</em></h2>
         </div>
         <div className="lasset__head-r">
           <div className="lasset__count">
-            <b>${(a.summary.totalValue / 1000).toFixed(1)}<em>k</em></b>
+            <b>${(totalValue / 1000).toFixed(1)}<em>k</em></b>
             <em>book value</em>
           </div>
           <div className="lasset__due">
             <span>NEXT AUDIT</span>
-            <b>{a.summary.nextAudit}</b>
+            <b>{LEDGER_ASSETS.summary.nextAudit}</b>
           </div>
           <button className="lasset__add">+ Receive asset</button>
         </div>
@@ -219,19 +226,19 @@ const LedgerAssets = () => {
             <em>full register</em>
           </div>
           <div className="lasset__cat-r">
-            <b>{a.summary.items}</b>
-            <span>${(a.summary.totalValue / 1000).toFixed(1)}k</span>
+            <b>{items.length}</b>
+            <span>${(totalValue / 1000).toFixed(1)}k</span>
           </div>
         </button>
-        {a.categories.map(c => (
+        {categories.map(c => (
           <button key={c.id} className={`lasset__cat ${catFilter === c.id ? 'on' : ''}`} onClick={() => setCatFilter(c.id)}>
             <div className="lasset__cat-l">
               <div className="lasset__cat-name">{c.label}</div>
               <em>{c.cycle}</em>
             </div>
             <div className="lasset__cat-r">
-              <b>{c.items}</b>
-              <span>${(c.value / 1000).toFixed(1)}k</span>
+              <b>{catAgg[c.id].items}</b>
+              <span>${(catAgg[c.id].value / 1000).toFixed(1)}k</span>
             </div>
           </button>
         ))}
@@ -263,7 +270,7 @@ const LedgerAssets = () => {
                     <em className="lasset__deployed">{it.deployed}/{it.batch} deployed</em>
                   )}
                 </span>
-                <span className="lasset__cat-pill">{catBy[it.cat].label}</span>
+                <span className="lasset__cat-pill">{catBy[it.cat]?.label}</span>
                 <span className="lasset__sn">{it.sn}</span>
                 <span className="lasset__date">{it.acquired}</span>
                 <span className="r ljr__num">${it.cost.toLocaleString()}</span>

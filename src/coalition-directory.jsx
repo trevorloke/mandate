@@ -20,8 +20,12 @@ const fmtK = (n) => {
   return n.toLocaleString();
 };
 
+// Deep-file fallback, keyed by slug so it can be matched against live org records.
+const ORG_FILES_FB = Object.entries(COA_ORGS).map(([slug, v]) => ({ slug, ...v }));
+
 const CoaDirectory = () => {
   const { records: COA_LEDGER } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
+  const { records: orgFiles } = useLiveRecords('coalition', 'org', ORG_FILES_FB);
   const [sel, setSel] = cdUS('bcfl');
   const [filter, setFilter] = cdUS('all');
 
@@ -29,7 +33,7 @@ const CoaDirectory = () => {
   const filtered = filter === 'all' ? orgs : orgs.filter(o => o.status === filter);
 
   const open = COA_LEDGER.find(o => o.slug === sel);
-  const file = COA_ORGS[sel]; // deep file may not exist for all
+  const file = orgFiles.find(o => o.slug === sel); // deep file may not exist for all
 
   return (
     <div className="cd">

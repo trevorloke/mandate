@@ -57,7 +57,7 @@ function buildBuckets(d) {
     { module: 'ledger', kind: 'asset',   records: (d.ledger.LEDGER_ASSETS && d.ledger.LEDGER_ASSETS.items) || [] },
 
     // coalition
-    { module: 'coalition', kind: 'org',         records: Object.values(d.coalition.COA_ORGS || {}) },
+    { module: 'coalition', kind: 'org',         records: Object.entries(d.coalition.COA_ORGS || {}).map(([slug, v]) => ({ slug, ...v })) },
     { module: 'coalition', kind: 'endorsement', records: d.coalition.COA_LEDGER || [] },
     { module: 'coalition', kind: 'ask',         records: d.coalition.COA_ASKS || [] },
     { module: 'coalition', kind: 'comm',        records: d.coalition.COA_COMMS || [] },
