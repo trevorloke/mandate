@@ -175,6 +175,7 @@ function OpTargets() {
 function OpClaims() {
   const { records: OP_TARGETS } = useLiveRecords('opposition', 'target', OP_TARGETS_FB);
   const { records: OP_CLAIMS } = useLiveRecords('opposition', 'claim', OP_CLAIMS_FB);
+  const { records: OP_EVIDENCE } = useLiveRecords('opposition', 'evidence', OP_EVIDENCE_FB);
   const [vfilter, setVfilter] = opUS('all');
   const [tfilter, setTfilter] = opUS('all');
 

@@ -344,6 +344,7 @@ function EvHostsTab() {
 
 /* ── SHIFTS (across events) ── */
 function EvShiftsTab() {
+  const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
   // Group by event
   const byEvent = {};
   EV_SHIFTS.forEach(s => {

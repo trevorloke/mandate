@@ -25,7 +25,7 @@ function SitePagesTab() {
         <h3 className="site2__aside-h" style={{marginTop:24}}>Templates</h3>
         <div className="site2__sitemap">
           {['Landing · Hero','Long-form','Conversion','Issue page','CMS feed','Editorial','Receipt'].map(t => (
-            <div key={t} className="site2__sitemap-row"><span className="site2__sitemap-route">{t}</span><span className="site2__sitemap-views">{Math.floor(Math.random()*4)+1} pages</span></div>
+            <div key={t} className="site2__sitemap-row"><span className="site2__sitemap-route">{t}</span></div>
           ))}
         </div>
       </aside>
