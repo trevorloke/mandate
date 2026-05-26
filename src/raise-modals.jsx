@@ -217,7 +217,7 @@ const LogGiftModal = ({ open, prefillDonor, onClose, onLogged, onSwitchToAdd }) 
               <div className="r-row" style={{ marginTop: 12 }}>
                 <div className="r-field">
                   <div className="r-field__lbl">Appeal / list code <em>optional</em></div>
-                  <input className="r-input" value={appeal} onChange={e => setAppeal(e.target.value)} placeholder="e.g. 26-Q2-CLIMATE · BRIDGE-PARK" />
+                  <input className="r-input" value={appeal} onChange={e => setAppeal(e.target.value)} placeholder="Appeal / campaign code" />
                 </div>
               </div>
             </div>
@@ -229,7 +229,7 @@ const LogGiftModal = ({ open, prefillDonor, onClose, onLogged, onSwitchToAdd }) 
                 <em>optional · feeds the moves log</em>
               </div>
               <textarea className="r-textarea" rows="3"
-                placeholder="Closed at full ask. Wants to host house party. — MR"
+                placeholder="Notes about this gift"
                 value={notes} onChange={e => setNotes(e.target.value)} />
               <div style={{ marginTop: 10, display: 'flex', gap: 14, fontFamily: 'var(--font-mono)', fontSize: 11, color: '#6b6855' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -380,7 +380,7 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
   const [email, setEmail] = rmUS('');
   const [phone, setPhone] = rmUS('');
   const [address, setAddress] = rmUS('');
-  const [city, setCity] = rmUS('Vancouver');
+  const [city, setCity] = rmUS('');
   const [postal, setPostal] = rmUS('');
   const [empName, setEmpName] = rmUS('');
   const [empTitle, setEmpTitle] = rmUS('');
@@ -457,17 +457,17 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
               <div className="r-row cols-2">
                 <div className="r-field">
                   <div className="r-field__lbl">First name<span className="req">*</span></div>
-                  <input className="r-input" value={first} onChange={e => setFirst(e.target.value)} placeholder="Mira" />
+                  <input className="r-input" value={first} onChange={e => setFirst(e.target.value)} placeholder="First name" />
                 </div>
                 <div className="r-field">
                   <div className="r-field__lbl">Last name<span className="req">*</span></div>
-                  <input className="r-input" value={last} onChange={e => setLast(e.target.value)} placeholder="Aoki" />
+                  <input className="r-input" value={last} onChange={e => setLast(e.target.value)} placeholder="Last name" />
                 </div>
               </div>
               <div className="r-row cols-2">
                 <div className="r-field">
                   <div className="r-field__lbl">Email</div>
-                  <input className="r-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="mira@example.com" />
+                  <input className="r-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" />
                 </div>
                 <div className="r-field">
                   <div className="r-field__lbl">Phone</div>
@@ -484,7 +484,7 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
               <div className="r-row">
                 <div className="r-field">
                   <div className="r-field__lbl">Street</div>
-                  <input className="r-input" value={address} onChange={e => setAddress(e.target.value)} placeholder="1234 Cambie Street" />
+                  <input className="r-input" value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address" />
                 </div>
               </div>
               <div className="r-row cols-3">
@@ -513,11 +513,11 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
               <div className="r-row cols-2">
                 <div className="r-field">
                   <div className="r-field__lbl">Employer</div>
-                  <input className="r-input" value={empName} onChange={e => setEmpName(e.target.value)} placeholder="Climate Forward" />
+                  <input className="r-input" value={empName} onChange={e => setEmpName(e.target.value)} placeholder="Employer / org" />
                 </div>
                 <div className="r-field">
                   <div className="r-field__lbl">Title</div>
-                  <input className="r-input" value={empTitle} onChange={e => setEmpTitle(e.target.value)} placeholder="Executive Director" />
+                  <input className="r-input" value={empTitle} onChange={e => setEmpTitle(e.target.value)} placeholder="Job title" />
                 </div>
               </div>
             </div>
@@ -556,7 +556,7 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
               <div className="r-row cols-2">
                 <div className="r-field">
                   <div className="r-field__lbl">Referred by</div>
-                  <input className="r-input" value={referrer} onChange={e => setReferrer(e.target.value)} placeholder="D. Ng · board" />
+                  <input className="r-input" value={referrer} onChange={e => setReferrer(e.target.value)} placeholder="Who referred this donor" />
                 </div>
                 <div className="r-field">
                   <div className="r-field__lbl">Comm. preference</div>

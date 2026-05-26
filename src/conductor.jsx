@@ -124,7 +124,7 @@ const Conductor = ({ open, onClose }) => {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); } }}
-                placeholder="What's the fastest way to hit shift fill for Metrotown? Or: draft a reply to Vance's housing quote in our voice."
+                placeholder="Ask Conductor anything — or paste a brief and it'll route the work."
                 disabled={busy}
               />
               <button className="conductor__input-send" disabled={busy || !draft.trim()} onClick={submit}>Send</button>

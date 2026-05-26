@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import './ledger-modal.css';
 import { LEDGER_COA as LEDGER_COA_FB } from './ledger-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import { useAuth } from './auth/AuthContext';
 import { api } from './auth/api';
 
 // Mandate 2.0 — Ledger New Entry modal (double-entry composer)
@@ -137,6 +138,7 @@ const todayDay = () => ['SUN','MON','TUE','WED','THU','FRI','SAT'][new Date().ge
 /* ── New Entry Modal ── */
 const NewEntryModal = ({ open, onClose, onPosted }) => {
   const { records: LEDGER_COA } = useLiveRecords('ledger', 'account', LEDGER_COA_FB);
+  const { user } = useAuth();
   const [type, setType] = lmUS('gift');
   const [date, setDate] = lmUS(todayMD());
   const [ref, setRef] = lmUS('');
@@ -208,8 +210,9 @@ const NewEntryModal = ({ open, onClose, onPosted }) => {
 
   const post = () => {
     if (!canPost) return;
+    const initials = (user?.name || '').split(/\s+/).filter(Boolean).map(s => s[0]?.toUpperCase()).slice(0, 2).join('.');
     const je = {
-      id: 'JE-' + (3142 + Math.floor(Math.random()*9) + 1),
+      id: 'JE-' + Math.random().toString(36).slice(2, 8).toUpperCase(),
       date,
       day: todayDay(),
       ref,
@@ -219,9 +222,9 @@ const NewEntryModal = ({ open, onClose, onPosted }) => {
       type,
       debit:  splits[0].dr || 0,
       credit: splits[0].cr || 0,
-      balance: 614820,
+      balance: 0,
       posted: true,
-      signed: 'M.R.',
+      signed: initials || '',
       flagged: false,
       splits: splits.map(s => ({
         acct: s.acct ? `${s.acct.code} ${s.acct.name}` : '',
