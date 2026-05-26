@@ -1,6 +1,7 @@
 // Mandate 2.0 — Command Center
 
 import React, { useState as cUS, useEffect as cUE, useRef as cUR, useMemo as cUM } from 'react';
+import { useAuth } from './auth/AuthContext';
 import './command.css';
 import { CMD_WORKSPACES, CMD_GROUPS as CMD_GROUPS_FB, CMD_MESSAGES as CMD_MESSAGES_FB, CMD_THREAD, CMD_SLASH } from './command-data';
 import { useLiveRecords } from './auth/useLiveRecords';
@@ -251,9 +252,10 @@ function ThreadPane({ root, replies, onClose }) {
 function Command() {
   const { records: CMD_GROUPS, isEmpty: noChannels } = useLiveRecords('command', 'channel', CMD_GROUPS_FB);
   const { records: CMD_MESSAGES, isEmpty: noMessages } = useLiveRecords('command', 'message', CMD_MSGS_FB);
-  const [activeCh, setActiveCh] = cUS('c-warroom');
-  const [threadRoot, setThreadRoot] = cUS(CMD_MESSAGES.find(m => m.id === 'm1'));
-  const [activeWs, setActiveWs] = cUS('mw');
+  const { workspace } = useAuth();
+  const [activeCh, setActiveCh] = cUS(null);
+  const [threadRoot, setThreadRoot] = cUS(null);
+  const [activeWs, setActiveWs] = cUS(workspace?.id || null);
   const streamRef = cUR(null);
 
   cUE(() => {
@@ -291,8 +293,8 @@ function Command() {
       {/* Channel sidebar */}
       <aside className="cmd__side">
         <div className="cmd__side-hd">
-          <div className="cmd__side-ws">{CMD_WORKSPACES.find(w => w.id === activeWs).name}</div>
-          <div className="cmd__side-ws-sub">47 members · 3 online now</div>
+          <div className="cmd__side-ws">{workspace?.name || workspace?.candidate || 'Workspace'}</div>
+          <div className="cmd__side-ws-sub"></div>
         </div>
         <div className="cmd__side-search">
           <input placeholder="Search channels, DMs, files…" />

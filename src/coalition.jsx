@@ -108,14 +108,14 @@ const CoaTabs = ({ tab, setTab, counts = {}, cycleLabel = '', wsLabel = '' }) =>
 );
 
 /* ── Crumbs ───────────────────────────────────────── */
-const CoaCrumbs = ({ tab }) => {
+const CoaCrumbs = ({ tab, summary }) => {
   const t = COA_TABS.find(x => x.k === tab);
   return (
     <div className="coa__crumbs">
       <span>Coalition</span>
       <span>·</span>
       <span>{t?.label}</span>
-      <em style={{ marginLeft: 'auto' }}>14 of 22 committed · 9 public · 5 holding</em>
+      {summary && <em style={{ marginLeft: 'auto' }}>{summary}</em>}
     </div>
   );
 };
@@ -350,7 +350,14 @@ const Coalition2 = () => {
 
   return (
     <div className="coa">
-      <CoaCrumbs tab={tab} />
+      <CoaCrumbs
+        tab={tab}
+        summary={
+          COA_LEDGER.length
+            ? `${committed} of ${COA_LEDGER.length} committed · ${publicCount} public`
+            : ''
+        }
+      />
       <CoaKpiStrip kpis={kpis} />
       <CoaTabs
         tab={tab} setTab={setTab}

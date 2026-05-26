@@ -564,7 +564,7 @@ function BTabPress() {
         <section className="b-l-panel b-l-panel--span2">
           <div className="b-l-panel__hd">
             <div className="b-l-panel__title">Journalist roster</div>
-            <div className="b-l-panel__sub">12 of 184 shown · sortable · filter by beat</div>
+            <div className="b-l-panel__sub">sortable · filter by beat</div>
           </div>
           <div className="b-l-panel__body">
             <table className="b-press-tbl">
