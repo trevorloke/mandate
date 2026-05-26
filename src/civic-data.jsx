@@ -8,6 +8,10 @@
 const CV_MEMBER = {
   name: '', title: '', constituency: '', party: '', email: '', phone: '', office: '',
   caucusRole: '', terms: 0, photo: '',
+  // Surface fields the Civic UI reads (kept zero/empty until computed from live records).
+  initials: '', role: '', session: '',
+  caseloadOpen: 0, voteAttendance: 0,
+  allowance: { spentYTD: 0, annual: 0 },
 };
 
 const CV_ORDER_TODAY = [];

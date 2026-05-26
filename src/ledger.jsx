@@ -240,15 +240,61 @@ const Ledger2 = () => {
   const [tab, setTab] = lUS('journal');
   const [newOpen, setNewOpen] = lUS(false);
   const [toast, setToast] = lUS(null);
-  const { isEmpty: noJournal } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL);
+  const { records: journal, isEmpty: noJournal } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL);
   const { records: bills } = useLiveRecords('ledger', 'bill', []);
+  const { records: filings } = useLiveRecords('ledger', 'filing', []);
   if (noJournal) return <EmptyModule module="LEDGER" label="Ledger" accent="var(--m-ledger)" />;
 
-  const billsTotal = bills.reduce((s, b) => s + (b.amt || 0), 0);
-  const vendorCount = new Set(bills.map(b => b.vendor)).size;
+  // ── KPI strip — derived from live journal/bills/filings ──
+  // Cash on hand = posted debits to the operating cash account minus credits.
+  // (Falls back to entry-level debit/credit if splits are absent.)
+  const cashTouches = (je) => {
+    if (Array.isArray(je.splits) && je.splits.length) {
+      return je.splits
+        .filter(s => /1010/.test(s.acct || '') || /cash/i.test(s.acct || ''))
+        .reduce((n, s) => n + (s.dr || 0) - (s.cr || 0), 0);
+    }
+    if (/cash/i.test(je.account || '') || /1010/.test(je.account || '')) {
+      return (je.debit || 0) - (je.credit || 0);
+    }
+    return 0;
+  };
+  const cash = journal.filter(je => je.posted !== false).reduce((s, je) => s + cashTouches(je), 0);
+  const arBalance = journal.filter(je => /pledges receivable|1310/i.test(je.account || ''))
+    .reduce((s, je) => s + (je.debit || 0) - (je.credit || 0), 0);
+  const billsTotal = bills.filter(b => b.status !== 'paid').reduce((s, b) => s + (b.amt || 0), 0);
+  const vendorCount = new Set(bills.filter(b => b.status !== 'paid').map(b => b.vendor)).size;
+  // 90-day burn = sum of expense-side journal debits in the trailing 90d.
+  const burn90 = journal
+    .filter(je => ['bill', 'expense', 'payroll'].includes(je.type))
+    .reduce((s, je) => s + (je.debit || 0), 0);
+  // Next filing = soonest due date in the filings queue with a non-filed status.
+  const nextFiling = filings
+    .filter(f => f.status !== 'filed' && f.due)
+    .sort((a, b) => String(a.due).localeCompare(String(b.due)))[0];
+
+  const fmt$ = (n) => n != null ? `$${Math.round(n).toLocaleString()}` : '—';
   const kpis = {
     ...LEDGER_KPIS,
-    ap: { ...LEDGER_KPIS.ap, value: `$${billsTotal.toLocaleString()}`, delta: `${vendorCount} ${vendorCount === 1 ? 'vendor' : 'vendors'}` },
+    cash:   { ...LEDGER_KPIS.cash,
+              value: cash ? fmt$(cash) : '—',
+              delta: cash ? `${journal.length} entries posted` : '',
+              sub: '', tone: cash > 0 ? 'good' : (cash < 0 ? 'warn' : 'flat') },
+    q2burn: { ...LEDGER_KPIS.q2burn,
+              value: burn90 ? fmt$(burn90) : '—',
+              delta: burn90 ? 'bills · expenses · payroll' : '',
+              sub: '' },
+    ar:     { ...LEDGER_KPIS.ar,
+              value: arBalance ? fmt$(arBalance) : '—',
+              delta: '', sub: '' },
+    ap:     { ...LEDGER_KPIS.ap,
+              value: bills.length ? fmt$(billsTotal) : '—',
+              delta: bills.length ? `${vendorCount} ${vendorCount === 1 ? 'vendor' : 'vendors'}` : '',
+              sub: '' },
+    filing: { ...LEDGER_KPIS.filing,
+              value: nextFiling ? (nextFiling.period || nextFiling.id || nextFiling.regulator || '—') : '—',
+              delta: nextFiling && nextFiling.daysToFile != null ? `${nextFiling.daysToFile}d to file` : '',
+              sub: nextFiling ? (nextFiling.status || '') : '' },
   };
 
   const handlePosted = (je) => {

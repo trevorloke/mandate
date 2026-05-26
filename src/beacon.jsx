@@ -247,13 +247,23 @@ function Beacon() {
 
   if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
 
-  const ribbon = BEACON_METRICS.map(m => {
-    const mk = bizMetrics[`beacon.${m.key}`];
-    if (!mk) return m;
-    if (mk.source === 'integration') return { ...m, val: mk.display, delta: 'needs integration', sub: 'Connect a media-monitoring integration to populate.' };
-    const spark = (mk.spark && mk.spark.length >= 2) ? mk.spark : (mk.value != null ? [mk.value, mk.value] : m.spark);
-    return { ...m, val: mk.display, delta: mk.delta?.text ?? '—', spark };
-  });
+  // Ribbon: when BEACON_METRICS is configured, layer business-metrics on
+  // top. Otherwise compute a minimal live ribbon from the workspace's own
+  // posts / accounts / mentions so the strip reflects real workspace state.
+  const ribbon = BEACON_METRICS.length > 0
+    ? BEACON_METRICS.map(m => {
+        const mk = bizMetrics[`beacon.${m.key}`];
+        if (!mk) return m;
+        if (mk.source === 'integration') return { ...m, val: mk.display, delta: 'needs integration', sub: 'Connect a media-monitoring integration to populate.' };
+        const spark = (mk.spark && mk.spark.length >= 2) ? mk.spark : (mk.value != null ? [mk.value, mk.value] : m.spark);
+        return { ...m, val: mk.display, delta: mk.delta?.text ?? '—', spark };
+      })
+    : [
+        { key:'posts',    label:'Posts in workspace', val: String(BEACON_POSTS.length),    delta:'', sub:'', spark: [] },
+        { key:'queued',   label:'Queued',             val: String(BEACON_POSTS.filter(p => ['SCHEDULED','queued','DRAFT'].includes(p.status)).length), delta:'', sub:'', spark: [] },
+        { key:'accounts', label:'Accounts',           val: String(BEACON_ACCOUNTS.length), delta:'', sub:'', spark: [] },
+        { key:'mentions', label:'Mentions',           val: String(BEACON_LISTENING.length), delta:'', sub:'', spark: [] },
+      ];
 
   return (
     <div className="beacon">

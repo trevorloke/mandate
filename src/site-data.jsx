@@ -17,6 +17,10 @@ const SITE_AUDIENCE = {
   topPages: [], devices: [], sources: [], geo: [],
 };
 const SITE_DEPLOYS = [];
-const SITE_HEALTH = { uptime: '—', p95: '—', errors24h: 0, lhDesktop: 0, lhMobile: 0, checks: [] };
+const SITE_HEALTH = {
+  uptime: '—', p95: '—', errors24h: 0, checks: [],
+  // Lighthouse panel reads .lighthouse.{perf,a11y,bp,seo}.
+  lighthouse: { perf: 0, a11y: 0, bp: 0, seo: 0 },
+};
 
 export { SITE_PAGES, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_EXPERIMENTS, SITE_FORMS, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH };

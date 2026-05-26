@@ -318,14 +318,24 @@ const CoaLedger = () => {
 const Coalition2 = () => {
   const [tab, setTab] = cUS('ledger');
   const { records: COA_LEDGER, isEmpty: noEndorsements } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
+  const { records: liveAsks } = useLiveRecords('coalition', 'ask', []);
   if (noEndorsements) return <EmptyModule module="COALITION" label="Coalition" accent="var(--m-coalition)" />;
 
   const committed = COA_LEDGER.filter(r => r.status === 'committed' || r.status === 'public').length;
   const publicCount = COA_LEDGER.filter(r => r.status === 'public').length;
+  const totalReach = COA_LEDGER.reduce((s, r) => s + (Number(r.reach) || 0), 0);
+  const openAsks = liveAsks.filter(a => !['Delivered', 'Lost', 'delivered', 'lost'].includes(a.stage)).length;
+  const fmtReach = (n) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
+                       : n >= 1_000 ? `${Math.round(n / 1_000)}k`
+                       : String(n);
   const kpis = {
     ...COA_KPIS,
     committed: { ...COA_KPIS.committed, value: `${committed} / ${COA_LEDGER.length}` },
     public:    { ...COA_KPIS.public,    value: String(publicCount) },
+    reach:     { ...COA_KPIS.reach,     value: totalReach ? fmtReach(totalReach) : '—',
+                                         delta: totalReach ? 'members · followers · sum of endorser reach' : '' },
+    asks:      { ...COA_KPIS.asks,      value: String(openAsks),
+                                         delta: liveAsks.length ? `${liveAsks.length} total` : '' },
   };
 
   return (
