@@ -27,12 +27,12 @@ const GiftsSummary = () => {
       <div className="r-gs-cell">
         <div className="r-gs-cell__lbl">Average gift</div>
         <div className="r-gs-cell__val money">{t.avg}</div>
-        <div className="r-gs-cell__sub">214 YTD</div>
+        <div className="r-gs-cell__sub"></div>
       </div>
       <div className="r-gs-cell">
         <div className="r-gs-cell__lbl">Recurring · today</div>
         <div className="r-gs-cell__val">{t.recurring}</div>
-        <div className="r-gs-cell__sub">38% of count</div>
+        <div className="r-gs-cell__sub"></div>
       </div>
       <div className="r-gs-cell r-gs-cell--chart">
         <div className="r-gs-cell__lbl">Hourly · today</div>
@@ -299,9 +299,21 @@ const CohortHeatmap = () => {
 };
 
 /* ── Reports: gift mix donut ─────────────────────────────── */
+// Compute YTD raised across all live gifts. Used by donut center + goal panel.
+function useYtdRaised() {
+  const { records: gifts } = useLiveRecords('raise', 'gift', []);
+  const total = gifts.reduce((s, g) => s + (Number(g.amt || g.amount) || 0), 0);
+  const display = total >= 1_000_000 ? `$${(total/1_000_000).toFixed(2)}M`
+                : total >= 1_000     ? `$${Math.round(total/1_000)}K`
+                : total > 0          ? `$${Math.round(total).toLocaleString()}`
+                : '—';
+  return { total, display };
+}
+
 const MixDonut = () => {
   const data = RAISE_REPORT_MIX;
-  const total = data.reduce((s, d) => s + d.pct, 0);
+  const total = data.reduce((s, d) => s + d.pct, 0) || 1;
+  const ytd = useYtdRaised();
   let acc = 0;
   const r = 50, cx = 60, cy = 60, sw = 16;
   const C = 2 * Math.PI * r;
@@ -321,7 +333,7 @@ const MixDonut = () => {
             />
           );
         })}
-        <text x={cx} y={cy + 2} textAnchor="middle" fontSize="20" fontFamily="Fraunces, serif" fontWeight="500" fill="#14110a">$1.42M</text>
+        <text x={cx} y={cy + 2} textAnchor="middle" fontSize="20" fontFamily="Fraunces, serif" fontWeight="500" fill="#14110a">{ytd.display}</text>
         <text x={cx} y={cy + 18} textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono, monospace" fill="#8c8770" letterSpacing="0.1em">RAISED YTD</text>
       </svg>
       <div className="r-donut-legend">
@@ -411,6 +423,7 @@ const Pyramid = () => {
 /* ── Reports: page ─────────────────────────────────────────── */
 const RaiseReports = () => {
   const [range, setRange] = glrUS('ytd');
+  const ytd = useYtdRaised();
   return (
     <>
       <div className="r-sec">
@@ -436,11 +449,9 @@ const RaiseReports = () => {
               <div className="r-panel__title">Cumulative raised vs goal</div>
               <div className="r-panel__sub">Cycle to date · monthly</div>
             </div>
-            <div className="r-panel__caption">Tracking 96% of pace. Recurring backbone is holding the gap; major-gift close rate is the swing factor for Q2.</div>
+            <div className="r-panel__caption">Set a cycle goal in settings to track pace and gap.</div>
             <div className="r-goal-stat">
-              <div className="r-goal-stat__big">$1.42M<em>of $1.48M target</em></div>
-              <div className="r-goal-stat__delta warn">−$60K vs goal</div>
-              <div className="r-goal-stat__delta">+18.4% vs same period last cycle</div>
+              <div className="r-goal-stat__big">{ytd.display}<em>raised this cycle</em></div>
             </div>
             <GoalChart />
           </div>
@@ -481,7 +492,7 @@ const RaiseReports = () => {
               <div className="r-panel__title">Officer leaderboard</div>
               <div className="r-panel__sub">Major-gift officers</div>
             </div>
-            <div className="r-panel__caption">Marcus's pipeline is bigger; Lila's close rate is higher. Pair them on Tier-1 prospects.</div>
+            <div className="r-panel__caption">Officer performance summary updates as gifts post.</div>
             <Leaderboard />
           </div>
 
@@ -491,7 +502,7 @@ const RaiseReports = () => {
               <div className="r-panel__title">Average gift over time</div>
               <div className="r-panel__sub">Monthly · all sources</div>
             </div>
-            <div className="r-panel__caption">$214 in April — highest in the cycle. Story-led emails outperform issue-only by ~22%.</div>
+            <div className="r-panel__caption">Avg gift trends as you record more donations.</div>
             <AvgGiftArea />
           </div>
 

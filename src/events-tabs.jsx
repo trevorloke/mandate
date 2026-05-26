@@ -193,7 +193,7 @@ function EvDetailTab() {
     <div className="ev2__detail">
       <div>
         <div className="ev2__d-hero">
-          <div className="ev2__d-eyebrow">{EV_TYPES[e.type].label} · Saturday · 02 May 2026</div>
+          <div className="ev2__d-eyebrow">{EV_TYPES[e.type]?.label || e.type}{e.date ? ' · ' + new Date(e.date).toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }) : ''}</div>
           <div className="ev2__d-h1">{e.title}</div>
           <div className="ev2__d-sub">{e.subtitle}</div>
           <div className="ev2__d-stamp">Sold ▸ 91%</div>

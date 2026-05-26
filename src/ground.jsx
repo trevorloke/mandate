@@ -2,6 +2,7 @@ import React from 'react';
 import './ground.css';
 import { GROUND_VOCAB, UNIVERSE_DEFAULT, PDS, RIVER, LANDMARKS, VOTERS, CANVASSERS, SHIFTS, SCRIPTS, MODES } from './ground-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import { useAuth } from './auth/AuthContext';
 import EmptyModule from './EmptyModule';
 
 // Mandate 2.0 — Ground module (Desk + Field tabs)
@@ -587,8 +588,10 @@ function StreetScreen({ mode }) {
 
 // ── Main Ground page
 function Ground() {
+  const { workspace } = useAuth();
   const { records: voters, isEmpty: noVoters } = useLiveRecords('ground', 'voter', VOTERS);
   const { records: scripts } = useLiveRecords('ground', 'script', SCRIPTS);
+  const { records: canvassersLive } = useLiveRecords('ground', 'canvasser', CANVASSERS);
   const [tab, setTab] = gUS('desk'); // desk | field | script
   const [cuts, setCuts] = gUS(UNIVERSE_DEFAULT);
   const [activePd, setActivePd] = gUS('PD-009');
@@ -604,7 +607,10 @@ function Ground() {
 
   // Filter voters to active PD for the list
   const filtered = gUM(() => voters.filter(v => v.pd === activePd || activePd === 'ALL').slice(0, 18), [activePd, voters]);
-  const totalInUniverse = 1420; // from the sentence, PD-009
+  // Universe count derives from voters matching the active PD (or all voters when ALL).
+  const totalInUniverse = activePd === 'ALL' ? voters.length : voters.filter(v => v.pd === activePd).length;
+  const liveCanvassers = canvassersLive.filter(c => c.status === 'live').length;
+  const wsLabel = workspace?.name || workspace?.candidate || 'Workspace';
 
   const toggleSel = (id) => setSelected(prev => {
     const n = new Set(prev);
@@ -619,8 +625,8 @@ function Ground() {
         <div className={'ground__tab ' + (tab === 'field' ? 'ground__tab--active' : '')} onClick={() => setTab('field')}>FIELD · CANVASSER APP</div>
         <div className={'ground__tab ' + (tab === 'script' ? 'ground__tab--active' : '')} onClick={() => setTab('script')}>SCRIPTS</div>
         <div className="ground__tabs-right">
-          <span><span className="live-dot"/> 12 CANVASSERS LIVE</span>
-          <span>PATH · Ground · Meridian West</span>
+          <span><span className="live-dot"/> {liveCanvassers} {liveCanvassers === 1 ? 'CANVASSER' : 'CANVASSERS'} LIVE</span>
+          <span>PATH · Ground · {wsLabel}</span>
         </div>
       </div>
 

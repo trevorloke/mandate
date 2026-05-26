@@ -123,9 +123,9 @@ function SiteBuilderTab() {
           {/* Hero (selected) */}
           <div className="site2__c-section" data-selected="">
             <span className="site2__c-tag">Hero · selected</span>
-            <div className="site2__c-eyebrow">Vote · May 12 · Vancouver-Mount Pleasant</div>
-            <h1 className="site2__c-h1">A government that finally builds, listens, and pays its way.</h1>
-            <p className="site2__c-sub">Twelve plans. One mandate. Funded line-by-line, costed by the legislature, written for the next generation, not the next news cycle.</p>
+            <div className="site2__c-eyebrow">Hero copy</div>
+            <h1 className="site2__c-h1">Edit this hero in the page builder.</h1>
+            <p className="site2__c-sub">Headline, subhead, and CTA buttons are sourced from the selected page record.</p>
             <div className="site2__c-cta">
               <span className="site2__c-btn primary">Chip in $10</span>
               <span className="site2__c-btn ghost">Volunteer</span>
@@ -183,7 +183,7 @@ function SiteBuilderTab() {
               <h4 className="site2__prop-h">Experiment</h4>
               <div className="site2__prop-row"><span className="k">test</span><span className="v">x-hero · running</span></div>
               <div className="site2__prop-row"><span className="k">variants</span><span className="v">A / B (50/50)</span></div>
-              <div className="site2__prop-row"><span className="k">conf.</span><span className="v">94%</span></div>
+              <div className="site2__prop-row"><span className="k">conf.</span><span className="v">—</span></div>
             </div>
           </div>
         </div>

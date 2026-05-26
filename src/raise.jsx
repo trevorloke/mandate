@@ -319,10 +319,16 @@ const DonorTable = ({ donors }) => (
   </table>
 );
 
-const GiftMix = () => (
+const GiftMix = () => {
+  const { records: gifts } = useLiveRecords('raise', 'gift', []);
+  const ytdTotal = gifts.reduce((s, g) => s + (Number(g.amt || g.amount) || 0), 0);
+  const fmtBig = (n) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(2)}M`
+                     : n >= 1_000 ? `$${Math.round(n/1_000)}K`
+                     : `$${Math.round(n).toLocaleString()}`;
+  return (
   <div className="r-mix">
     <div className="r-mix__h">Gift mix · YTD</div>
-    <div className="r-mix__big">$1.42M<em>raised</em></div>
+    <div className="r-mix__big">{ytdTotal ? fmtBig(ytdTotal) : '—'}<em>raised</em></div>
     <div className="r-mix__bar">
       {RAISE_GIFTMIX.map(g => (
         <div key={g.id} style={{ flexBasis: `${g.pct}%`, background: g.color }}></div>
@@ -339,7 +345,8 @@ const GiftMix = () => (
       ))}
     </div>
   </div>
-);
+  );
+};
 
 /* ── Drawer ── */
 const ProspectDrawer = ({ prospect, onClose, onLogGift }) => {

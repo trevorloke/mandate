@@ -49,7 +49,7 @@ function Civic2() {
 
         <div className="cv2__kpis">
           <div className="cv2__kpi">
-            <span className="cv2__kpi-v">{CV_MEMBER.caseloadOpen}</span>
+            <span className="cv2__kpi-v">{CV_CASES.filter(c => c.status !== 'closed' && c.status !== 'resolved').length}</span>
             <span className="cv2__kpi-k">open cases</span>
           </div>
           <div className="cv2__kpi">
@@ -117,8 +117,8 @@ function CvToday() {
     <div className="cv2__today">
       <div className="cv2__card cv2__today-order">
         <div className="cv2__card-title">
-          <span>Order of the day · Wed Mar 11</span>
-          <span className="cv2__card-title-r">7 entries · session day 47</span>
+          <span>Order of the day · {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+          <span className="cv2__card-title-r">{CV_ORDER_TODAY.length} {CV_ORDER_TODAY.length === 1 ? 'entry' : 'entries'}</span>
         </div>
         <div className="cv2__order">
           {CV_ORDER_TODAY.map(o => (

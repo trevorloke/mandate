@@ -162,7 +162,7 @@ function CvCommunity() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cv-accent-2)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-        <span>Constituency calendar · week of Mar 9</span>
+        <span>Constituency calendar · week of {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
         <span>{totalBooked}/{totalCap} attendees · {Math.round(totalBooked/totalCap*100)}% utilization</span>
       </div>
 

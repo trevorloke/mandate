@@ -78,7 +78,22 @@ const LEDGER_TABS = [
   { k:'reports',    label:'REPORTS',    count:'',       hint:'P&L · runway' },
 ];
 
-const LedgerTabs = ({ tab, setTab, onNewEntry }) => (
+// Calendar-quarter helper: returns the period label and human range for today.
+function currentQuarter() {
+  const now = new Date();
+  const month = now.getUTCMonth();
+  const year = now.getUTCFullYear();
+  const q = Math.floor(month / 3) + 1;
+  const startMonth = (q - 1) * 3;
+  const endMonth = startMonth + 2;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const endDay = new Date(Date.UTC(year, endMonth + 1, 0)).getUTCDate();
+  return { range: `${months[startMonth]} 1 – ${months[endMonth]} ${endDay}`, label: `Q${q} ${year}` };
+}
+
+const LedgerTabs = ({ tab, setTab, onNewEntry }) => {
+  const period = currentQuarter();
+  return (
   <div className="ledger__tabs">
     {LEDGER_TABS.map(t => (
       <button
@@ -94,12 +109,13 @@ const LedgerTabs = ({ tab, setTab, onNewEntry }) => (
     <div className="ledger__tabs-spacer" />
     <div className="ledger__period">
       <span>Period</span>
-      <b>Apr 1 – Jun 30</b>
-      <em>Q2 2026</em>
+      <b>{period.range}</b>
+      <em>{period.label}</em>
     </div>
     <button className="ledger__compose" onClick={onNewEntry}>+ NEW ENTRY</button>
   </div>
-);
+  );
+};
 
 /* ── Journal — register view ─────────────────────── */
 const LedgerJournal = ({ onPick }) => {

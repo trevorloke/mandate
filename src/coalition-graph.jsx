@@ -212,11 +212,7 @@ const CoaGraph = () => {
             </g>
           </svg>
 
-          {/* Floating annotations */}
-          <div className="cg__ann cg__ann--tl">
-            <div className="cg__ann-eyebrow">CONTESTED</div>
-            <div>BEC also being courted by Vance — decision <b>Apr 30</b></div>
-          </div>
+          {/* Floating annotations are populated from live coalition records when present. */}
           <div className="cg__ann cg__ann--br">
             <div className="cg__ann-eyebrow">CLUSTERS</div>
             <div>Labour federation · 7 nodes, all linked through BCFL</div>
@@ -264,8 +260,7 @@ const CoaGraph = () => {
                 </div>
               ) : sel.kind === 'opp' ? (
                 <div className="cg__d-section">
-                  <div className="cg__d-h">VANCE — OPPOSITION CLUSTER</div>
-                  <p>2 confirmed ties (BREA hostile, BEC contested). Watch BEC closely — decision Apr 30. BREA Vance endorsement is locked.</p>
+                  <div className="cg__d-h">OPPOSITION CLUSTER</div>
                 </div>
               ) : sel.kind === 'person' ? (
                 <div className="cg__d-section">

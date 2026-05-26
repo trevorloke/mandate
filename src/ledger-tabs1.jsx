@@ -117,10 +117,10 @@ const LedgerChart = () => {
             </div>
 
             <div className="lcoa__detail-stats">
-              <div><span>Last entry</span><b>04-22 · JE-3142</b></div>
-              <div><span>Avg / week</span><b>$4,820</b></div>
-              <div><span>YoY</span><b className="up">+18.4%</b></div>
-              <div><span>vs budget</span><b className={pickedAcct.kind === 'exp' ? 'flat' : 'up'}>+2.1%</b></div>
+              <div><span>Last entry</span><b>—</b></div>
+              <div><span>Avg / week</span><b>—</b></div>
+              <div><span>YoY</span><b>—</b></div>
+              <div><span>vs budget</span><b>—</b></div>
             </div>
 
             <div className="lcoa__detail-h">RECENT ACTIVITY</div>

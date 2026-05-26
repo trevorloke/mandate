@@ -87,8 +87,8 @@ const LedgerCompliance = () => {
         </div>
         <div className="lcomp__stat">
           <span>NEXT REVIEW</span>
-          <b>May 8</b>
-          <em>quarterly · Pacific Tax LLP</em>
+          <b>—</b>
+          <em></em>
         </div>
       </div>
 

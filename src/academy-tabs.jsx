@@ -40,11 +40,11 @@ function AcLibrary({ onPickCourse, onPickArticle }) {
             ))}
           </div>
           <div className="lyc-feat__progress">
-            <div className="lyc-feat__progress-bar"><span style={{width:'32%'}}></span></div>
-            <div className="lyc-feat__progress-meta"><span>32% · 1h 22m left</span><span>9 chapters</span></div>
+            <div className="lyc-feat__progress-bar"><span style={{width:'0%'}}></span></div>
+            <div className="lyc-feat__progress-meta"><span>—</span><span></span></div>
           </div>
           <div className="lyc-feat__cta">
-            <button className="lyc-feat__cta-btn">Resume · Chapter 4</button>
+            <button className="lyc-feat__cta-btn">Start course</button>
             <button className="lyc-feat__cta-btn ghost">Save</button>
           </div>
         </aside>
@@ -53,7 +53,7 @@ function AcLibrary({ onPickCourse, onPickArticle }) {
       {/* COURSE GRID */}
       <div className="lyc__sect">
         <div className="lyc__sect-h">Required for Phase III</div>
-        <div className="lyc__sect-meta">3 modules · 5h 18m total · cohort closes May 1</div>
+        <div className="lyc__sect-meta">{ACAD_COURSES.filter(c => c.required).length} {ACAD_COURSES.filter(c => c.required).length === 1 ? 'module' : 'modules'}</div>
       </div>
       <div className="lyc__grid">
         {ACAD_COURSES.filter(c => c.required).map(c => <CourseCard key={c.id} c={c} onPick={onPickCourse} />)}

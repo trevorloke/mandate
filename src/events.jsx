@@ -26,15 +26,17 @@ function Events2() {
   if (noEvents) return <EmptyModule module="EVENTS" label="Events" accent="var(--m-events)" />;
 
   const upcoming = EV_LIST.filter(e => e.attended === null).length;
-  const totalRsvp = EV_LIST.filter(e => e.attended === null).reduce((s,e)=>s+e.rsvped, 0);
-  const totalShifts = EV_LIST.filter(e=>e.attended===null).reduce((s,e)=>s+e.shifts,0);
-  const totalShiftsFilled = EV_LIST.filter(e=>e.attended===null).reduce((s,e)=>s+e.shiftsFilled,0);
-  const ticketRev = 210000;
+  const totalRsvp = EV_LIST.filter(e => e.attended === null).reduce((s,e)=>s+(e.rsvped||0), 0);
+  const totalShifts = EV_LIST.filter(e=>e.attended===null).reduce((s,e)=>s+(e.shifts||0),0);
+  const totalShiftsFilled = EV_LIST.filter(e=>e.attended===null).reduce((s,e)=>s+(e.shiftsFilled||0),0);
+  // Ticket revenue: sum of revenue field on live events when present.
+  const ticketRev = EV_LIST.reduce((s,e)=>s+(Number(e.ticketRev)||0),0);
+  const fillPct = totalShifts > 0 ? Math.round((totalShiftsFilled/totalShifts)*100) : 0;
 
   const tabBadges = {
     schedule: String(upcoming),
-    calendar: 'May',
-    shifts:   `${Math.round((totalShiftsFilled/totalShifts)*100)}%`,
+    calendar: '',
+    shifts:   `${fillPct}%`,
     venues:   String(EV_VENUES.length),
     hosts:    String(EV_HOSTS.filter(h=>h.status==='active').length),
   };
@@ -47,7 +49,7 @@ function Events2() {
             <span className="ev2__title">The Programme</span>
             <span className="ev2__title-deco"></span>
           </div>
-          <div className="ev2__title-sub">Apr 28 → E-Day · 14 days · {upcoming} events · {EV_VENUES.length} venues on file</div>
+          <div className="ev2__title-sub">{upcoming} upcoming · {EV_VENUES.length} {EV_VENUES.length === 1 ? 'venue' : 'venues'} on file</div>
         </div>
         <div className="ev2__metrics">
           <div className="ev2__metric"><span className="ev2__metric-v">{upcoming}</span><span className="ev2__metric-k">upcoming</span></div>

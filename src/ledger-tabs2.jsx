@@ -301,10 +301,10 @@ const LedgerReports = () => {
             <em>actual + 8wk projection</em>
           </div>
           <div className="lrpt__runway-stats">
-            <div><span>CURRENT</span><b>$614,820</b></div>
-            <div><span>8wk projected</span><b>$348,800</b></div>
-            <div><span>WEEKLY BURN</span><b>$33,200</b></div>
-            <div><span>RUNWAY</span><b className="warn">11 wk</b></div>
+            <div><span>CURRENT</span><b>—</b></div>
+            <div><span>8wk projected</span><b>—</b></div>
+            <div><span>WEEKLY BURN</span><b>—</b></div>
+            <div><span>RUNWAY</span><b>—</b></div>
           </div>
           <svg viewBox={`0 0 ${W} ${H}`} className="lrpt__runway-svg">
             {/* gridlines */}
