@@ -4,6 +4,7 @@ import './coalition-ledger.css';
 import { COA_KPIS, COA_LEDGER as COA_LEDGER_FB } from './coalition-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
+import { useAuth } from './auth/AuthContext';
 import EmptyModule from './EmptyModule';
 import { Shell } from './shell';
 import { CoaGraph } from './coalition-graph';
@@ -68,34 +69,40 @@ const CoaKpiStrip = ({ kpis }) => {
 
 /* ── Tabs ─────────────────────────────────────────── */
 const COA_TABS = [
-  { k:'ledger',    label:'LEDGER',    count:'14/22', hint:'endorsements' },
-  { k:'graph',     label:'GRAPH',     count:'',      hint:'relationships' },
-  { k:'directory', label:'DIRECTORY', count:22,      hint:'org files' },
-  { k:'asks',      label:'ASKS',      count:18,      hint:'pipeline' },
-  { k:'ops',       label:'OPS',       count:7,       hint:'joint operations' },
-  { k:'comms',     label:'COMMS',     count:18,      hint:'log · 7 days' },
-  { k:'events',    label:'EVENTS',    count:11,      hint:'co-hosting' },
+  { k:'ledger',    label:'LEDGER',    hint:'endorsements' },
+  { k:'graph',     label:'GRAPH',     hint:'relationships' },
+  { k:'directory', label:'DIRECTORY', hint:'org files' },
+  { k:'asks',      label:'ASKS',      hint:'pipeline' },
+  { k:'ops',       label:'OPS',       hint:'joint operations' },
+  { k:'comms',     label:'COMMS',     hint:'log' },
+  { k:'events',    label:'EVENTS',    hint:'co-hosting' },
 ];
 
-const CoaTabs = ({ tab, setTab }) => (
+const CoaTabs = ({ tab, setTab, counts = {}, cycleLabel = '', wsLabel = '' }) => (
   <div className="coa__tabs">
-    {COA_TABS.map(t => (
-      <button
-        key={t.k}
-        className={`coa__tab ${tab === t.k ? 'on' : ''}`}
-        onClick={() => setTab(t.k)}
-      >
-        <span className="coa__tab-lbl">{t.label}</span>
-        {t.count !== '' && <span className="coa__tab-cnt">{t.count}</span>}
-        <em className="coa__tab-hint">{t.hint}</em>
-      </button>
-    ))}
+    {COA_TABS.map(t => {
+      const c = counts[t.k];
+      const cntStr = c == null ? '' : String(c);
+      return (
+        <button
+          key={t.k}
+          className={`coa__tab ${tab === t.k ? 'on' : ''}`}
+          onClick={() => setTab(t.k)}
+        >
+          <span className="coa__tab-lbl">{t.label}</span>
+          {cntStr !== '' && <span className="coa__tab-cnt">{cntStr}</span>}
+          <em className="coa__tab-hint">{t.hint}</em>
+        </button>
+      );
+    })}
     <div className="coa__tabs-spacer" />
-    <div className="coa__period">
-      <span>Cycle</span>
-      <b>2026 General</b>
-      <em>Meridian West</em>
-    </div>
+    {(cycleLabel || wsLabel) && (
+      <div className="coa__period">
+        <span>Cycle</span>
+        {cycleLabel && <b>{cycleLabel}</b>}
+        {wsLabel && <em>{wsLabel}</em>}
+      </div>
+    )}
     <button className="coa__compose">+ NEW ASK</button>
   </div>
 );
@@ -126,7 +133,7 @@ const STATUS_LABEL = {
 const CoaLedger = () => {
   const [filter, setFilter] = cUS('all');
   const [q, setQ] = cUS('');
-  const [openId, setOpenId] = cUS('EN-001');
+  const [openId, setOpenId] = cUS(null);
   const { records: COA_LEDGER } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
 
   const rows = COA_LEDGER.filter(r => {
@@ -316,9 +323,12 @@ const CoaLedger = () => {
 
 /* ── Main shell ───────────────────────────────────── */
 const Coalition2 = () => {
+  const { workspace } = useAuth();
   const [tab, setTab] = cUS('ledger');
   const { records: COA_LEDGER, isEmpty: noEndorsements } = useLiveRecords('coalition', 'endorsement', COA_LEDGER_FB);
   const { records: liveAsks } = useLiveRecords('coalition', 'ask', []);
+  const { records: liveOrgs } = useLiveRecords('coalition', 'org', []);
+  const { records: liveComms } = useLiveRecords('coalition', 'comm', []);
   if (noEndorsements) return <EmptyModule module="COALITION" label="Coalition" accent="var(--m-coalition)" />;
 
   const committed = COA_LEDGER.filter(r => r.status === 'committed' || r.status === 'public').length;
@@ -342,7 +352,17 @@ const Coalition2 = () => {
     <div className="coa">
       <CoaCrumbs tab={tab} />
       <CoaKpiStrip kpis={kpis} />
-      <CoaTabs tab={tab} setTab={setTab} />
+      <CoaTabs
+        tab={tab} setTab={setTab}
+        counts={{
+          ledger:    `${committed}/${COA_LEDGER.length}`,
+          directory: liveOrgs.length || null,
+          asks:      liveAsks.length || null,
+          comms:     liveComms.length || null,
+        }}
+        cycleLabel={workspace?.phase || ''}
+        wsLabel={workspace?.name || workspace?.candidate || ''}
+      />
 
       <div className="coa__body">
         {tab === 'ledger'    && <CoaLedger />}

@@ -262,7 +262,7 @@ const LedgerBills = () => {
   const bills = LEDGER_BILLS.filter(b => filter === 'all' || b.status === filter);
   const total = bills.reduce((a, b) => a + b.amt, 0);
   const dueSoon = LEDGER_BILLS.filter(b => {
-    const d = new Date(b.due); const now = new Date('2026-04-22');
+    const d = new Date(b.due); const now = new Date();
     return (d - now) < 7 * 86400000;
   });
   const dueSoon$ = dueSoon.reduce((a, b) => a + b.amt, 0);
@@ -273,7 +273,7 @@ const LedgerBills = () => {
   const pickedTotal = bills.filter(b => picked.includes(b.id)).reduce((a, b) => a + b.amt, 0);
 
   const daysUntil = (d) => {
-    const dt = new Date(d); const now = new Date('2026-04-22');
+    const dt = new Date(d); const now = new Date();
     return Math.round((dt - now) / 86400000);
   };
 

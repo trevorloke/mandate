@@ -14,7 +14,7 @@ const CMD_MSGS_FB = [...CMD_MESSAGES_FB, ...CMD_THREAD.map(t => ({ ...t, parentI
 function CmdItem({ it, active, onClick }) {
   const cls = ['cmd__item'];
   if (it.type === 'dm') cls.push('cmd__item--dm');
-  if (it.name === 'Marcus Hale') cls.push('cmd__item--mla');
+  if (it.role === 'mla' || it.candidate) cls.push('cmd__item--mla');
   if (it.urgent) cls.push('cmd__item--urgent');
   if (it.live) cls.push('cmd__item--live-huddle');
   if (active) cls.push('cmd__item--active');

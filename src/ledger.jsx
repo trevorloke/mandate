@@ -68,14 +68,14 @@ const LedgerKpiStrip = ({ kpis }) => {
 
 /* ── Tabs ─────────────────────────────────────────── */
 const LEDGER_TABS = [
-  { k:'journal',    label:'JOURNAL',    count:24,       hint:'register' },
-  { k:'chart',      label:'BOOKS',      count:42,       hint:'accounts' },
-  { k:'reconcile',  label:'RECONCILE',  count:'3 OPEN', hint:'bank' },
-  { k:'bills',      label:'BILLS',      count:9,        hint:'AP' },
-  { k:'filings',    label:'FILINGS',    count:5,        hint:'regulators' },
-  { k:'compliance', label:'COMPLIANCE', count:'4 FLAG', hint:'rules · audit' },
-  { k:'assets',     label:'ASSETS',     count:287,      hint:'inventory' },
-  { k:'reports',    label:'REPORTS',    count:'',       hint:'P&L · runway' },
+  { k:'journal',    label:'JOURNAL',    hint:'register' },
+  { k:'chart',      label:'BOOKS',      hint:'accounts' },
+  { k:'reconcile',  label:'RECONCILE',  hint:'bank' },
+  { k:'bills',      label:'BILLS',      hint:'AP' },
+  { k:'filings',    label:'FILINGS',    hint:'regulators' },
+  { k:'compliance', label:'COMPLIANCE', hint:'rules · audit' },
+  { k:'assets',     label:'ASSETS',     hint:'inventory' },
+  { k:'reports',    label:'REPORTS',    hint:'P&L · runway' },
 ];
 
 // Calendar-quarter helper: returns the period label and human range for today.
@@ -91,21 +91,25 @@ function currentQuarter() {
   return { range: `${months[startMonth]} 1 – ${months[endMonth]} ${endDay}`, label: `Q${q} ${year}` };
 }
 
-const LedgerTabs = ({ tab, setTab, onNewEntry }) => {
+const LedgerTabs = ({ tab, setTab, onNewEntry, counts = {} }) => {
   const period = currentQuarter();
   return (
   <div className="ledger__tabs">
-    {LEDGER_TABS.map(t => (
+    {LEDGER_TABS.map(t => {
+      const c = counts[t.k];
+      const cntStr = c == null ? '' : String(c);
+      return (
       <button
         key={t.k}
         className={`ledger__tab ${tab === t.k ? 'on' : ''}`}
         onClick={() => setTab(t.k)}
       >
         <span className="ledger__tab-lbl">{t.label}</span>
-        {t.count !== '' && <span className="ledger__tab-cnt">{t.count}</span>}
+        {cntStr !== '' && <span className="ledger__tab-cnt">{cntStr}</span>}
         <em className="ledger__tab-hint">{t.hint}</em>
       </button>
-    ))}
+      );
+    })}
     <div className="ledger__tabs-spacer" />
     <div className="ledger__period">
       <span>Period</span>
@@ -324,7 +328,15 @@ const Ledger2 = () => {
   return (
     <div className="ledger">
       <LedgerKpiStrip kpis={kpis} />
-      <LedgerTabs tab={tab} setTab={setTab} onNewEntry={() => setNewOpen(true)} />
+      <LedgerTabs
+        tab={tab} setTab={setTab}
+        onNewEntry={() => setNewOpen(true)}
+        counts={{
+          journal: journal.length || null,
+          bills:   bills.filter(b => b.status !== 'paid').length || null,
+          filings: filings.length || null,
+        }}
+      />
 
       <div className="ledger__body">
         {tab === 'journal' && <LedgerJournal />}

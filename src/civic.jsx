@@ -11,14 +11,14 @@ import { TODAY } from './data';
 const { useState: cvUS, useMemo: cvUM } = React;
 
 const CV_TABS = [
-  { k: 'today',     label: 'Today',         badge: 'live' },
-  { k: 'bills',     label: 'Bills',         badge: '7' },
-  { k: 'cases',     label: 'Casework',      badge: '47' },
-  { k: 'hansard',   label: 'Hansard',       badge: 'wk' },
-  { k: 'committees',label: 'Committees',    badge: '3' },
+  { k: 'today',     label: 'Today' },
+  { k: 'bills',     label: 'Bills' },
+  { k: 'cases',     label: 'Casework' },
+  { k: 'hansard',   label: 'Hansard' },
+  { k: 'committees',label: 'Committees' },
   { k: 'promises',  label: 'Promises' },
   { k: 'community', label: 'Community' },
-  { k: 'letters',   label: 'Correspondence', badgeWarn: '1 new' },
+  { k: 'letters',   label: 'Correspondence' },
   { k: 'spend',     label: 'Allowance' },
   { k: 'staff',     label: 'Staff' },
   { k: 'trends',    label: 'Insights' },
@@ -76,17 +76,22 @@ function Civic2() {
         </div>
       </div>
 
-      {/* ─── Tabs ─── */}
+      {/* ─── Tabs (badges from live record counts) ─── */}
       <div className="cv2__tabs">
-        {CV_TABS.map(t => (
-          <button key={t.k}
-                  className={'cv2__tab' + (tab === t.k ? ' is-on' : '')}
-                  onClick={() => setTab(t.k)}>
-            {t.label}
-            {t.badge && <span className="cv2__tab-badge">{t.badge}</span>}
-            {t.badgeWarn && <span className="cv2__tab-badge warn">{t.badgeWarn}</span>}
-          </button>
-        ))}
+        {CV_TABS.map(t => {
+          const badge = t.k === 'bills'   ? (CV_BILLS.length    || null)
+                      : t.k === 'cases'   ? (CV_CASES.filter(c => c.status !== 'closed' && c.status !== 'resolved').length || null)
+                      : t.k === 'promises'? (CV_PROMISES.length || null)
+                      : null;
+          return (
+            <button key={t.k}
+                    className={'cv2__tab' + (tab === t.k ? ' is-on' : '')}
+                    onClick={() => setTab(t.k)}>
+              {t.label}
+              {badge && <span className="cv2__tab-badge">{badge}</span>}
+            </button>
+          );
+        })}
       </div>
 
       {/* ─── Body ─── */}

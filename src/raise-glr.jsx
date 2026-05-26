@@ -17,12 +17,12 @@ const GiftsSummary = () => {
       <div className="r-gs-cell">
         <div className="r-gs-cell__lbl">Today · gifts</div>
         <div className="r-gs-cell__val">{t.count}</div>
-        <div className="r-gs-cell__sub">3.1/min last hour</div>
+        <div className="r-gs-cell__sub"></div>
       </div>
       <div className="r-gs-cell">
         <div className="r-gs-cell__lbl">Today · raised</div>
         <div className="r-gs-cell__val money">{t.total}</div>
-        <div className="r-gs-cell__sub">+18% vs avg Tue</div>
+        <div className="r-gs-cell__sub"></div>
       </div>
       <div className="r-gs-cell">
         <div className="r-gs-cell__lbl">Average gift</div>

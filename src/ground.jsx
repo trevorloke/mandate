@@ -143,8 +143,8 @@ function GroundMap({ activePd, onPickPd, shade }) {
         />
       ))}
 
-      {/* PD labels — only a few key ones */}
-      {pds.filter(pd => pd.target || ['PD-001','PD-007','PD-015','PD-017','PD-021'].includes(pd.id)).map(pd => {
+      {/* PD labels — only target PDs (set pd.target on the record) */}
+      {pds.filter(pd => pd.target).map(pd => {
         // centroid-ish
         const pts = pd.points.split(' ').map(p => p.split(',').map(Number));
         const cx = pts.reduce((a,p) => a+p[0], 0) / pts.length;
@@ -554,7 +554,7 @@ function TextScreen({ mode }) {
         </div>
       </div>
       <div style={{ display:'flex', gap:6, marginTop: 14, flexWrap:'wrap' }}>
-        {['Warm intro','Bill 14 ask','Rally RSVP','Petition','GOTV'].map(m => (
+        {['Warm intro','Issue ask','Rally RSVP','Petition','GOTV'].map(m => (
           <span key={m} style={{ fontFamily:'var(--font-mono)', fontSize:10, padding:'4px 8px', border:'1px solid #1a1814', borderRadius: 2 }}>{m}</span>
         ))}
       </div>
@@ -594,9 +594,9 @@ function Ground() {
   const { records: canvassersLive } = useLiveRecords('ground', 'canvasser', CANVASSERS);
   const [tab, setTab] = gUS('desk'); // desk | field | script
   const [cuts, setCuts] = gUS(UNIVERSE_DEFAULT);
-  const [activePd, setActivePd] = gUS('PD-009');
+  const [activePd, setActivePd] = gUS('ALL');
   const [shade, setShade] = gUS('support'); // support | turnout | progress
-  const [openVoter, setOpenVoter] = gUS('V-1000');
+  const [openVoter, setOpenVoter] = gUS(null);
   const [selected, setSelected] = gUS(new Set());
   const [scriptOpen, setScriptOpen] = gUS(false);
   const [activeScriptId, setActiveScriptId] = gUS(null);

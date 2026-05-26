@@ -205,11 +205,13 @@ function BSovChart({ data }) {
   const W = 320, H = 140, P = 18;
   const xs = (i) => P + (i / (data.length - 1)) * (W - P*2);
   const ys = (v) => H - P - (v / 50) * (H - P*2);
-  const lines = [
-    { key:'hale', label:'Hale', color:'var(--b-accent)', dash:false },
-    { key:'vance', label:'Vance', color:'var(--text-2)', dash:true },
-    { key:'prem',  label:'Premier', color:'var(--text-3)', dash:true },
-  ];
+  // Lines render from data series when present (one per non-x key); empty data → empty chart.
+  const lines = (data && data.length && data[0] && typeof data[0] === 'object')
+    ? Object.keys(data[0]).filter(k => k !== 'x' && k !== 'label').map((k, i) => ({
+        key: k, label: k, dash: i > 0,
+        color: i === 0 ? 'var(--b-accent)' : (i === 1 ? 'var(--text-2)' : 'var(--text-3)'),
+      }))
+    : [];
   return (
     <div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:'140px', display:'block' }}>
@@ -416,7 +418,7 @@ function BTabBoost() {
         <div className="b-boost__stat">
           <div className="b-boost__stat-lbl">Paid impressions</div>
           <div className="b-boost__stat-val">{(totalImp/1000).toFixed(0)}K</div>
-          <div className="b-boost__stat-sub">+34% vs prior week</div>
+          <div className="b-boost__stat-sub"></div>
         </div>
         <div className="b-boost__stat">
           <div className="b-boost__stat-lbl">Conversions</div>

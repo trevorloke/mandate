@@ -15,10 +15,10 @@ function SitePagesTab() {
       <aside className="site2__pages-aside">
         <h3 className="site2__aside-h">Sitemap · {SITE_PAGES.length} routes</h3>
         <div className="site2__sitemap">
-          {SITE_PAGES.map(p => (
-            <div key={p.id} className={`site2__sitemap-row ${p.id==='p-home'?'is-on':''}`}>
+          {SITE_PAGES.map((p, i) => (
+            <div key={p.id} className={`site2__sitemap-row ${i === 0 ? 'is-on' : ''}`}>
               <span className="site2__sitemap-route">{p.route}</span>
-              <span className="site2__sitemap-views">{p.views7d.toLocaleString()}</span>
+              <span className="site2__sitemap-views">{(p.views7d || 0).toLocaleString()}</span>
             </div>
           ))}
         </div>

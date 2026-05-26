@@ -20,7 +20,7 @@ const CoaAsks = () => {
   const totalDue14 = asks.filter(a => {
     if (a.stage === 3 || a.stage === 4) return false;
     const d = new Date(a.due);
-    const days = (d - new Date('2026-04-22'))/(1000*60*60*24);
+    const days = (d - new Date())/(1000*60*60*24);
     return days >= 0 && days <= 14;
   }).length;
 
@@ -49,7 +49,7 @@ const CoaAsks = () => {
             <div className="ca__col-body">
               {asks.filter(a=>a.stage===i).map(a => {
                 const dueDate = new Date(a.due);
-                const days = Math.round((dueDate - new Date('2026-04-22'))/(1000*60*60*24));
+                const days = Math.round((dueDate - new Date())/(1000*60*60*24));
                 const overdue = days < 0 && a.stage < 3;
                 const soon = days >= 0 && days <= 7 && a.stage < 3;
                 return (
@@ -93,7 +93,7 @@ const STAGE_TINT = {
 };
 
 const CoaOps = () => {
-  const [sel, setSel] = caUS('OP-01');
+  const [sel, setSel] = caUS(null);
   const ops = COA_OPS;
   const open = ops.find(o => o.id === sel);
 

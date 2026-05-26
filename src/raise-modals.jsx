@@ -63,7 +63,7 @@ const LogGiftModal = ({ open, prefillDonor, onClose, onLogged, onSwitchToAdd }) 
   const [source, setSource] = rmUS('major');
   const [appeal, setAppeal] = rmUS('');
   const [recur, setRecur] = rmUS('one-time');
-  const [date, setDate] = rmUS('2026-04-22');
+  const [date, setDate] = rmUS(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = rmUS('');
   const [pledged, setPledged] = rmUS(false);
 
@@ -425,7 +425,7 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
       id: 'd-' + Date.now().toString(36),
       name: fullName,
       gift: 0, freq: 'New', ltv: 0,
-      first: '2026-04', last: '2026-04-22',
+      first: new Date().toISOString().slice(0, 7), last: new Date().toISOString().slice(0, 10),
       list,
     };
     onAdded && onAdded(newDonor);

@@ -139,7 +139,7 @@ const NewEntryModal = ({ open, onClose, onPosted }) => {
   const { records: LEDGER_COA } = useLiveRecords('ledger', 'account', LEDGER_COA_FB);
   const [type, setType] = lmUS('gift');
   const [date, setDate] = lmUS(todayMD());
-  const [ref, setRef] = lmUS('GIFT-8842');
+  const [ref, setRef] = lmUS('');
   const [memo, setMemo] = lmUS('');
   const [source, setSource] = lmUS('Manual');
   const [splits, setSplits] = lmUS(() => splitTemplate('gift', LEDGER_COA));
