@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shell, Nav2Ctx } from './shell';
-import { WORKSPACE as DEFAULT_WORKSPACE, CONDUCTOR } from './data';
+import { WORKSPACE as DEFAULT_WORKSPACE } from './data';
+import { useLiveRecords } from './auth/useLiveRecords';
 import { Home2 } from './home';
 import { Conductor } from './conductor';
 import { DossierDrawer } from './fabric';
@@ -81,6 +82,8 @@ export default function App2() {
   const initial = (() => { try { return localStorage.getItem('mandate2:route') || 'home'; } catch { return 'home'; } })();
   const [route, setRoute] = useState(initial);
   const [conductorOpen, setConductorOpen] = useState(false);
+  const { records: conductorAsks } = useLiveRecords('conductor', 'ask', []);
+  const conductorNowCount = conductorAsks.filter(c => c.window === 'NOW').length;
 
   const go = (k) => {
     setRoute(k);
@@ -156,7 +159,7 @@ export default function App2() {
         user={user.initials || 'MR'}
         onCmd={() => {}}
         onConductor={() => setConductorOpen(true)}
-        conductorCount={CONDUCTOR.filter(c => c.window === 'NOW').length}
+        conductorCount={conductorNowCount}
         userMenu={<UserMenu onAdmin={() => go('admin')} />}
         notifications={<NotificationBell onNav={(link) => { if (link?.startsWith('/admin')) go('admin'); }} />}
         enabledModules={enabledModules}

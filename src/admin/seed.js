@@ -6,7 +6,7 @@ import { api } from '../auth/api';
 async function loadAllData() {
   const [
     ground, beacon1, beacon2, raise, raiseGlr,
-    ledger, coalition, civic, opp, site, events, academy, command,
+    ledger, coalition, civic, opp, site, events, academy, command, app,
   ] = await Promise.all([
     import('../ground-data'),
     import('../beacon-data'),
@@ -21,8 +21,9 @@ async function loadAllData() {
     import('../events-data'),
     import('../academy-data'),
     import('../command-data'),
+    import('../data'),
   ]);
-  return { ground, beacon1, beacon2, raise, raiseGlr, ledger, coalition, civic, opp, site, events, academy, command };
+  return { ground, beacon1, beacon2, raise, raiseGlr, ledger, coalition, civic, opp, site, events, academy, command, app };
 }
 
 // Map each (module, kind) bucket to a function returning the records.
@@ -88,6 +89,9 @@ function buildBuckets(d) {
     { module: 'academy', kind: 'course',  records: d.academy.ACAD_COURSES || [] },
     { module: 'academy', kind: 'article', records: d.academy.ACAD_ARTICLES || [] },
     { module: 'academy', kind: 'faculty', records: d.academy.ACAD_FACULTY || [] },
+
+    // conductor (cross-module ask queue)
+    { module: 'conductor', kind: 'ask', records: d.app.CONDUCTOR || [] },
 
     // command
     { module: 'command', kind: 'channel', records: (d.command.CMD_GROUPS || []).flatMap(g => (g.items || []).map(i => ({ ...i, group: g.label }))) },
