@@ -618,12 +618,11 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
             </div>
 
             <div className="r-side-sec">
-              <div className="r-side-sec__h">Compliance check</div>
+              <div className="r-side-sec__h">Compliance reference</div>
               <div className="r-wealth">
                 <div className="r-wealth__row"><span>Donor type</span><b>Individual</b></div>
-                <div className="r-wealth__row"><span>BC residency</span><b>{city === 'Vancouver' ? 'Confirmed' : 'Pending verify'}</b></div>
-                <div className="r-wealth__row"><span>Foreign source</span><b>No flag</b></div>
                 <div className="r-wealth__row"><span>Cycle cap</span><b>$1,400 / yr</b></div>
+                <div className="r-wealth__row"><span>Verification</span><b>Pending</b></div>
               </div>
             </div>
           </aside>

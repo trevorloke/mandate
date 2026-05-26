@@ -107,7 +107,7 @@ function BTabListening() {
         <section className="b-l-panel b-l-panel--span2">
           <div className="b-l-panel__hd">
             <div className="b-l-panel__title">Mention volume · last 24h</div>
-            <div className="b-l-panel__sub">848 total · 412 about Marcus directly · spike at 14:00 (Vance quote)</div>
+            <div className="b-l-panel__sub">Connect a media-monitoring integration to populate this chart.</div>
           </div>
           <div className="b-l-panel__body">
             <BSparkBars data={BEACON_MENTION_TIMELINE} height={120} />
@@ -120,7 +120,7 @@ function BTabListening() {
         <section className="b-l-panel">
           <div className="b-l-panel__hd">
             <div className="b-l-panel__title">Share of voice · 14d</div>
-            <div className="b-l-panel__sub">Hale 34% · Vance 28% · Premier 21%</div>
+            <div className="b-l-panel__sub">Share of voice across your tracked subjects.</div>
           </div>
           <div className="b-l-panel__body">
             <BSovChart data={BEACON_SOV_HISTORY} />
@@ -132,7 +132,7 @@ function BTabListening() {
         <section className="b-l-panel">
           <div className="b-l-panel__hd">
             <div className="b-l-panel__title">Tracked terms</div>
-            <div className="b-l-panel__sub">8 active · auto-flagged · drag to reorder</div>
+            <div className="b-l-panel__sub">Add tracked terms to monitor mentions.</div>
           </div>
           <div className="b-l-panel__body b-l-panel__body--list">
             {BEACON_TRACKED_TERMS.map((t, i) => (
@@ -257,7 +257,7 @@ function BTabPerformance() {
         <section className="b-l-panel" style={{ flex: '2 1 0' }}>
           <div className="b-l-panel__hd">
             <div className="b-l-panel__title">Top performing · last 14 days</div>
-            <div className="b-l-panel__sub">Ranked by engagement × reach. 5 of 87 posts shown.</div>
+            <div className="b-l-panel__sub">Ranked by engagement × reach.</div>
           </div>
           <div className="b-l-panel__body b-l-panel__body--list">
             {BEACON_TOP_POSTS.map((p, i) => {
@@ -428,7 +428,7 @@ function BTabBoost() {
         <div className="b-boost__stat">
           <div className="b-boost__stat-lbl">Cost per</div>
           <div className="b-boost__stat-val">${(totalSpend/totalConv).toFixed(2)}</div>
-          <div className="b-boost__stat-sub">blended · target $4.50</div>
+          <div className="b-boost__stat-sub">blended cost / outcome</div>
         </div>
       </div>
 
@@ -541,7 +541,7 @@ function BTabPress() {
         <div className="b-boost__stat">
           <div className="b-boost__stat-lbl">Press list size</div>
           <div className="b-boost__stat-val">184</div>
-          <div className="b-boost__stat-sub">across 6 categories</div>
+          <div className="b-boost__stat-sub"></div>
         </div>
         <div className="b-boost__stat">
           <div className="b-boost__stat-lbl">Reply rate · 30d</div>

@@ -474,7 +474,7 @@ const Raise2 = () => {
   const handleAdded = (donor) => {
     setExtraDonors(p => [donor, ...p]);
     api.createData('raise', 'donor', donor).catch(() => {});
-    flashToast(<><b>{donor.name}</b> added to donor file · 4,214 records</>);
+    flashToast(<><b>{donor.name}</b> added to donor file</>);
   };
 
   const drawerToGift = (p) => {
