@@ -4,7 +4,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
-import { seedDemoData } from './seed';
 import { getSchema } from './schemas';
 import TypedForm from './TypedForm';
 import { toCSV, fromCSV, downloadFile, readFileAsText } from './csv';
@@ -99,8 +98,6 @@ export default function AdminData() {
   const { has } = useAuth();
   const [counts, setCounts] = useState({});
   const [active, setActive] = useState(null);  // {module, kind, label}
-  const [seeding, setSeeding] = useState(null);
-  const [seedResult, setSeedResult] = useState(null);
 
   // Load record counts for each (module, kind) bucket
   const loadCounts = async () => {
@@ -120,22 +117,6 @@ export default function AdminData() {
 
   const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  const runSeed = async () => {
-    if (totalRecords > 0) {
-      if (!confirm(`This will REPLACE all ${totalRecords} existing records with the prototype data. Continue?`)) return;
-    }
-    setSeedResult(null);
-    setSeeding({ i: 0, of: '?', module: '', kind: '' });
-    try {
-      const result = await seedDemoData((p) => setSeeding(p));
-      setSeedResult(result);
-      await loadCounts();
-    } catch (e) {
-      setSeedResult({ error: e.message });
-    } finally {
-      setSeeding(null);
-    }
-  };
 
   if (active) {
     return <BucketEditor module={active.module} kind={active.kind} label={active.label} onBack={() => setActive(null)} canEdit={has('editor')} />;
@@ -149,23 +130,8 @@ export default function AdminData() {
           {has('editor') ? '' : <em> You have read-only access.</em>}
           {' '}<b style={{ color: 'var(--ink-3)' }}>{totalRecords.toLocaleString()}</b> total records across all buckets.
         </p>
-        {has('editor') && (
-          <button className="adm__btn adm__btn--ghost" onClick={runSeed} disabled={!!seeding} style={{ flex: 'none' }}>
-            {seeding ? `Seeding ${seeding.module}/${seeding.kind} (${seeding.i + 1}/${seeding.of})…` : '⤓ Load prototype data'}
-          </button>
-        )}
       </div>
 
-      {seedResult && !seedResult.error && (
-        <div className="adm__msg adm__msg--ok" style={{ marginBottom: 16 }}>
-          ✓ Seeded {seedResult.total.toLocaleString()} records across {seedResult.buckets.length} buckets.
-        </div>
-      )}
-      {seedResult && seedResult.error && (
-        <div className="adm__msg adm__msg--err" style={{ marginBottom: 16 }}>
-          Seed failed: {seedResult.error}
-        </div>
-      )}
 
       {MODULE_KINDS.map(m => (
         <div key={m.module} style={{ marginBottom: 32 }}>
