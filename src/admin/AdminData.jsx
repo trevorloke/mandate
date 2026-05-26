@@ -77,7 +77,23 @@ export const MODULE_KINDS = [
     { kind: 'channel',    label: 'Channels' },
     { kind: 'message',    label: 'Messages' },
   ]},
+  { module: 'conductor', kinds: [
+    { kind: 'ask',        label: 'Cross-module asks' },
+  ]},
 ];
+
+// Generate a default record for "New record". If the schema declares an
+// idPrefix, pre-fill the id (or schema.idField, e.g. 'slug' for coalition.org)
+// so the user doesn't have to invent a unique identifier for every entry.
+function genIdValue(schema) {
+  if (!schema?.idPrefix) return '';
+  return `${schema.idPrefix}-${Math.random().toString(36).slice(2, 8)}`;
+}
+function newRecord(schema) {
+  if (!schema?.idPrefix) return { isNew: true, data: {} };
+  const field = schema.idField || 'id';
+  return { isNew: true, data: { [field]: genIdValue(schema) } };
+}
 
 export default function AdminData() {
   const { has } = useAuth();
@@ -189,6 +205,8 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
   const [sortDir, setSortDir] = useState('desc'); // asc | desc
   const [page, setPage] = useState(0);
   const [importing, setImporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
   const [selected, setSelected] = useState(new Set()); // _dbIds
   const [filters, setFilters] = useState({});         // schema-aware select/boolean filters
   const [advFilters, setAdvFilters] = useState([]);    // [{ key, op, value }] — power filters
@@ -287,11 +305,12 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
   const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   useEffect(() => { if (page >= totalPages) setPage(0); }, [totalPages, page]);
 
-  const save = async (rec) => {
+  const save = async (rec, { andAnother = false } = {}) => {
     try {
       if (rec.isNew) await api.createData(module, kind, rec.data);
       else await api.updateData(module, kind, rec.id, rec.data);
-      setEditing(null);
+      // Stay in the modal with a fresh blank record when adding many at once.
+      setEditing(andAnother ? newRecord(schema) : null);
       setMsg({ kind: 'ok', text: 'Saved.' });
       load();
     } catch (e) { setMsg({ kind: 'err', text: e.message }); }
@@ -345,17 +364,22 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
     downloadFile(filename, csv);
   };
 
-  const onImport = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
+  const downloadTemplate = () => {
+    if (!schema) {
+      setMsg({ kind: 'err', text: 'No schema — use Export to copy an existing record as a template.' });
+      return;
+    }
+    const headers = schema.fields.map(f => f.key);
+    const csv = toCSV([], headers);
+    downloadFile(`${module}-${kind}-template.csv`, csv);
+  };
+
+  // Import rows in append or replace mode (no confirm() dialog).
+  const importRows = async (rows, mode) => {
+    if (!rows.length) { setMsg({ kind: 'err', text: 'No rows to import.' }); return; }
     try {
       setImporting(true);
-      const text = await readFileAsText(file);
-      const rows = fromCSV(text);
-      if (!rows.length) { setMsg({ kind: 'err', text: 'CSV is empty.' }); return; }
-      const append = confirm(`Import ${rows.length} records?\n\n[OK] = APPEND to existing ${records.length} records.\n[Cancel] = REPLACE all existing records.`);
-      if (append) {
+      if (mode === 'append') {
         for (const r of rows) await api.createData(module, kind, r);
         setMsg({ kind: 'ok', text: `Appended ${rows.length} records.` });
       } else {
@@ -367,6 +391,34 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
       setMsg({ kind: 'err', text: 'Import failed: ' + err.message });
     } finally {
       setImporting(false);
+    }
+  };
+
+  // File picker with the mode baked in via fileRef.current.dataset.mode.
+  const pickFile = (mode) => { fileRef.current.dataset.mode = mode; fileRef.current.click(); };
+  const onFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    const mode = e.target.dataset.mode || 'append';
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const text = await readFileAsText(file);
+      await importRows(fromCSV(text), mode);
+    } catch (err) {
+      setMsg({ kind: 'err', text: 'Import failed: ' + err.message });
+    }
+  };
+
+  const importPaste = async (mode) => {
+    const text = (pasteText || '').trim();
+    if (!text) { setMsg({ kind: 'err', text: 'Paste some CSV first.' }); return; }
+    try {
+      const rows = fromCSV(text);
+      await importRows(rows, mode);
+      setPasteText('');
+      setImportOpen(false);
+    } catch (err) {
+      setMsg({ kind: 'err', text: 'Import failed: ' + err.message });
     }
   };
 
@@ -386,9 +438,9 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {canEdit && (
             <>
-              <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={onImport} />
-              <button className="adm__btn adm__btn--ghost" onClick={() => fileRef.current?.click()} disabled={importing}>
-                {importing ? 'Importing…' : '⤓ Import CSV'}
+              <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={onFilePicked} />
+              <button className="adm__btn adm__btn--ghost" onClick={() => setImportOpen(o => !o)} disabled={importing}>
+                {importing ? 'Importing…' : (importOpen ? '× Close import' : '⤓ Import')}
               </button>
             </>
           )}
@@ -396,10 +448,40 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
             <button className="adm__btn adm__btn--ghost" onClick={exportCsv}>↑ Export CSV</button>
           )}
           {canEdit && !editing && (
-            <button className="adm__btn" onClick={() => setEditing({ isNew: true, data: {} })}>+ New record</button>
+            <button className="adm__btn" onClick={() => setEditing(newRecord(schema))}>+ New record</button>
           )}
         </div>
       </div>
+
+      {canEdit && importOpen && (
+        <div className="adm__panel" style={{ marginBottom: 18 }}>
+          <div className="adm__panel-h">Import {label || kind}</div>
+          <p style={{ margin: '8px 0 14px', color: 'var(--ink-4)', fontSize: 13 }}>
+            <b>Append</b> adds rows to the existing {records.length}. <b>Replace</b> deletes everything in this bucket and loads the new rows. The first CSV row should be the header.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            <button className="adm__btn" onClick={() => pickFile('append')} disabled={importing}>⤓ Upload CSV → Append</button>
+            <button className="adm__btn adm__btn--danger" onClick={() => pickFile('replace')} disabled={importing}>⤓ Upload CSV → Replace</button>
+            {schema && (
+              <button className="adm__btn adm__btn--ghost" onClick={downloadTemplate}>↓ Download template</button>
+            )}
+          </div>
+          <label className="adm__field-label" style={{ display: 'block', marginBottom: 6 }}>Or paste CSV here</label>
+          <textarea
+            className="adm__field-textarea"
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder={schema ? schema.fields.map(f => f.key).join(',') + '\nvalue1,value2,…' : 'Paste rows here (first row = header)'}
+            rows={6}
+            spellCheck={false}
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="adm__btn" onClick={() => importPaste('append')} disabled={importing || !pasteText.trim()}>Paste → Append</button>
+            <button className="adm__btn adm__btn--danger" onClick={() => importPaste('replace')} disabled={importing || !pasteText.trim()}>Paste → Replace</button>
+            <button className="adm__btn adm__btn--ghost" onClick={() => { setPasteText(''); setImportOpen(false); }}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {/* Search + filter + count */}
       <div className="adm__bucket-bar">
@@ -655,8 +737,8 @@ function RecordForm({ module, kind, record, onCancel, onSubmit }) {
     setMode(m);
   };
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, { andAnother = false } = {}) => {
+    if (e?.preventDefault) e.preventDefault();
     setErr(''); setBusy(true);
     let payload = data;
     if (mode === 'json') {
@@ -670,7 +752,7 @@ function RecordForm({ module, kind, record, onCancel, onSubmit }) {
         setBusy(false); return;
       }
     }
-    try { await onSubmit({ ...record, data: payload }); }
+    try { await onSubmit({ ...record, data: payload }, { andAnother }); }
     catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   };
@@ -701,6 +783,9 @@ function RecordForm({ module, kind, record, onCancel, onSubmit }) {
         )}
         <div className="adm__actions">
           <button className="adm__btn" type="submit" disabled={busy}>{busy ? 'Saving…' : (record.isNew ? 'Create' : 'Save')}</button>
+          {record.isNew && (
+            <button className="adm__btn adm__btn--ghost" type="button" disabled={busy} onClick={(e) => submit(e, { andAnother: true })}>Save & add another</button>
+          )}
           <button className="adm__btn adm__btn--ghost" type="button" onClick={onCancel}>Cancel</button>
         </div>
       </form>

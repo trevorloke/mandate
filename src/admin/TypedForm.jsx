@@ -79,6 +79,28 @@ function renderInput(f, value, set, tagDrafts, setTagDrafts) {
           />
         </div>
       );
+    case 'percent':
+      return (
+        <input
+          className={cls + ' adm__field-input--mono'}
+          type="number"
+          step={f.step ?? 0.1}
+          min={f.min}
+          max={f.max}
+          value={v ?? ''}
+          placeholder={f.placeholder || '0'}
+          onChange={(e) => set(f.key, e.target.value === '' ? null : Number(e.target.value))}
+        />
+      );
+    case 'date':
+      return (
+        <input
+          className={cls + ' adm__field-input--mono'}
+          type="date"
+          value={v ?? ''}
+          onChange={(e) => set(f.key, e.target.value || null)}
+        />
+      );
     case 'select':
       return (
         <select
