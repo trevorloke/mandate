@@ -238,13 +238,14 @@ function Beacon() {
   const { records: BEACON_POSTS, isEmpty: noPosts } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
   const { records: BEACON_LISTENING } = useLiveRecords('beacon', 'mention', BEACON_LISTENING_FB);
   const bizMetrics = useBusinessMetrics();
-  if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
 
   bUE(() => {
     const esc = (e) => { if (e.key === 'Escape') setOpenPost(null); };
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
   }, []);
+
+  if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
 
   const ribbon = BEACON_METRICS.map(m => {
     const mk = bizMetrics[`beacon.${m.key}`];

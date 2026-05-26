@@ -19,7 +19,6 @@ function Academy() {
   const [tab, setTab] = useState('library');
   const [courseId, setCourseId] = useState(null);
   const [articleId, setArticleId] = useState(null);
-  if (noCourses && noArticles) return <EmptyModule module="ACADEMY" label="Academy" accent="var(--m-academy, var(--ink))" />;
 
   const stats = useMemo(() => {
     const enrolled = ACAD_COURSES.filter(c => c.progress > 0).length;
@@ -27,7 +26,9 @@ function Academy() {
     const inProgress = ACAD_COURSES.filter(c => c.progress > 0 && !c.completed).length;
     const certs = ACAD_TRANSCRIPT?.length || completed;
     return { enrolled, completed, inProgress, certs };
-  }, []);
+  }, [ACAD_COURSES]);
+
+  if (noCourses && noArticles) return <EmptyModule module="ACADEMY" label="Academy" accent="var(--m-academy, var(--ink))" />;
 
   const pickCourse = (id) => { setCourseId(id); setArticleId(null); };
   const pickArticle = (id) => { setArticleId(id); setCourseId(null); };

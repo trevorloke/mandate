@@ -255,7 +255,6 @@ function Command() {
   const [threadRoot, setThreadRoot] = cUS(CMD_MESSAGES.find(m => m.id === 'm1'));
   const [activeWs, setActiveWs] = cUS('mw');
   const streamRef = cUR(null);
-  if (noChannels && noMessages) return <EmptyModule module="COMMAND" label="Command" accent="var(--m-command, var(--ink))" />;
 
   cUE(() => {
     if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
@@ -266,6 +265,8 @@ function Command() {
     document.documentElement.style.setProperty('--m-command', '#5a4a8a');
     document.documentElement.style.setProperty('--m-command-tint', '#ece7f4');
   }, []);
+
+  if (noChannels && noMessages) return <EmptyModule module="COMMAND" label="Command" accent="var(--m-command, var(--ink))" />;
 
   return (
     <div className={'cmd' + (threadRoot ? '' : ' cmd--thread-closed')}>
