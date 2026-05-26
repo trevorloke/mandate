@@ -37,11 +37,14 @@ import commentsRoutes from './routes/comments.js';
 import reportsRoutes from './routes/reports.js';
 import passkeyRoutes from './routes/passkey.js';
 import dashboardRoutes from './routes/dashboard.js';
+import businessMetricsRoutes from './routes/metrics-business.js';
+import { startMetricsWorker } from './lib/metrics-compute.js';
 
 ensureTables();
 startWebhookWorker();
 startRetentionWorker();
 startReportsWorker();
+startMetricsWorker();
 
 const app = new Hono();
 
@@ -93,6 +96,7 @@ app.route('/api/auth/totp', totpRoutes);
 app.route('/api/forms', formsAdminRoutes);
 app.route('/api/public/forms', formsPublicRoutes);
 app.route('/api/metrics', metricsRoutes);
+app.route('/api/business-metrics', businessMetricsRoutes);
 app.route('/api/auth/oauth', oauthPublicRoutes);
 app.route('/api/oauth-providers', oauthAdminRoutes);
 app.route('/api/comments', commentsRoutes);

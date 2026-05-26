@@ -2,6 +2,7 @@ import React from 'react';
 import './beacon.css';
 import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB, BEACON_LISTENING as BEACON_LISTENING_FB, BEACON_APPROVALS, BEACON_METRICS } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import EmptyModule from './EmptyModule';
 import { BTabQueue, BTabListening, BTabPerformance, BTabBoost, BTabPress } from './beacon-tabs';
 
@@ -236,6 +237,7 @@ function Beacon() {
   const { records: BEACON_ACCOUNTS, isEmpty: noAccounts } = useLiveRecords('beacon', 'account', BEACON_ACCOUNTS_FB);
   const { records: BEACON_POSTS, isEmpty: noPosts } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
   const { records: BEACON_LISTENING } = useLiveRecords('beacon', 'mention', BEACON_LISTENING_FB);
+  const bizMetrics = useBusinessMetrics();
   if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
 
   bUE(() => {
@@ -244,14 +246,19 @@ function Beacon() {
     return () => window.removeEventListener('keydown', esc);
   }, []);
 
-  const awaiting = BEACON_POSTS.filter(p => p.status !== 'LIVE' && p.status !== 'SCHEDULED').length;
-  const metrics = BEACON_METRICS.map(m => m.key === 'approval' ? { ...m, val: String(awaiting) } : m);
+  const ribbon = BEACON_METRICS.map(m => {
+    const mk = bizMetrics[`beacon.${m.key}`];
+    if (!mk) return m;
+    if (mk.source === 'integration') return { ...m, val: mk.display, delta: 'needs integration', sub: 'Connect a media-monitoring integration to populate.' };
+    const spark = (mk.spark && mk.spark.length >= 2) ? mk.spark : (mk.value != null ? [mk.value, mk.value] : m.spark);
+    return { ...m, val: mk.display, delta: mk.delta?.text ?? '—', spark };
+  });
 
   return (
     <div className="beacon">
       {/* Ribbon */}
       <div className="beacon__ribbon">
-        {metrics.map(m => <BMetric key={m.key} m={m} />)}
+        {ribbon.map(m => <BMetric key={m.key} m={m} />)}
       </div>
 
       {/* Tabs */}

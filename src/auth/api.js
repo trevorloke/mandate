@@ -51,6 +51,8 @@ export const api = {
   workspace: () => fetchJson('/api/workspace'),
   updateWorkspace: (body) => fetchJson('/api/workspace', { method: 'PUT', body }),
 
+  businessMetrics: () => fetchJson('/api/business-metrics'),
+
   listWorkspaces:   () => fetchJson('/api/workspaces'),
   createWorkspace:  (body) => fetchJson('/api/workspaces', { method: 'POST', body }),
   switchWorkspace:  (id) => fetchJson(`/api/workspaces/switch/${id}`, { method: 'POST' }),

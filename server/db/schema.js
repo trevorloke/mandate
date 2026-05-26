@@ -1,5 +1,5 @@
 // Database schema using Drizzle ORM (SQLite)
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const workspaces = sqliteTable('workspaces', {
@@ -299,4 +299,15 @@ export const oauthProviders = sqliteTable('oauth_providers', {
   discoveryCacheAt:  integer('discovery_cache_at', { mode: 'timestamp' }),
   active:            integer('active', { mode: 'boolean' }).notNull().default(true),
   createdAt:         integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// Daily snapshots of computed business metrics, one row per (workspace, metric, day).
+// Powers period-over-period deltas and sparklines for the module KPI strips.
+export const metricSnapshots = sqliteTable('metric_snapshots', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  metricKey:   text('metric_key').notNull(),   // e.g. 'raise.ytd', 'ledger.cash'
+  value:       real('value').notNull(),
+  day:         text('day').notNull(),          // 'YYYY-MM-DD' (UTC) — daily dedupe key
+  capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });

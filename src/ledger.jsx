@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import './ledger.css';
 import { LEDGER_JOURNAL, LEDGER_KPIS } from './ledger-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import EmptyModule from './EmptyModule';
 import { NewEntryModal } from './ledger-modal';
 import { LedgerChart, LedgerReconcile, LedgerBills } from './ledger-tabs1';
@@ -40,21 +41,30 @@ const LKPI_SPARKS = {
   comp:    [96, 96.5, 97, 97.2, 97.4, 97.6, 97.8, 98, 98.1, 98.2, 98.3, 98.4],
 };
 
-const LedgerKpiStrip = ({ kpis }) => (
+const LedgerKpiStrip = ({ kpis }) => {
+  const metrics = useBusinessMetrics();
+  return (
   <div className="ledger__kpis">
-    {Object.entries(kpis).map(([k, v]) => (
+    {Object.entries(kpis).map(([k, v]) => {
+      const mk = metrics[`ledger.${k}`];
+      const value = mk?.display ?? v.value;
+      const delta = mk ? (mk.delta?.text ?? '—') : v.delta;
+      const spark = (mk?.spark && mk.spark.length >= 2) ? mk.spark
+                  : (mk?.value != null ? [mk.value, mk.value] : LKPI_SPARKS[k]);
+      return (
       <div className="ledger__kpi" key={k}>
         <div className="ledger__kpi-lbl">{v.label}</div>
-        <div className={`ledger__kpi-val ${v.tone}`}>{v.value}</div>
-        <LSpark pts={LKPI_SPARKS[k]} fill color={v.tone === 'warn' ? '#b94a3a' : v.tone === 'good' ? '#0d4f3c' : '#5c4a1f'} />
+        <div className={`ledger__kpi-val ${v.tone}`}>{value}</div>
+        <LSpark pts={spark} fill color={v.tone === 'warn' ? '#b94a3a' : v.tone === 'good' ? '#0d4f3c' : '#5c4a1f'} />
         <div className={`ledger__kpi-delta ${v.tone}`}>
-          <b>{v.delta}</b>
+          <b>{delta}</b>
           <span>{v.sub}</span>
         </div>
       </div>
-    ))}
+    );})}
   </div>
-);
+  );
+};
 
 /* ── Tabs ─────────────────────────────────────────── */
 const LEDGER_TABS = [

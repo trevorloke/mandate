@@ -2,6 +2,7 @@ import React from 'react';
 import './raise.css';
 import { RAISE_KPIS, RAISE_TODAY, RAISE_PULSE, RAISE_GIFTMIX, RAISE_PROSPECT_DETAIL, RAISE_DONORS, RAISE_STAGES, RAISE_PROSPECTS, RAISE_STORIES, RAISE_FEED, RAISE_COMPLIANCE } from './raise-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import EmptyModule from './EmptyModule';
 import { RaiseGifts, RaiseLists, RaiseReports } from './raise-glr';
 import { LogGiftModal, AddDonorModal, RaiseToast } from './raise-modals';
@@ -38,21 +39,30 @@ const KPI_SPARKS = {
   pledgesdue:  [50, 60, 65, 70, 72, 75, 80, 78, 80, 82, 84, 84],
 };
 
-const RaiseKpiStrip = ({ kpis }) => (
+const RaiseKpiStrip = ({ kpis }) => {
+  const metrics = useBusinessMetrics();
+  return (
   <div className="raise__kpis">
-    {Object.entries(kpis).map(([k, v]) => (
+    {Object.entries(kpis).map(([k, v]) => {
+      const mk = metrics[`raise.${k}`];
+      const value = mk?.display ?? v.value;
+      const delta = mk ? (mk.delta?.text ?? '—') : v.delta;
+      const spark = (mk?.spark && mk.spark.length >= 2) ? mk.spark
+                  : (mk?.value != null ? [mk.value, mk.value] : KPI_SPARKS[k]);
+      return (
       <div className="raise__kpi" key={k}>
         <div className="raise__kpi-lbl">{v.label}</div>
-        <div className="raise__kpi-val">{v.value}</div>
-        <Spark pts={KPI_SPARKS[k]} fill color={v.tone === 'warn' ? '#b94a3a' : v.tone === 'flat' ? '#6b6855' : '#0d4f3c'} />
+        <div className="raise__kpi-val">{value}</div>
+        <Spark pts={spark} fill color={v.tone === 'warn' ? '#b94a3a' : v.tone === 'flat' ? '#6b6855' : '#0d4f3c'} />
         <div className={`raise__kpi-delta ${v.tone}`}>
-          <b>{v.delta}</b>
+          <b>{delta}</b>
           <span>{v.sub}</span>
         </div>
       </div>
-    ))}
+    );})}
   </div>
-);
+  );
+};
 
 /* ── Today's moves block ── */
 const RaiseToday = ({ onPick }) => (

@@ -3,6 +3,7 @@ import './coalition.css';
 import './coalition-ledger.css';
 import { COA_KPIS, COA_LEDGER as COA_LEDGER_FB } from './coalition-data';
 import { useLiveRecords } from './auth/useLiveRecords';
+import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import EmptyModule from './EmptyModule';
 import { Shell } from './shell';
 import { CoaGraph } from './coalition-graph';
@@ -40,21 +41,30 @@ const COA_KPI_SPARKS = {
   events:    [2, 3, 4, 5, 6, 7, 8, 9, 9, 10, 11, 11],
 };
 
-const CoaKpiStrip = ({ kpis }) => (
+const CoaKpiStrip = ({ kpis }) => {
+  const metrics = useBusinessMetrics();
+  return (
   <div className="coa__kpis">
-    {Object.entries(kpis).map(([k, v]) => (
+    {Object.entries(kpis).map(([k, v]) => {
+      const mk = metrics[`coalition.${k}`];
+      const value = mk?.display ?? v.value;
+      const delta = mk ? (mk.delta?.text ?? '—') : v.delta;
+      const spark = (mk?.spark && mk.spark.length >= 2) ? mk.spark
+                  : (mk?.value != null ? [mk.value, mk.value] : COA_KPI_SPARKS[k]);
+      return (
       <div className="coa__kpi" key={k}>
         <div className="coa__kpi-lbl">{v.label}</div>
-        <div className={`coa__kpi-val ${v.tone}`}>{v.value}</div>
-        <CSpark pts={COA_KPI_SPARKS[k]} color={v.tone === 'good' ? '#2a4d35' : v.tone === 'warn' ? '#b94a3a' : '#56655a'} />
+        <div className={`coa__kpi-val ${v.tone}`}>{value}</div>
+        <CSpark pts={spark} color={v.tone === 'good' ? '#2a4d35' : v.tone === 'warn' ? '#b94a3a' : '#56655a'} />
         <div className={`coa__kpi-delta ${v.tone}`}>
-          <b>{v.delta}</b>
+          <b>{delta}</b>
           <span>{v.sub}</span>
         </div>
       </div>
-    ))}
+    );})}
   </div>
-);
+  );
+};
 
 /* ── Tabs ─────────────────────────────────────────── */
 const COA_TABS = [

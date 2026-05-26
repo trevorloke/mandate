@@ -337,6 +337,20 @@ function bootstrapTables() {
     CREATE INDEX IF NOT EXISTS idx_record_shares_user ON record_shares(user_id);
   `);
 
+  // Daily business-metric snapshots (deltas + sparklines)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS metric_snapshots (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      metric_key   TEXT NOT NULL,
+      value        REAL NOT NULL,
+      day          TEXT NOT NULL,
+      captured_at  INTEGER DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_metric_snapshots_unique ON metric_snapshots(workspace_id, metric_key, day);
+    CREATE INDEX IF NOT EXISTS idx_metric_snapshots_lookup ON metric_snapshots(workspace_id, metric_key, day DESC);
+  `);
+
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.
   // Order by SQLite's implicit rowid (insertion order) — created_at is per-second
