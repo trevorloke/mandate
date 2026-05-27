@@ -248,18 +248,8 @@ function VoterRow({ v, open, onToggle, onSelect, selected }) {
           <div>
             <div className="dossier__col-title">Contact Log</div>
             <ul className="dossier__log">
-              <li><b>18:52</b> <span style={{flex:1}}>Door knock · B. Okafor · spoke 3 min · Bill 14 receptive · recontact OK</span></li>
-              <li><b>2d</b>  <span style={{flex:1}}>SMS sent · "Rent cap town hall Sat" · read, no reply</span></li>
-              <li><b>6w</b>  <span style={{flex:1}}>Signed petition · Save Our Rent Cap · via street</span></li>
-              <li><b>2022</b><span style={{flex:1}}>Flagged did-not-vote · sent GOTV text (no reply)</span></li>
+              <li style={{ fontStyle: 'italic', color: 'var(--text-3)' }}>No contacts logged yet.</li>
             </ul>
-
-            <div style={{ marginTop: 14 }}>
-              <div className="dossier__col-title">Related</div>
-              <div style={{ fontFamily:'var(--font-serif)', fontSize:13, color:'var(--text-2)', lineHeight:1.5 }}>
-                Lives with <b style={{color:'var(--ink)', fontWeight:500}}>Kenji Nakamura, 46</b> (partner, supports 0.82) and one child (not on voter file).
-              </div>
-            </div>
 
             <div className="dossier__actions">
               <button className="dossier__btn">Queue for tonight</button>

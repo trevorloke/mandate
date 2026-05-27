@@ -196,13 +196,13 @@ function EvDetailTab() {
           <div className="ev2__d-eyebrow">{EV_TYPES[e.type]?.label || e.type}{e.date ? ' · ' + new Date(e.date).toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }) : ''}</div>
           <div className="ev2__d-h1">{e.title}</div>
           <div className="ev2__d-sub">{e.subtitle}</div>
-          <div className="ev2__d-stamp">Sold ▸ 91%</div>
+          {e.capacity > 0 && <div className="ev2__d-stamp">Sold ▸ {Math.round(((e.rsvped || 0) / e.capacity) * 100)}%</div>}
 
           <div className="ev2__d-meta">
-            <div className="ev2__d-meta-cell"><span className="k">Venue</span><span className="v">{venue.name}<small>{venue.city}</small></span></div>
-            <div className="ev2__d-meta-cell"><span className="k">Doors / Start</span><span className="v">17:30<small>· dinner 19:45</small></span></div>
-            <div className="ev2__d-meta-cell"><span className="k">RSVP</span><span className="v">{e.rsvped}<small>of {e.capacity}</small></span></div>
-            <div className="ev2__d-meta-cell"><span className="k">Tonight's pace</span><span className="v">${(totalRev/1000).toFixed(0)}k<small>· goal $230k</small></span></div>
+            <div className="ev2__d-meta-cell"><span className="k">Venue</span><span className="v">{venue?.name || '—'}<small>{venue?.city || ''}</small></span></div>
+            <div className="ev2__d-meta-cell"><span className="k">Start</span><span className="v">{e.start || '—'}{e.end && <small>· ends {e.end}</small>}</span></div>
+            <div className="ev2__d-meta-cell"><span className="k">RSVP</span><span className="v">{e.rsvped || 0}<small>of {e.capacity || 0}</small></span></div>
+            <div className="ev2__d-meta-cell"><span className="k">Revenue</span><span className="v">${(totalRev/1000).toFixed(0)}k{e.revenueGoal && <small>· goal ${(e.revenueGoal/1000).toFixed(0)}k</small>}</span></div>
           </div>
         </div>
 

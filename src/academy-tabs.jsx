@@ -151,14 +151,12 @@ function AcCourse({ courseId, onBack }) {
       <div className="lyc-course__main">
         <div className="lyc-course__player">
           <div className="lyc-course__player-portrait"></div>
-          <div className="lyc-course__player-frame-line">
-            Your job, in the first thirty seconds, is to make the cost of being civil to you lower than the cost of being rude.
-          </div>
+          <div className="lyc-course__player-frame-line"></div>
           <div className="lyc-course__player-controls">
             <span className="lyc-course__player-play">▶</span>
-            <span className="lyc-course__player-time">19:36</span>
+            <span className="lyc-course__player-time">0:00</span>
             <div className="lyc-course__player-scrub"><span></span></div>
-            <span className="lyc-course__player-time">21:30</span>
+            <span className="lyc-course__player-time">0:00</span>
             <div className="lyc-course__player-icons">
               <span>⊟</span><span>CC</span><span>⤓</span><span>1×</span><span>⛶</span>
             </div>
@@ -204,24 +202,17 @@ function AcCourse({ courseId, onBack }) {
           )}
           {tab==='materials' && (
             <div className="lyc-course__transcript">
-              <p><span className="ts">PDF</span>The Doorstep Field Card · 4 pp · 28 KB</p>
-              <p><span className="ts">PDF</span>Hard-door playbook · 12 pp · 142 KB</p>
-              <p><span className="ts">SHEET</span>Lift-tracking template · Google Sheets</p>
-              <p><span className="ts">VIDEO</span>Cohn at the Cariboo doorstep · supplemental, 22 min</p>
+              <p style={{fontStyle:'italic', color:'var(--lyc-mute-2)'}}>Course materials appear here when uploaded.</p>
             </div>
           )}
           {tab==='discussion' && (
             <div className="lyc-course__transcript">
-              <p><span className="ts">M.R.</span><em>Marisol R. — </em>The "ask permission" move is the one that finally clicked for me. Tried it on Saturday — refusal rate dropped from 4 of 10 to maybe 1.</p>
-              <p><span className="ts">P.O.</span><em>Priya O. — </em>If you're getting a lot of hard doors in a row, walk one block over and reset. The frame doesn't carry across porches but it absolutely carries within a row.</p>
-              <p><span className="ts">M.C.</span><em>Mike C. — </em>Bingo. The block has a mood. Read it.</p>
+              <p style={{fontStyle:'italic', color:'var(--lyc-mute-2)'}}>No discussion yet — be the first to post.</p>
             </div>
           )}
           {tab==='notes' && (
             <div className="lyc-course__transcript">
               <p style={{fontStyle:'italic', color:'var(--lyc-mute-2)'}}>Your notes for this chapter (visible only to you).</p>
-              <p><span className="ts">19:36</span>{'"cost of being civil < cost of being rude"'} — frame for hard doors. Use this on Saturday.</p>
-              <p><span className="ts">20:14</span>Four moves: name yourself plainly, ask permission, ask question first, then listen 90s.</p>
             </div>
           )}
         </div>
