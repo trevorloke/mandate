@@ -183,11 +183,11 @@ export default function OnboardingWizard({ onComplete }) {
             <div className="onb__field-row">
               <div className="onb__field">
                 <label className="onb__label">Candidate</label>
-                <input className="onb__input" value={candidate} onChange={e => setCandidate(e.target.value)} placeholder="Amara Tanaka" />
+                <input className="onb__input" value={candidate} onChange={e => setCandidate(e.target.value)} placeholder="Candidate name" />
               </div>
               <div className="onb__field">
                 <label className="onb__label">Party / banner</label>
-                <input className="onb__input" value={party} onChange={e => setParty(e.target.value)} placeholder="Meridian Forward" />
+                <input className="onb__input" value={party} onChange={e => setParty(e.target.value)} placeholder="Party / banner" />
               </div>
             </div>
 

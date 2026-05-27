@@ -37,7 +37,7 @@ export default function Signup({ onSwitchToLogin }) {
           <div className="auth-form__row">
             <label className="auth-form__label">Your name</label>
             <input className="auth-form__input" required autoFocus
-              placeholder="Marcus Reyes"
+              placeholder="Full name"
               value={name} onChange={e => setName(e.target.value)} />
           </div>
 
@@ -60,7 +60,7 @@ export default function Signup({ onSwitchToLogin }) {
           <div className="auth-form__row">
             <label className="auth-form__label">Workspace name</label>
             <input className="auth-form__input" required
-              placeholder="Meridian West — Assembly"
+              placeholder="Workspace name (e.g. riding · assembly)"
               value={workspaceName} onChange={e => setWorkspaceName(e.target.value)} />
           </div>
 
@@ -68,13 +68,13 @@ export default function Signup({ onSwitchToLogin }) {
             <div className="auth-form__row">
               <label className="auth-form__label">Candidate</label>
               <input className="auth-form__input"
-                placeholder="Amara Tanaka"
+                placeholder="Candidate name"
                 value={candidate} onChange={e => setCandidate(e.target.value)} />
             </div>
             <div className="auth-form__row">
               <label className="auth-form__label">Party</label>
               <input className="auth-form__input"
-                placeholder="Meridian Forward"
+                placeholder="Party / banner"
                 value={party} onChange={e => setParty(e.target.value)} />
             </div>
           </div>
