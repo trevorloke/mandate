@@ -439,23 +439,23 @@ function DoorScreen({ voter, script, mode }) {
         <div className="fscript">
           <div className="fscript-dir">Silent drop. Confirm piece placed.</div>
           <div style={{ padding: '14px 0', textAlign: 'center' }}>
-            <div style={{ width:120, height:140, margin:'0 auto', background:'#f4c65a', border:'1px solid #1a1814', transform:'rotate(-3deg)', display:'grid', placeItems:'center', fontFamily:'var(--font-display)', fontSize:14, padding:8, lineHeight:1.2 }}>
-              A Home You Can Afford
+            <div style={{ width:120, height:140, margin:'0 auto', background:'#f4c65a', border:'1px solid #1a1814', transform:'rotate(-3deg)', display:'grid', placeItems:'center', fontFamily:'var(--font-display)', fontSize:14, padding:8, lineHeight:1.2, color:'var(--text-3)', fontStyle:'italic' }}>
+              Leaflet preview
             </div>
             <div style={{ fontFamily:'var(--font-mono)', fontSize:10, marginTop:10, color:'var(--text-3)', letterSpacing:'0.1em' }}>
-              BILL 14 · LEAFLET v3
+              SELECT A SCRIPT
             </div>
           </div>
         </div>
       ) : (
         <div className="fscript">
-          {script.scenes.slice(0, 2).map((sc, i) => (
+          {(script?.scenes || []).slice(0, 2).map((sc, i) => (
             <div key={i} style={{ marginBottom: 12 }}>
               <div className="fscript-dir">{sc.direction}</div>
               {sc.lines.map((ln, j) => (
                 <div key={j} className="fscript-line">
                   <div className="fscript-who">{ln.who}</div>
-                  {ln.text && <div>{ln.text.replace('{{name}}', 'Ben')}</div>}
+                  {ln.text && <div>{ln.text.replace('{{name}}', voter.first || '[name]')}</div>}
                 </div>
               ))}
             </div>
@@ -480,7 +480,7 @@ function DoorScreen({ voter, script, mode }) {
           {mode === 'door-petition' && (
             <div style={{ marginTop: 12, padding: 12, background: '#f4c65a', border: '1px solid #1a1814' }}>
               <div style={{ fontFamily:'var(--font-mono)', fontSize:10, letterSpacing:'0.14em' }}>SIGN & SEND</div>
-              <div style={{ fontFamily:'var(--font-display)', fontSize:18, margin:'4px 0' }}>Save our rent cap</div>
+              <div style={{ fontFamily:'var(--font-display)', fontSize:18, margin:'4px 0', color:'var(--text-3)', fontStyle:'italic' }}>{script?.petition?.title || 'Petition title'}</div>
               <div style={{ borderBottom:'1px solid #1a1814', paddingBottom:18, marginTop:12, fontFamily:'cursive', fontSize:22, minHeight:32 }}>&nbsp;</div>
               <div style={{ fontFamily:'var(--font-mono)', fontSize:9, letterSpacing:'0.1em', marginTop:4 }}>SIGNATURE</div>
             </div>
@@ -505,13 +505,13 @@ function PhoneScreen({ voter, script, mode }) {
   return (
     <div>
       <div className="fvoter">
-        <div className="fvoter-addr">DIALING · 604-555-0142</div>
+        <div className="fvoter-addr">DIALING{voter.phone ? ' · ' + voter.phone : ''}</div>
         <div className="fvoter-name">{voter.first} {voter.last}</div>
-        <div className="fvoter-sub">{voter.age} · queue position 4 of 87</div>
+        <div className="fvoter-sub">{voter.age ? voter.age + ' · ' : ''}{voter.tenure || ''}</div>
       </div>
       <div style={{ textAlign:'center', padding:'14px 0' }}>
         <div style={{ width:80, height:80, margin:'0 auto', borderRadius:'50%', background:'#2e6b3e', display:'grid', placeItems:'center', color:'#fff', fontSize:28 }}>📞</div>
-        <div style={{ fontFamily:'var(--font-mono)', fontSize:11, marginTop:8, color:'var(--text-2)' }}>ringing · 00:08</div>
+        <div style={{ fontFamily:'var(--font-mono)', fontSize:11, marginTop:8, color:'var(--text-2)' }}>ringing</div>
       </div>
       {mode !== 'phone-gotv' && (
         <div className="fscript">
@@ -530,17 +530,14 @@ function TextScreen({ mode }) {
   return (
     <div>
       <div className="fvoter">
-        <div className="fvoter-addr">QUEUE · 340 RECIPIENTS</div>
-        <div className="fvoter-name">Housing warm list</div>
-        <div className="fvoter-sub">Persuadable renters in Universe 31-B</div>
+        <div className="fvoter-addr">QUEUE</div>
+        <div className="fvoter-name">Select a list</div>
+        <div className="fvoter-sub">Choose a text-bank list from the universe sentence above.</div>
       </div>
       <div style={{ marginTop: 12 }}>
         <div style={{ fontFamily:'var(--font-mono)', fontSize:10, letterSpacing:'0.14em', color:'var(--text-3)' }}>MESSAGE</div>
-        <div style={{ background:'#e2f0df', padding:12, borderRadius:14, marginTop:6, fontSize:13.5, maxWidth:'85%' }}>
-          Hi {'{first}'} — Marcus is speaking on Bill 14 (rent cap) at 13:50 tomorrow. Watch live: mandatemw.ca/14. Reply STOP to opt out.
-        </div>
-        <div style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-3)', marginTop:8 }}>
-          3 macros · 146 chars · 1 segment
+        <div style={{ background:'#e2f0df', padding:12, borderRadius:14, marginTop:6, fontSize:13.5, maxWidth:'85%', color:'var(--text-3)', fontStyle:'italic' }}>
+          Hi {'{first}'} — your message body goes here. Reply STOP to opt out.
         </div>
       </div>
       <div style={{ display:'flex', gap:6, marginTop: 14, flexWrap:'wrap' }}>
@@ -558,7 +555,7 @@ function StreetScreen({ mode }) {
       <div className="fvoter">
         <div className="fvoter-addr">INBOUND · STREET / EVENT</div>
         <div className="fvoter-name">They came to you</div>
-        <div className="fvoter-sub">Trout Lake farmer's market · booth 12</div>
+        <div className="fvoter-sub">Inbound contact at a street/event booth</div>
       </div>
       <div className="fscript">
         <div className="fscript-dir">Don't pitch — ask. Let them lead.</div>

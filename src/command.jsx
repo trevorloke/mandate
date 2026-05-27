@@ -341,18 +341,10 @@ function Command() {
           </div>
         </div>
 
-        <div className="cmd__pinned">
-          <span className="pin-icon">📌</span>
-          <span className="pin-body">"Market vs. neighbours" is the agreed frame for today. Don't debate Vance's words — reframe them.</span>
-          <span style={{ fontFamily:'var(--font-mono)', fontSize:10, opacity:0.7 }}>pinned by @Dex · 08:24</span>
-        </div>
-
         <div className="huddle-strip">
           <span style={{ fontSize:14 }}>🎙</span>
-          <span>LIVE · war room huddle</span>
-          <div className="av-stack">
-            <span>DT</span><span>MC</span><span>BO</span><span>PS</span><span>+2</span>
-          </div>
+          <span>Huddle</span>
+          <div className="av-stack"></div>
           <span style={{ opacity:0.85 }}>Dex is speaking</span>
           <span className="huddle-live">JOIN</span>
         </div>

@@ -343,7 +343,7 @@ function SiteFormsTab() {
 
       <div className="site2__funnel">
         <div className="site2__funnel-h">Donate funnel · /donate</div>
-        <div className="site2__funnel-sub">Last 7 days · 6,310 entries</div>
+        <div className="site2__funnel-sub">Last 7 days</div>
         {SITE_DONATE_FUNNEL.map((s, i) => (
           <div key={s.step} className={`site2__funnel-row ${i===SITE_DONATE_FUNNEL.length-1?'final':''}`}>
             <span className="step">{s.step}</span>
@@ -352,10 +352,6 @@ function SiteFormsTab() {
             <span className="pct">{s.pct.toFixed(1)}%</span>
           </div>
         ))}
-        <div style={{marginTop:18, paddingTop:14, borderTop:'1px solid var(--rule)', fontFamily:'var(--font-mono)', fontSize:10.5, color:'var(--text-3)'}}>
-          <strong style={{color:'var(--ink)', fontFamily:'var(--font-display)', fontSize:14, fontWeight:400}}>Step-2 drop-off &nbsp;</strong>
-          —  62% leave between "Choose amount" and "Begin form".  Likely friction:  required postal-code field,  no Apple Pay.
-        </div>
       </div>
     </div>
   );
