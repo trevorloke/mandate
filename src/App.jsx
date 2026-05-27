@@ -156,7 +156,7 @@ export default function App2() {
         route={effectiveRoute}
         onGo={go}
         workspace={ws}
-        user={user.initials || 'MR'}
+        user={user.initials || (user.name || '').split(/\s+/).filter(Boolean).map(s => s[0]?.toUpperCase()).slice(0,2).join('') || '—'}
         onCmd={() => {}}
         onConductor={() => setConductorOpen(true)}
         conductorCount={conductorNowCount}

@@ -183,11 +183,10 @@ const LogGiftModal = ({ open, prefillDonor, onClose, onLogged, onSwitchToAdd }) 
                   <div className="r-field__lbl">Fund</div>
                   <select className="r-select" value={fund} onChange={e => setFund(e.target.value)}>
                     <option>General</option>
-                    <option>Climate Forward</option>
-                    <option>Housing campaign</option>
-                    <option>Education · Cypress</option>
-                    <option>Major giving</option>
-                    <option>Restricted · venue</option>
+                    <option>Major gift</option>
+                    <option>Recurring</option>
+                    <option>Capital</option>
+                    <option>Pledge fulfilment</option>
                   </select>
                 </div>
                 <div className="r-field">
@@ -531,14 +530,13 @@ const AddDonorModal = ({ open, prefillName, onClose, onAdded, onSwitchToGift }) 
                 <div className="r-field">
                   <div className="r-field__lbl">Source list</div>
                   <select className="r-select" value={list} onChange={e => setList(e.target.value)}>
-                    <option>Email · 2026 launch</option>
-                    <option>Climate · 2024</option>
-                    <option>Doorstep · 2025</option>
-                    <option>Town hall · 2025</option>
-                    <option>Ride-along · 2024</option>
+                    <option>Email</option>
+                    <option>Web</option>
+                    <option>Event</option>
+                    <option>Doorstep</option>
                     <option>Major giving</option>
                     <option>Referral</option>
-                    <option>Imported · screened</option>
+                    <option>Imported</option>
                   </select>
                 </div>
                 <div className="r-field">

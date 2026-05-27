@@ -462,7 +462,7 @@ const RaiseReports = () => {
               <div className="r-panel__title">Acquisition by channel</div>
               <div className="r-panel__sub">Last 30d · revenue · count</div>
             </div>
-            <div className="r-panel__caption">Major-gift wires drove half of April. Email volume is up but per-gift average dipped — list fatigue is the working hypothesis.</div>
+            <div className="r-panel__caption">Acquisition counts and revenue by channel populate as gifts post.</div>
             <AcqBars />
           </div>
 

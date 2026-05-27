@@ -182,7 +182,7 @@ const LedgerReconcile = () => {
         <div className="lrec__bal">
           <span className="lbl">STATEMENT BALANCE</span>
           <b className="big">{fmt(r.statementBalance)}</b>
-          <em>per BMO statement · {r.statementDate}</em>
+          <em>per {(r.bank && r.bank !== '—') ? r.bank : 'bank'} statement{(r.statementDate && r.statementDate !== '—') ? ' · ' + r.statementDate : ''}</em>
         </div>
         <div className="lrec__sep">−</div>
         <div className="lrec__bal">
