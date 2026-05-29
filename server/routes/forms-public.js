@@ -75,12 +75,22 @@ app.post(
     const data = {};
     for (const f of allowedFields) {
       let v = body[f.key];
-      if (v === undefined || v === '') {
+      const isEmpty = v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+      if (isEmpty) {
         if (f.required) return c.json({ error: `missing required field: ${f.key}` }, 400);
         continue;
       }
       if (f.type === 'number')  v = Number(v);
       if (f.type === 'boolean') v = !!v;
+      if (f.type === 'multiselect') {
+        v = (Array.isArray(v) ? v : [v]).map(String);
+        if (f.options) v = v.filter((x) => f.options.includes(x));
+        if (v.length === 0) {
+          if (f.required) return c.json({ error: `missing required field: ${f.key}` }, 400);
+          continue;
+        }
+        if (f.max && v.length > f.max) v = v.slice(0, f.max);
+      }
       if (f.type === 'select' && f.options && !f.options.includes(String(v))) {
         return c.json({ error: `invalid value for ${f.key}` }, 400);
       }

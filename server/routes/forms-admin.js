@@ -9,6 +9,32 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 const newId = (p='') => p + randomBytes(12).toString('hex');
 const slugId = () => randomBytes(8).toString('hex');
 
+// Field types a public form may declare. `multiselect`/`date` were added so the
+// volunteer intake form can carry "check all that apply" groups and dates of
+// birth; arrays/dates pass straight through the public submit handler.
+const FIELD_TYPES = ['text', 'email', 'number', 'textarea', 'select', 'boolean', 'multiselect', 'date'];
+
+// Normalize a client-supplied list of field defs to a safe, persisted shape.
+// Keeps the presentation hints (section/half/placeholder/hint) and the
+// multiselect `max`, so the public renderer can group and cap selections.
+function sanitizeFields(allowedFields) {
+  return (Array.isArray(allowedFields) ? allowedFields : []).map((f) => {
+    const out = {
+      key: String(f.key || '').trim(),
+      label: String(f.label || f.key || '').trim(),
+      type: FIELD_TYPES.includes(f.type) ? f.type : 'text',
+      required: !!f.required,
+    };
+    if (Array.isArray(f.options)) out.options = f.options.map(String);
+    if (f.section) out.section = String(f.section);
+    if (f.half) out.half = true;
+    if (f.placeholder) out.placeholder = String(f.placeholder);
+    if (f.hint) out.hint = String(f.hint);
+    if (Number.isFinite(f.max)) out.max = f.max;
+    return out;
+  }).filter((f) => f.key);
+}
+
 const app = new Hono();
 app.use('*', requireAuth);
 
@@ -37,13 +63,7 @@ app.post('/', requireRole('admin'), async (c) => {
   if (!module || !kind) return c.json({ error: 'module and kind required' }, 400);
 
   // Sanitize allowedFields
-  const fields = (Array.isArray(allowedFields) ? allowedFields : []).map(f => ({
-    key: String(f.key || '').trim(),
-    label: String(f.label || f.key || '').trim(),
-    type: ['text', 'email', 'number', 'textarea', 'select', 'boolean'].includes(f.type) ? f.type : 'text',
-    required: !!f.required,
-    options: Array.isArray(f.options) ? f.options.map(String) : undefined,
-  })).filter(f => f.key);
+  const fields = sanitizeFields(allowedFields);
   if (fields.length === 0) return c.json({ error: 'at least one allowed field required' }, 400);
 
   const { captchaProvider, captchaSitekey, captchaSecret } = body;
@@ -86,7 +106,8 @@ app.put('/:id', requireRole('admin'), async (c) => {
   if (typeof body.redirectUrl === 'string') updates.redirectUrl = body.redirectUrl.trim() || null;
   if (typeof body.rateLimitPerMin === 'number') updates.rateLimitPerMin = body.rateLimitPerMin;
   if (Array.isArray(body.allowedFields) && body.allowedFields.length) {
-    updates.allowedFields = JSON.stringify(body.allowedFields);
+    const fields = sanitizeFields(body.allowedFields);
+    if (fields.length) updates.allowedFields = JSON.stringify(fields);
   }
   if (typeof body.captchaProvider === 'string' || body.captchaProvider === null) {
     const v = ['hcaptcha', 'turnstile'].includes(body.captchaProvider) ? body.captchaProvider : null;

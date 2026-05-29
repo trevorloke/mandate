@@ -4,13 +4,39 @@ import { api } from '../auth/api';
 import { getSchema } from './schemas';
 
 const FIELD_TYPES = [
-  { v: 'text',     label: 'Text' },
-  { v: 'email',    label: 'Email' },
-  { v: 'number',   label: 'Number' },
-  { v: 'textarea', label: 'Textarea' },
-  { v: 'boolean',  label: 'Checkbox' },
-  { v: 'select',   label: 'Select (options)' },
+  { v: 'text',        label: 'Text' },
+  { v: 'email',       label: 'Email' },
+  { v: 'number',      label: 'Number' },
+  { v: 'textarea',    label: 'Textarea' },
+  { v: 'boolean',     label: 'Checkbox' },
+  { v: 'date',        label: 'Date' },
+  { v: 'select',      label: 'Select (options)' },
+  { v: 'multiselect', label: 'Multi-select (options)' },
 ];
+
+const PASSTHROUGH_TYPES = FIELD_TYPES.map((t) => t.v);
+
+// Build the public field defs for a (module, kind) from its schema, keeping the
+// rich types (multiselect/date) and presentation hints. Excludes the id field
+// and any 'Internal' (staff-only) section.
+function publicFieldsFor(module, kind, { skipInternal = true } = {}) {
+  const schema = getSchema(module, kind);
+  if (!schema) return [];
+  return schema.fields
+    .filter((f) => f.key !== 'id' && (!skipInternal || f.section !== 'Internal'))
+    .map((f) => ({
+      key: f.key,
+      label: f.label,
+      type: PASSTHROUGH_TYPES.includes(f.type) ? f.type : 'text',
+      required: !!f.required,
+      ...(f.options ? { options: f.options } : {}),
+      ...(f.section ? { section: f.section } : {}),
+      ...(f.half ? { half: true } : {}),
+      ...(f.placeholder ? { placeholder: f.placeholder } : {}),
+      ...(f.hint ? { hint: f.hint } : {}),
+      ...(Number.isFinite(f.max) ? { max: f.max } : {}),
+    }));
+}
 
 export default function AdminForms() {
   const [forms, setForms] = useState([]);
@@ -35,6 +61,24 @@ export default function AdminForms() {
       load();
     } catch (e) { setMsg({ kind: 'err', text: e.message }); }
   };
+  // One-click: provision the full Volunteer Information Form bound to
+  // people.volunteer, so it's live and shareable without hand-building 100 fields.
+  const onCreateVolunteerIntake = async () => {
+    const allowedFields = publicFieldsFor('people', 'volunteer');
+    if (!allowedFields.length) { setMsg({ kind: 'err', text: 'Volunteer schema not found.' }); return; }
+    try {
+      const r = await api.createForm({
+        label: 'Volunteer intake',
+        module: 'people', kind: 'volunteer',
+        allowedFields,
+        rateLimitPerMin: 10,
+      });
+      setShowCreate(false);
+      setRevealed(r.form);
+      load();
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
+
   const onToggle = async (f) => {
     try { await api.updateForm(f.id, { active: !f.active }); load(); }
     catch (e) { setMsg({ kind: 'err', text: e.message }); }
@@ -52,7 +96,10 @@ export default function AdminForms() {
           Public forms accept anonymous submissions and store them as module records.
           Use them for donate forms, volunteer signups, RSVPs.
         </p>
-        <button className="adm__btn" onClick={() => setShowCreate(true)}>+ New form</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="adm__btn adm__btn--ghost" onClick={onCreateVolunteerIntake}>+ Volunteer intake</button>
+          <button className="adm__btn" onClick={() => setShowCreate(true)}>+ New form</button>
+        </div>
       </div>
 
       {msg && <div className={`adm__msg adm__msg--${msg.kind}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
@@ -102,13 +149,17 @@ export default function AdminForms() {
 
 function RevealForm({ form, onClose }) {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const pageUrl = `${origin}/f/${form.slug}`;
   const url = `${origin}/api/public/forms/${form.slug}`;
   const embed = buildEmbed(form, origin);
 
   return (
     <div className="adm__panel" style={{ background: '#fff8e0', borderColor: '#d6c8ae' }}>
       <div className="adm__panel-h">Form · "{form.label}"</div>
-      <h3 className="adm__panel-title">Public endpoint</h3>
+      <h3 className="adm__panel-title">Hosted page — share this link</h3>
+      <input className="adm__field-input adm__field-input--mono" readOnly value={pageUrl}
+        onClick={e => e.target.select()} style={{ fontSize: 12, marginBottom: 12 }} />
+      <h3 className="adm__panel-title">Raw API endpoint (for embeds)</h3>
       <input className="adm__field-input adm__field-input--mono" readOnly value={url}
         onClick={e => e.target.select()} style={{ fontSize: 12, marginBottom: 12 }} />
 
@@ -200,7 +251,7 @@ function NewForm({ onCancel, onSubmit }) {
         .map(f => ({
           key: f.key,
           label: f.label,
-          type: ['text', 'email', 'number', 'textarea', 'boolean', 'select'].includes(f.type) ? f.type : 'text',
+          type: PASSTHROUGH_TYPES.includes(f.type) ? f.type : 'text',
           required: !!f.required,
           options: f.options,
         }));
@@ -254,6 +305,9 @@ function NewForm({ onCancel, onSubmit }) {
               <optgroup label="Ground">
                 <option value="ground.voter">ground · voter</option>
                 <option value="ground.canvasser">ground · canvasser</option>
+              </optgroup>
+              <optgroup label="People">
+                <option value="people.volunteer">people · volunteer</option>
               </optgroup>
               <optgroup label="Civic">
                 <option value="civic.case">civic · case</option>

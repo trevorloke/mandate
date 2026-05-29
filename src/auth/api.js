@@ -114,6 +114,10 @@ export const api = {
   updateForm:   (id, body) => fetchJson(`/api/forms/${id}`, { method: 'PUT', body }),
   deleteForm:   (id) => fetchJson(`/api/forms/${id}`, { method: 'DELETE' }),
 
+  // Public (anonymous) form rendering + submission — no auth required.
+  getPublicForm:    (slug) => fetchJson(`/api/public/forms/${slug}`),
+  submitPublicForm: (slug, data) => fetchJson(`/api/public/forms/${slug}`, { method: 'POST', body: data }),
+
   listWebhookDeliveries: (id) => fetchJson(`/api/webhooks/${id}/deliveries`),
   retryWebhookDelivery:  (whid, did) => fetchJson(`/api/webhooks/${whid}/deliveries/${did}/retry`, { method: 'POST' }),
 

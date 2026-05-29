@@ -19,6 +19,7 @@ import { Command } from './command';
 import { Academy } from './academy';
 import Admin from './admin/Admin';
 import OnboardingWizard from './admin/OnboardingWizard';
+import PublicForm from './PublicForm';
 import { useAuth } from './auth/AuthContext';
 import { useLocale } from './i18n';
 import { api } from './auth/api';
@@ -105,6 +106,12 @@ export default function App2() {
   }, []);
 
   // Auth gate
+  // Public form link (e.g. volunteer intake) — open to anyone, no auth needed.
+  const formMatch = typeof window !== 'undefined' && window.location.pathname.match(/^\/f\/([a-f0-9]+)/);
+  if (formMatch) {
+    return <PublicForm slug={formMatch[1]} />;
+  }
+
   if (loading) {
     return <div className="auth-screen__loading">Loading…</div>;
   }
