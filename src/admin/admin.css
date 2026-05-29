@@ -289,6 +289,44 @@
   font-size: 13px;
 }
 
+/* Section header inside a typed form (full-width band) */
+.adm__section {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-4);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 6px;
+  margin: 16px 0 2px;
+}
+.adm__section:first-child { margin-top: 0; }
+
+/* Multiselect — wrap of toggle chips, value is an array */
+.adm__field-multi {
+  display: flex; flex-wrap: wrap; gap: 6px 8px;
+  padding: 6px 0;
+}
+.adm__multi-opt {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink-3);
+  background: var(--paper-1);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 4px 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.adm__multi-opt:hover { background: var(--paper-2); }
+.adm__multi-opt.is-on {
+  background: var(--ink-1);
+  color: var(--paper-0);
+  border-color: var(--ink-1);
+}
+.adm__multi-opt.is-disabled { opacity: 0.4; cursor: not-allowed; }
+.adm__multi-opt input { cursor: inherit; margin: 0; }
+.adm__multi-opt.is-on input { accent-color: var(--paper-0); }
+
 /* Mode toggle (Fields / JSON) */
 .adm__mode-toggle {
   display: inline-flex;

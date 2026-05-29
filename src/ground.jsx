@@ -4,6 +4,7 @@ import { GROUND_VOCAB, UNIVERSE_DEFAULT, PDS, RIVER, LANDMARKS, VOTERS, CANVASSE
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useAuth } from './auth/AuthContext';
 import EmptyModule from './EmptyModule';
+import { ageOf } from './util';
 
 // Mandate 2.0 — Ground module (Desk + Field tabs)
 
@@ -205,7 +206,7 @@ function VoterRow({ v, open, onToggle, onSelect, selected }) {
       <div className={'vrow ' + (open ? 'vrow--open' : '')} onClick={onToggle}>
         <div className={'vrow__check ' + (selected ? 'vrow__check--on' : '')} onClick={(e) => { e.stopPropagation(); onSelect(); }}/>
         <div className="vrow__name">
-          {v.first} {v.last} <span className="meta">{v.age} · {v.tenure}</span>
+          {v.first} {v.last} <span className="meta">{[ageOf(v), v.tenure].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="vrow__addr">{v.addr}</div>
         <div className="vrow__supp">
@@ -220,7 +221,7 @@ function VoterRow({ v, open, onToggle, onSelect, selected }) {
           <div>
             <div className="dossier__col-title">Dossier</div>
             <div className="dossier__name">{v.first} {v.last}</div>
-            <div className="dossier__sub">{v.age} · {v.tenure} · {v.addr}</div>
+            <div className="dossier__sub">{[ageOf(v), v.tenure, v.addr].filter(Boolean).join(' · ')}</div>
             <div className="dossier__facts">
               <div><b>Support</b> {v.support.toFixed(2)}</div>
               <div><b>Primary issue</b> {v.issue}</div>
@@ -433,7 +434,7 @@ function DoorScreen({ voter, script, mode }) {
       <div className="fvoter">
         <div className="fvoter-addr">{voter.addr.toUpperCase()}</div>
         <div className="fvoter-name">{voter.first} {voter.last}</div>
-        <div className="fvoter-sub">{voter.age} · {voter.tenure} · ballot {voter.ballots} · issue: {voter.issue}</div>
+        <div className="fvoter-sub">{[ageOf(voter), voter.tenure].filter(Boolean).join(' · ')} · ballot {voter.ballots} · issue: {voter.issue}</div>
       </div>
       {mode === 'door-lit' ? (
         <div className="fscript">
@@ -507,7 +508,7 @@ function PhoneScreen({ voter, script, mode }) {
       <div className="fvoter">
         <div className="fvoter-addr">DIALING{voter.phone ? ' · ' + voter.phone : ''}</div>
         <div className="fvoter-name">{voter.first} {voter.last}</div>
-        <div className="fvoter-sub">{voter.age ? voter.age + ' · ' : ''}{voter.tenure || ''}</div>
+        <div className="fvoter-sub">{ageOf(voter) != null ? ageOf(voter) + ' · ' : ''}{voter.tenure || ''}</div>
       </div>
       <div style={{ textAlign:'center', padding:'14px 0' }}>
         <div style={{ width:80, height:80, margin:'0 auto', borderRadius:'50%', background:'#2e6b3e', display:'grid', placeItems:'center', color:'#fff', fontSize:28 }}>📞</div>

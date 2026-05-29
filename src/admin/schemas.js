@@ -4,6 +4,13 @@
 // Field types:
 //   text, textarea, number, select, multiselect, boolean, tags, date, currency, percent
 //
+// Per-field options:
+//   half    — render at half width (two per row); omit for full width
+//   section — optional group label; TypedForm prints a header the first time
+//             a new section value appears, so long schemas read as sections
+//   options — array of choices for select / multiselect
+//   max     — (multiselect) cap the number of selections (e.g. "pick 3")
+//
 // `idPrefix` (optional): when creating a new record, the form pre-fills the
 // required `id` field with `${idPrefix}-${random}`. Omit to require manual entry
 // (e.g. ledger.account where `code` carries semantic meaning).
@@ -17,7 +24,7 @@ export const SCHEMAS = {
       { key: 'pd',         label: 'Polling district', type: 'text', half: true, placeholder: 'PD-009' },
       { key: 'first',      label: 'First name',  type: 'text', required: true, half: true },
       { key: 'last',       label: 'Last name',   type: 'text', required: true, half: true },
-      { key: 'age',        label: 'Age',         type: 'number', half: true },
+      { key: 'dob',        label: 'Date of birth', type: 'date', half: true, hint: 'age is derived — never goes stale' },
       { key: 'household',  label: 'Household',   type: 'number', half: true },
       { key: 'addr',       label: 'Address',     type: 'text' },
       { key: 'tenure',     label: 'Tenure',      type: 'select', options: ['renter', 'owner', 'unknown'], half: true },

@@ -8,21 +8,30 @@ export default function TypedForm({ schema, value, onChange }) {
 
   const set = (key, v) => onChange({ ...value, [key]: v });
 
+  // Fields may declare an optional `section`; we emit a header the first time
+  // each section appears so long schemas (e.g. the volunteer intake) read as
+  // grouped sections rather than one flat wall of inputs.
+  let lastSection = null;
+
   return (
     <div className="adm__typed">
-      {schema.fields.map((f) => (
-        <div
-          key={f.key}
-          className={'adm__field' + (f.half ? ' adm__field--half' : '')}
-        >
-          <label className="adm__field-label">
-            {f.label}
-            {f.required && <span className="adm__req">*</span>}
-            {f.hint && <em className="adm__hint"> · {f.hint}</em>}
-          </label>
-          {renderInput(f, value, set, tagDrafts, setTagDrafts)}
-        </div>
-      ))}
+      {schema.fields.map((f) => {
+        const showHeader = f.section && f.section !== lastSection;
+        if (f.section) lastSection = f.section;
+        return (
+          <React.Fragment key={f.key}>
+            {showHeader && <div className="adm__section">{f.section}</div>}
+            <div className={'adm__field' + (f.half ? ' adm__field--half' : '')}>
+              <label className="adm__field-label">
+                {f.label}
+                {f.required && <span className="adm__req">*</span>}
+                {f.hint && <em className="adm__hint"> · {f.hint}</em>}
+              </label>
+              {renderInput(f, value, set, tagDrafts, setTagDrafts)}
+            </div>
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -163,6 +172,36 @@ function renderInput(f, value, set, tagDrafts, setTagDrafts) {
             }}
             onBlur={commit}
           />
+        </div>
+      );
+    }
+    case 'multiselect': {
+      const arr = Array.isArray(v) ? v : [];
+      const atMax = f.max != null && arr.length >= f.max;
+      const toggle = (opt) => {
+        if (arr.includes(opt)) set(f.key, arr.filter((x) => x !== opt));
+        else if (!atMax) set(f.key, [...arr, opt]);
+      };
+      return (
+        <div className="adm__field-multi">
+          {(f.options || []).map((opt) => {
+            const on = arr.includes(opt);
+            const locked = !on && atMax;
+            return (
+              <label
+                key={opt}
+                className={'adm__multi-opt' + (on ? ' is-on' : '') + (locked ? ' is-disabled' : '')}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={locked}
+                  onChange={() => toggle(opt)}
+                />
+                <span>{opt}</span>
+              </label>
+            );
+          })}
         </div>
       );
     }
