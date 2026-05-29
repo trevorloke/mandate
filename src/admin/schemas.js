@@ -91,6 +91,136 @@ export const SCHEMAS = {
     ],
   },
 
+  // ── People ───────────────────────────────────────────────
+  // Volunteer Information Form. The single source of truth for the admin
+  // editor, the public intake page, and the CSV import template.
+  'people.volunteer': {
+    label: 'Volunteer', idPrefix: 'VOL',
+    fields: [
+      // Identity & contact
+      { key: 'id',        label: 'ID',          type: 'text', required: true, mono: true, half: true, section: 'Identity & contact' },
+      { key: 'first',     label: 'First name',  type: 'text', required: true, half: true, section: 'Identity & contact' },
+      { key: 'last',      label: 'Last name',   type: 'text', required: true, half: true, section: 'Identity & contact' },
+      { key: 'addr',      label: 'Address',     type: 'text', section: 'Identity & contact' },
+      { key: 'city',      label: 'City',        type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'postal',    label: 'Postal code', type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'phone',     label: 'Phone',       type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'cell',      label: 'Cell phone',  type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'email1',    label: 'Email 1',     type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'email2',    label: 'Email 2',     type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'twitter',   label: 'X / Twitter', type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'instagram', label: 'Instagram',   type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'tiktok',    label: 'TikTok',      type: 'text', half: true, section: 'Identity & contact' },
+      { key: 'facebook',  label: 'Facebook',    type: 'text', half: true, section: 'Identity & contact' },
+
+      // Identity documents
+      { key: 'dob',         label: 'Date of birth',      type: 'date', half: true, hint: 'age is derived — never goes stale', section: 'Identity documents' },
+      { key: 'citizenship', label: 'Citizenship',        type: 'text', half: true, section: 'Identity documents' },
+      { key: 'riding',      label: 'Riding',             type: 'text', half: true, section: 'Identity documents' },
+      { key: 'dlNumber',    label: "Driver's licence #", type: 'text', half: true, hint: 'for drivers', section: 'Identity documents' },
+      { key: 'careCard',    label: 'Care card #',        type: 'text', half: true, hint: 'for emergencies only', section: 'Identity documents' },
+
+      // Languages
+      { key: 'languages',         label: 'Languages spoken', type: 'multiselect', section: 'Languages',
+        options: ['English', 'Punjabi', 'Hindi', 'Mandarin', 'Cantonese', 'Arabic', 'French', 'Spanish', 'Ukrainian'] },
+      { key: 'languagesOther',    label: 'Other languages',  type: 'text', half: true, section: 'Languages' },
+      { key: 'preferredLanguage', label: 'Preferred language', type: 'text', half: true, section: 'Languages' },
+
+      // Childcare
+      { key: 'childcareHours',     label: 'Available childcare hours', type: 'text', section: 'Childcare', placeholder: 'e.g. weekday evenings, Sat mornings' },
+      { key: 'wantsFreeChildcare', label: 'Interested in free childcare while I volunteer', type: 'boolean', section: 'Childcare' },
+      { key: 'volunteerWithChild', label: 'Interested in volunteering with my child (13+)', type: 'boolean', section: 'Childcare' },
+
+      // Availability
+      { key: 'availabilityOnline',   label: 'Online availability',    type: 'textarea', section: 'Availability', hint: 'days — hours; note available / sometimes / unavailable' },
+      { key: 'availabilityInPerson', label: 'In-person availability', type: 'textarea', section: 'Availability', hint: 'days — hours' },
+
+      // Political experience
+      { key: 'politicalExperience', label: 'Previous political experience', type: 'multiselect', section: 'Political experience',
+        options: ['Scrutineer', 'Canvassing', 'Political influencer', 'Fundraising', 'Event planning/management', 'Past candidate', 'Financial agent', 'Campaign manager', 'Party executive', 'Media'] },
+      { key: 'previousRun',     label: 'Previous run for office',     type: 'text', half: true, section: 'Political experience' },
+      { key: 'previousElected', label: 'Previously elected to office', type: 'text', half: true, section: 'Political experience' },
+      { key: 'wantsToRun',      label: 'I would like to run as a candidate',                type: 'boolean', section: 'Political experience' },
+      { key: 'contactEvents',   label: 'Contact me about events in my area',               type: 'boolean', section: 'Political experience' },
+      { key: 'contactVolunteer',label: 'Contact me about opportunities to volunteer',      type: 'boolean', section: 'Political experience' },
+
+      // Work & volunteer experience
+      { key: 'workExperience', label: 'Previous work / volunteer experience', type: 'multiselect', section: 'Work & volunteer experience',
+        options: ['Retail', 'Management', 'Executive management', 'Sales', 'Social media', 'Influencer', 'Restaurant', 'Professional driver', 'Event planning/management', 'Network/computer', 'Coaching sports', 'Teacher', 'Accounting/bookkeeping', 'Social work', 'Counselling', 'Journalism', 'Non-profit', 'Business owner', 'Company founder', 'Religious leader', 'Data entry', 'Hair styling', 'Make-up', 'Wardrobe', 'Brand management', 'Advertising', 'Cashier', 'Child care', 'Nurse', 'Doctor', 'Paramedic', 'Police', 'Firefighter', 'Security', 'Audio/video', 'Computer programming', 'Artificial intelligence', 'Janitorial/cleaning', 'Human resources', 'Telemarketing', 'Wellness', 'Fitness', 'Yoga', 'Music', 'Technical', 'Media', 'Legal', 'Engineering', 'Construction', 'Woodworking'] },
+      { key: 'workExperienceOther', label: 'Other experience', type: 'text', section: 'Work & volunteer experience' },
+
+      // Certifications
+      { key: 'firstAid',      label: 'Current first aid certification', type: 'boolean', section: 'Certifications' },
+      { key: 'firstAidDate',  label: 'First aid — date',  type: 'date', half: true, section: 'Certifications' },
+      { key: 'firstAidLevel', label: 'First aid — level', type: 'text', half: true, section: 'Certifications' },
+      { key: 'certifications', label: 'Professional certifications', type: 'multiselect', section: 'Certifications',
+        options: ['Medical doctor', 'Nurse', 'Paramedic', 'Food safe', 'Serving it right', 'Special events server', 'Security licence', 'Law degree'] },
+
+      // Preferred volunteer roles
+      { key: 'preferredRoles', label: 'Preferred volunteer roles', type: 'multiselect', section: 'Preferred volunteer roles',
+        options: ['Candidate', 'Campaign manager', 'Riding executive management', 'Party executive management', 'Legal', 'Fundraising', 'Door knocking/canvassing', 'Street promotion', 'Outreach', 'Telemarketing', 'Financial agent', 'Accounting', 'Data entry', 'Scrutineer', 'Election fairness', 'Computer technology', 'Computer/data security', 'Video production', 'Camera person', 'Audio technician', 'Lighting technician', 'Social media management', 'Written content/technical writing', 'Event management', 'Food service', 'Food preparation', 'Disability accommodation', 'Delivery driving', 'Carpool driving', 'Child minding', 'Human resources', 'Health and safety', 'Security', 'Lawn sign installation', 'University club', 'General volunteer'] },
+
+      // Transferable skills
+      { key: 'skills', label: 'Transferable skills', type: 'multiselect', section: 'Transferable skills',
+        options: ['Typing 30 wpm', 'Typing 45 wpm', 'Typing 60 wpm', 'Telemarketing', 'Sales', 'Business management', 'Bookkeeping', 'Customer service', 'Account management', 'Event management', 'Coaching', 'Motivating', 'Word', 'Excel', 'PowerPoint', 'Research', 'Writing', 'Public speaking', 'Negotiating', 'Lift 25 lbs', 'Lift 50 lbs'] },
+      { key: 'uniqueSkill', label: 'Unique skill, experience, or idea that may help the campaign', type: 'textarea', section: 'Transferable skills' },
+
+      // Hobbies & social events
+      { key: 'interestedFreeEvents', label: 'Contact me about attending free events', type: 'boolean', section: 'Hobbies & social events' },
+      { key: 'freeEvents', label: 'Free events of interest', type: 'multiselect', section: 'Hobbies & social events',
+        options: ['Hiking', 'Picnics', 'Potluck dinners', 'Beach', 'Karaoke', 'Board games', 'Video games', 'Card games', 'Softball', 'Soccer', 'Basketball', 'Badminton', 'Meditation', 'Yoga', "Children's play events"] },
+      { key: 'interestedPaidEvents', label: 'Contact me about attending paid events', type: 'boolean', section: 'Hobbies & social events' },
+      { key: 'paidEvents', label: 'Paid events of interest', type: 'multiselect', section: 'Hobbies & social events',
+        options: ['Dinner and dancing', 'Comedy night', 'Symphony', 'Theatre', 'Museums', 'Art galleries', 'Wine tasting', 'Golfing', 'Pool parties', 'Wellness retreat', 'Local pro sports'] },
+      { key: 'supportGroups', label: 'Support groups of interest', type: 'multiselect', section: 'Hobbies & social events',
+        options: ['Trauma support', 'Stress and relaxation', 'Practical help exchange'] },
+
+      // Disability accommodations
+      { key: 'disability',         label: 'Disability',             type: 'text', section: 'Disability accommodations' },
+      { key: 'accommodation',      label: 'Requested accommodation', type: 'textarea', section: 'Disability accommodations' },
+      { key: 'accommodationNotes', label: 'Other information',       type: 'textarea', section: 'Disability accommodations' },
+
+      // Medical
+      { key: 'medicalConditions',   label: 'Conditions you may need assistance with', type: 'textarea', section: 'Medical' },
+      { key: 'doctorName',          label: 'Doctor name',  type: 'text', half: true, section: 'Medical' },
+      { key: 'doctorPhone',         label: 'Doctor phone', type: 'text', half: true, section: 'Medical' },
+      { key: 'medicalInstructions', label: 'Special instructions', type: 'textarea', section: 'Medical' },
+
+      // Allergies
+      { key: 'foodAllergies',  label: 'Food allergies',  type: 'textarea', section: 'Allergies' },
+      { key: 'otherAllergies', label: 'Other allergies', type: 'textarea', section: 'Allergies' },
+
+      // Emergency contact
+      { key: 'emergencyName',  label: 'Emergency contact name',  type: 'text', half: true, section: 'Emergency contact' },
+      { key: 'emergencyPhone', label: 'Emergency contact phone', type: 'text', half: true, section: 'Emergency contact' },
+
+      // Referral
+      { key: 'referral', label: 'Who referred you to the party / campaign?', type: 'text', section: 'Referral' },
+
+      // Holidays
+      { key: 'holidays', label: 'Holidays I celebrate or would attend', type: 'multiselect', section: 'Holidays',
+        options: ['Christmas', 'Easter', 'Thanksgiving', "New Year's Day", 'Canada Day', 'Ramadan', 'Eid al-Fitr', 'Eid al-Adha', 'Islamic New Year (Hijra)', 'Day of Ashura', 'Mawlid an-Nabi', 'Hola Mohalla', 'Diwali', 'Bandi Chhor Divas', 'Vaisakhi', 'Rosh Hashanah', 'Yom Kippur', 'Passover', 'Shavuot', 'Sukkot', 'Hanukkah', 'Chinese New Year', 'Dragon Boat Festival', 'Vesak', 'Parinirvana Day', 'Magha Puja', 'Dhamma Day', 'Bodhi Day', 'Chuseok', 'Seollal'] },
+
+      // Motivation
+      { key: 'motivation', label: 'What made you want to volunteer?', type: 'textarea', section: 'Motivation' },
+      { key: 'topIssues',  label: 'Top 3 issues', type: 'multiselect', max: 3, hint: 'pick up to 3', section: 'Motivation',
+        options: ['Strengthening the economy', 'Anti-corruption / organized crime', 'Lowering housing costs', 'Lowering taxes', 'Improving healthcare', 'Reforming education', 'Protecting the environment', 'Youth prosperity', 'Disability rights & inclusion', 'Foreign interference', 'Crime', 'Democracy'] },
+      { key: 'politicalChange', label: 'What political change do you want to see most?', type: 'textarea', section: 'Motivation' },
+
+      // Resume
+      { key: 'hasResume',      label: 'I have a resume',  type: 'boolean', section: 'Resume' },
+      { key: 'resumeUrl',      label: 'Resume link',      type: 'text', hint: 'optional — paste a link', section: 'Resume' },
+      { key: 'coverLetterUrl', label: 'Cover letter link', type: 'text', hint: 'optional', section: 'Resume' },
+
+      // Internal (staff only — not part of the public form)
+      { key: 'status', label: 'Status', type: 'select', half: true, section: 'Internal',
+        options: ['prospect', 'active', 'inactive', 'declined'] },
+      { key: 'source', label: 'Source', type: 'text', half: true, section: 'Internal', placeholder: 'public form / import / event' },
+      { key: 'tags',   label: 'Tags',   type: 'tags', section: 'Internal' },
+      { key: 'notes',  label: 'Staff notes', type: 'textarea', section: 'Internal' },
+    ],
+  },
+
   // ── Raise ────────────────────────────────────────────────
   'raise.donor': {
     label: 'Donor', idPrefix: 'd',

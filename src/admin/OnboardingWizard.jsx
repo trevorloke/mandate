@@ -10,6 +10,7 @@ import './OnboardingWizard.css';
 
 const ALL_MODULES = [
   { k: 'ground',     label: 'Ground',     desc: 'Voter universes · canvass · field' },
+  { k: 'people',     label: 'People',     desc: 'Volunteers · supporters · intake' },
   { k: 'beacon',     label: 'Beacon',     desc: 'Social · publishing · listening · press' },
   { k: 'raise',      label: 'Raise',      desc: 'Donors · prospects · gifts' },
   { k: 'ledger',     label: 'Ledger',     desc: 'Books · journal · filings · compliance' },

@@ -7,6 +7,7 @@ import { useT } from './i18n';
 // ── Module registry (ink/paper, per-module chromatic territory)
 const MOD2 = [
   { k:'ground',     n:'Ground',     s:'Field ops',        ac:'var(--m-ground)',     tint:'var(--m-ground-tint)',     tag:'G' },
+  { k:'people',     n:'People',     s:'Volunteers',       ac:'var(--m-people)',     tint:'var(--m-people-tint)',     tag:'P' },
   { k:'beacon',     n:'Beacon',     s:'Voice & press',    ac:'var(--m-beacon)',     tint:'var(--m-beacon-tint)',     tag:'B' },
   { k:'raise',      n:'Raise',      s:'Fundraising',      ac:'var(--m-raise)',      tint:'var(--m-raise-tint)',      tag:'R' },
   { k:'ledger',     n:'Ledger',     s:'Finance',          ac:'var(--m-ledger)',     tint:'var(--m-ledger-tint)',     tag:'L' },

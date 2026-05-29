@@ -5,10 +5,11 @@ import { api } from '../auth/api';
 // Lazy imports — only loaded when seeding is triggered.
 async function loadAllData() {
   const [
-    ground, beacon1, beacon2, raise, raiseGlr,
+    ground, people, beacon1, beacon2, raise, raiseGlr,
     ledger, coalition, civic, opp, site, events, academy, command, app,
   ] = await Promise.all([
     import('../ground-data'),
+    import('../people-data'),
     import('../beacon-data'),
     import('../beacon-data2'),
     import('../raise-data'),
@@ -23,7 +24,7 @@ async function loadAllData() {
     import('../command-data'),
     import('../data'),
   ]);
-  return { ground, beacon1, beacon2, raise, raiseGlr, ledger, coalition, civic, opp, site, events, academy, command, app };
+  return { ground, people, beacon1, beacon2, raise, raiseGlr, ledger, coalition, civic, opp, site, events, academy, command, app };
 }
 
 // Map each (module, kind) bucket to a function returning the records.
@@ -35,6 +36,9 @@ function buildBuckets(d) {
     { module: 'ground', kind: 'shift',     records: d.ground.SHIFTS || [] },
     { module: 'ground', kind: 'pd',        records: d.ground.PDS || [] },
     { module: 'ground', kind: 'script',    records: d.ground.SCRIPTS || [] },
+
+    // people
+    { module: 'people', kind: 'volunteer', records: d.people.VOLUNTEERS || [] },
 
     // beacon
     { module: 'beacon', kind: 'account',      records: d.beacon1.BEACON_ACCOUNTS || [] },

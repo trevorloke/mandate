@@ -6,6 +6,7 @@ import { Home2 } from './home';
 import { Conductor } from './conductor';
 import { DossierDrawer } from './fabric';
 import { Ground } from './ground';
+import { People } from './people';
 import { Beacon } from './beacon';
 import { Raise2 } from './raise';
 import { Ledger2 } from './ledger';
@@ -31,6 +32,7 @@ import NotificationBell from './shell/NotificationBell';
 const PAGE_MAP2 = {
   ground:     () => <Ground />,
   field:      () => <Ground />,
+  people:     () => <People />,
   beacon:     () => <Beacon />,
   raise:      () => <Raise2 />,
   ledger:     () => <Ledger2 />,

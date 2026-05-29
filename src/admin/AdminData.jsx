@@ -20,6 +20,9 @@ export const MODULE_KINDS = [
     { kind: 'pd',         label: 'Polling districts' },
     { kind: 'script',     label: 'Scripts' },
   ]},
+  { module: 'people', kinds: [
+    { kind: 'volunteer',  label: 'Volunteers' },
+  ]},
   { module: 'beacon', kinds: [
     { kind: 'account',    label: 'Social accounts' },
     { kind: 'post',       label: 'Posts' },
