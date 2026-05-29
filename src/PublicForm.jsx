@@ -1,7 +1,7 @@
 // Public, unauthenticated form page. Mounted by App.jsx for the route
 // /f/:slug — fetches the form schema from /api/public/forms/:slug and renders
 // it (sections, multiselect, date, etc.), then submits anonymously.
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './auth/api';
 import './PublicForm.css';
 

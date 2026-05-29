@@ -10,14 +10,13 @@ export default function TypedForm({ schema, value, onChange }) {
 
   // Fields may declare an optional `section`; we emit a header the first time
   // each section appears so long schemas (e.g. the volunteer intake) read as
-  // grouped sections rather than one flat wall of inputs.
-  let lastSection = null;
-
+  // grouped sections rather than one flat wall of inputs. We detect "first in
+  // section" by comparing to the previous field rather than mutating state.
   return (
     <div className="adm__typed">
-      {schema.fields.map((f) => {
-        const showHeader = f.section && f.section !== lastSection;
-        if (f.section) lastSection = f.section;
+      {schema.fields.map((f, i) => {
+        const prevSection = i > 0 ? schema.fields[i - 1].section : null;
+        const showHeader = f.section && f.section !== prevSection;
         return (
           <React.Fragment key={f.key}>
             {showHeader && <div className="adm__section">{f.section}</div>}
