@@ -311,3 +311,66 @@ export const metricSnapshots = sqliteTable('metric_snapshots', {
   day:         text('day').notNull(),          // 'YYYY-MM-DD' (UTC) — daily dedupe key
   capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// ── Social (Beacon) — real account connections, scheduled/published posts,
+// and per-platform developer-app credentials. Tokens & secrets are stored
+// encrypted (see server/lib/crypto.js); they are never returned to the client.
+
+// A connected social account (Bluesky, Mastodon, X, …). `credentials` holds an
+// encrypted JSON blob (access/refresh tokens, app password, instance, did…).
+export const socialAccounts = sqliteTable('social_accounts', {
+  id:             text('id').primaryKey(),
+  workspaceId:    text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  platform:       text('platform').notNull(),          // 'bluesky' | 'mastodon' | 'x' | 'meta' | 'linkedin'
+  handle:         text('handle'),                       // '@name' / 'name@instance'
+  displayName:    text('display_name'),
+  avatarUrl:      text('avatar_url'),
+  remoteId:       text('remote_id'),                    // did / account id on the platform
+  instanceUrl:    text('instance_url'),                 // mastodon instance origin
+  credentials:    text('credentials'),                  // encrypted JSON — server-only
+  scopes:         text('scopes'),
+  status:         text('status').notNull().default('connected'), // connected | error | expired
+  lastError:      text('last_error'),
+  lastVerifiedAt: integer('last_verified_at', { mode: 'timestamp' }),
+  createdById:    text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:      integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:      integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// One row per (post content × target account). Posts composed to N accounts
+// share a groupId so the UI can group them; the worker publishes each row
+// independently with its own status/retry. scheduledAt null = publish now/draft.
+export const socialPosts = sqliteTable('social_posts', {
+  id:            text('id').primaryKey(),
+  workspaceId:   text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  groupId:       text('group_id').notNull(),
+  accountId:     text('account_id').references(() => socialAccounts.id, { onDelete: 'set null' }),
+  platform:      text('platform').notNull(),
+  body:          text('body').notNull().default(''),
+  mediaJson:     text('media_json'),                   // JSON array of media refs (future)
+  status:        text('status').notNull().default('draft'), // draft|scheduled|publishing|published|failed|canceled
+  scheduledAt:   integer('scheduled_at', { mode: 'timestamp' }),
+  publishedAt:   integer('published_at', { mode: 'timestamp' }),
+  remoteId:      text('remote_id'),
+  remoteUrl:     text('remote_url'),
+  error:         text('error'),
+  attempts:      integer('attempts').notNull().default(0),
+  workerId:      text('worker_id'),
+  leaseExpiresAt: integer('lease_expires_at', { mode: 'timestamp' }),
+  createdById:   text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:     integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:     integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// Per-platform developer-app credentials (client id/secret) for the gated
+// providers that require an OAuth app. clientSecret is stored encrypted.
+export const socialApps = sqliteTable('social_apps', {
+  id:           text('id').primaryKey(),
+  workspaceId:  text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  platform:     text('platform').notNull(),
+  clientId:     text('client_id'),
+  clientSecret: text('client_secret'),                 // encrypted
+  extra:        text('extra').default('{}'),           // JSON: redirect URI, instance, etc.
+  active:       integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

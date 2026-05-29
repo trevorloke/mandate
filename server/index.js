@@ -14,6 +14,7 @@ const SERVE_STATIC = process.env.MANDATE_SERVE_STATIC === '1' || existsSync(DIST
 import { startWebhookWorker } from './lib/webhooks.js';
 import { startRetentionWorker } from './lib/retention.js';
 import { startReportsWorker } from './lib/reports.js';
+import { startSocialWorker } from './lib/social-worker.js';
 import { csrfMiddleware } from './middleware/csrf.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -38,12 +39,14 @@ import reportsRoutes from './routes/reports.js';
 import passkeyRoutes from './routes/passkey.js';
 import dashboardRoutes from './routes/dashboard.js';
 import businessMetricsRoutes from './routes/metrics-business.js';
+import socialRoutes from './routes/social.js';
 import { startMetricsWorker } from './lib/metrics-compute.js';
 
 ensureTables();
 startWebhookWorker();
 startRetentionWorker();
 startReportsWorker();
+startSocialWorker();
 startMetricsWorker();
 
 const app = new Hono();
@@ -103,6 +106,7 @@ app.route('/api/comments', commentsRoutes);
 app.route('/api/reports', reportsRoutes);
 app.route('/api/auth/passkey', passkeyRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+app.route('/api/social', socialRoutes);
 
 // Static SPA serving (production deploys). When `dist/` exists OR
 // MANDATE_SERVE_STATIC=1 is set, the API also serves the built frontend

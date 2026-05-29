@@ -351,6 +351,66 @@ function bootstrapTables() {
     CREATE INDEX IF NOT EXISTS idx_metric_snapshots_lookup ON metric_snapshots(workspace_id, metric_key, day DESC);
   `);
 
+  // Social (Beacon): connected accounts, scheduled/published posts, dev-app creds.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS social_accounts (
+      id               TEXT PRIMARY KEY,
+      workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      platform         TEXT NOT NULL,
+      handle           TEXT,
+      display_name     TEXT,
+      avatar_url       TEXT,
+      remote_id        TEXT,
+      instance_url     TEXT,
+      credentials      TEXT,
+      scopes           TEXT,
+      status           TEXT NOT NULL DEFAULT 'connected',
+      last_error       TEXT,
+      last_verified_at INTEGER,
+      created_by_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at       INTEGER DEFAULT (unixepoch()),
+      updated_at       INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_accounts_workspace ON social_accounts(workspace_id);
+
+    CREATE TABLE IF NOT EXISTS social_posts (
+      id               TEXT PRIMARY KEY,
+      workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      group_id         TEXT NOT NULL,
+      account_id       TEXT REFERENCES social_accounts(id) ON DELETE SET NULL,
+      platform         TEXT NOT NULL,
+      body             TEXT NOT NULL DEFAULT '',
+      media_json       TEXT,
+      status           TEXT NOT NULL DEFAULT 'draft',
+      scheduled_at     INTEGER,
+      published_at     INTEGER,
+      remote_id        TEXT,
+      remote_url       TEXT,
+      error            TEXT,
+      attempts         INTEGER NOT NULL DEFAULT 0,
+      worker_id        TEXT,
+      lease_expires_at INTEGER,
+      created_by_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at       INTEGER DEFAULT (unixepoch()),
+      updated_at       INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_posts_workspace ON social_posts(workspace_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_social_posts_due ON social_posts(status, scheduled_at);
+    CREATE INDEX IF NOT EXISTS idx_social_posts_group ON social_posts(group_id);
+
+    CREATE TABLE IF NOT EXISTS social_apps (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      platform      TEXT NOT NULL,
+      client_id     TEXT,
+      client_secret TEXT,
+      extra         TEXT DEFAULT '{}',
+      active        INTEGER NOT NULL DEFAULT 1,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_social_apps_unique ON social_apps(workspace_id, platform);
+  `);
+
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.
   // Order by SQLite's implicit rowid (insertion order) — created_at is per-second
