@@ -3,8 +3,9 @@ import './beacon.css';
 import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB, BEACON_LISTENING as BEACON_LISTENING_FB, BEACON_APPROVALS, BEACON_METRICS } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
-import EmptyModule from './EmptyModule';
 import { BTabQueue, BTabListening, BTabPerformance, BTabBoost, BTabPress } from './beacon-tabs';
+import { BConnections, BComposer, BOutbox } from './beacon-social';
+import { useSocial } from './use-social';
 
 // Mandate 2.0 — Beacon
 
@@ -234,8 +235,12 @@ function Beacon() {
   const [activeAcct, setActiveAcct] = bUS('x-marcus');
   const [tab, setTab] = bUS('calendar');
   const [openPost, setOpenPost] = bUS(null);
-  const { records: BEACON_ACCOUNTS, isEmpty: noAccounts } = useLiveRecords('beacon', 'account', BEACON_ACCOUNTS_FB);
-  const { records: BEACON_POSTS, isEmpty: noPosts } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
+  const [composerOpen, setComposerOpen] = bUS(false);
+  const [outboxKey, setOutboxKey] = bUS(0);
+  // Real connected accounts (for the composer + Connections tab).
+  const { accounts: socialAccounts } = useSocial();
+  const { records: BEACON_ACCOUNTS } = useLiveRecords('beacon', 'account', BEACON_ACCOUNTS_FB);
+  const { records: BEACON_POSTS } = useLiveRecords('beacon', 'post', BEACON_POSTS_FB);
   const { records: BEACON_LISTENING } = useLiveRecords('beacon', 'mention', BEACON_LISTENING_FB);
   const bizMetrics = useBusinessMetrics();
 
@@ -245,7 +250,9 @@ function Beacon() {
     return () => window.removeEventListener('keydown', esc);
   }, []);
 
-  if (noAccounts && noPosts) return <EmptyModule module="BEACON" label="Beacon" accent="var(--m-beacon)" />;
+  // Note: we no longer hard-gate the whole module on an empty mock dataset —
+  // the Connections/Compose/Outbox surfaces must stay reachable so users can
+  // connect real accounts and publish even in a fresh workspace.
 
   // Ribbon: when BEACON_METRICS is configured, layer business-metrics on
   // top. Otherwise compute a minimal live ribbon from the workspace's own
@@ -275,6 +282,8 @@ function Beacon() {
       {/* Tabs */}
       <div className="beacon__tabs">
         {[
+          ['connect','Connections'],
+          ['outbox','Outbox'],
           ['calendar','Calendar'],
           ['queue','Publishing queue'],
           ['listen','Listening'],
@@ -290,7 +299,7 @@ function Beacon() {
         ))}
         <div className="beacon__tabs-right">
           <span style={{ color: 'var(--text-3)' }}>This week · {BEACON_POSTS.length} posts · {BEACON_POSTS.filter(p => p.status !== 'LIVE' && p.status !== 'SCHEDULED').length} awaiting</span>
-          <div className="beacon__compose">◇ Compose</div>
+          <div className="beacon__compose" onClick={() => setComposerOpen(true)}>◇ Compose</div>
         </div>
       </div>
 
@@ -338,6 +347,8 @@ function Beacon() {
         </div>
       ) : (
         <div className="beacon__body beacon__body--full">
+          {tab === 'connect'     && <BConnections />}
+          {tab === 'outbox'      && <BOutbox key={outboxKey} />}
           {tab === 'queue'       && <BTabQueue onOpenPost={setOpenPost} />}
           {tab === 'listen'      && <BTabListening />}
           {tab === 'performance' && <BTabPerformance />}
@@ -347,6 +358,13 @@ function Beacon() {
       )}
 
       <BModal post={openPost} onClose={() => setOpenPost(null)} />
+      {composerOpen && (
+        <BComposer
+          accounts={socialAccounts}
+          onClose={() => setComposerOpen(false)}
+          onPosted={() => setOutboxKey(k => k + 1)}
+        />
+      )}
     </div>
   );
 }

@@ -118,6 +118,17 @@ export const api = {
   getPublicForm:    (slug) => fetchJson(`/api/public/forms/${slug}`),
   submitPublicForm: (slug, data) => fetchJson(`/api/public/forms/${slug}`, { method: 'POST', body: data }),
 
+  // Social (Beacon) — real account connections + publishing.
+  socialProviders:  () => fetchJson('/api/social/providers'),
+  socialAccounts:   () => fetchJson('/api/social/accounts'),
+  socialConnect:    (body) => fetchJson('/api/social/accounts/connect', { method: 'POST', body }),
+  socialVerify:     (id) => fetchJson(`/api/social/accounts/${id}/verify`, { method: 'POST' }),
+  socialDisconnect: (id) => fetchJson(`/api/social/accounts/${id}`, { method: 'DELETE' }),
+  socialPosts:      (status) => fetchJson(`/api/social/posts${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  socialCompose:    (body) => fetchJson('/api/social/posts', { method: 'POST', body }),
+  socialCancel:     (groupId) => fetchJson(`/api/social/posts/${groupId}/cancel`, { method: 'POST' }),
+  socialRetry:      (id) => fetchJson(`/api/social/posts/${id}/retry`, { method: 'POST' }),
+
   listWebhookDeliveries: (id) => fetchJson(`/api/webhooks/${id}/deliveries`),
   retryWebhookDelivery:  (whid, did) => fetchJson(`/api/webhooks/${whid}/deliveries/${did}/retry`, { method: 'POST' }),
 
