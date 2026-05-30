@@ -2,9 +2,9 @@
 // unique index) and post replies back. Bluesky & Mastodon are wired; other
 // providers light up as their fetchInbox/reply adapters are added.
 import { randomBytes } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { db, sqlite } from '../../db/index.js';
-import { socialAccounts, socialInbox } from '../../db/schema.js';
+import { socialAccounts, socialInbox, socialPosts } from '../../db/schema.js';
 import { getProvider } from './index.js';
 import { getApp } from './oauth.js';
 import { encryptJson, decryptJson } from '../crypto.js';
@@ -39,8 +39,14 @@ export async function syncInbox(accountId) {
   const { prov, creds, app } = await loadAccountCtx(account);
   if (!prov?.adapter?.fetchInbox) return 0;
 
+  // Some platforms (e.g. LinkedIn) pull engagement from our own recent posts.
+  const recent = await db.select({ remoteId: socialPosts.remoteId }).from(socialPosts)
+    .where(and(eq(socialPosts.accountId, account.id), eq(socialPosts.status, 'published')))
+    .orderBy(desc(socialPosts.publishedAt)).limit(20);
+  const recentPostIds = recent.map((r) => r.remoteId).filter(Boolean);
+
   let res;
-  try { res = await prov.adapter.fetchInbox({ ...account, credentials: creds, _app: app }); }
+  try { res = await prov.adapter.fetchInbox({ ...account, credentials: creds, _app: app }, { recentPostIds }); }
   catch { return 0; }
   if (res.credentials) {
     await db.update(socialAccounts).set({ credentials: encryptJson(res.credentials), updatedAt: new Date() }).where(eq(socialAccounts.id, account.id));

@@ -109,3 +109,44 @@ export async function verify(account) {
   if (!r.ok) throw new Error(`LinkedIn token is invalid (${r.status}) — reconnect.`);
   return { ok: true };
 }
+
+// Inbox: comments on the member's recent posts (URNs we published via Beacon).
+export async function fetchInbox(account, { recentPostIds = [] } = {}) {
+  const creds = account.credentials;
+  const items = [];
+  for (const urn of recentPostIds.slice(0, 15)) {
+    if (!urn) continue;
+    const r = await fetch(`https://api.linkedin.com/v2/socialActions/${encodeURIComponent(urn)}/comments`, {
+      headers: { Authorization: `Bearer ${creds.accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) continue;
+    for (const c of (j.elements || [])) {
+      if (c.actor === creds.memberUrn) continue; // skip our own comments
+      const who = String(c.actor || '').split(':').pop();
+      items.push({
+        remoteId: c['$URN'] || c.id || `${urn}#${c.created?.time || ''}`,
+        type: 'comment',
+        authorHandle: null, authorName: who ? `LinkedIn member ${who.slice(0, 6)}` : 'LinkedIn member', authorAvatar: null,
+        text: c.message?.text || '',
+        url: null, replyContext: { shareUrn: urn },
+        remoteCreatedAt: c.created?.time ? new Date(c.created.time).toISOString() : null,
+      });
+    }
+  }
+  return { items };
+}
+
+export async function reply(account, item, text) {
+  const creds = account.credentials;
+  const shareUrn = item.replyContext?.shareUrn;
+  if (!shareUrn) throw new Error('Missing LinkedIn share reference.');
+  const r = await fetch(`https://api.linkedin.com/v2/socialActions/${encodeURIComponent(shareUrn)}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+    body: JSON.stringify({ actor: creds.memberUrn, message: { text: String(text || '') } }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.message || `LinkedIn reply failed (${r.status}).`);
+  return { remoteId: j['$URN'] || j.id };
+}
