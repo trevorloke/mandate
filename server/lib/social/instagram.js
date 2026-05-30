@@ -54,3 +54,34 @@ export async function verify(account) {
   if (!r.ok) throw new Error(`Instagram token is invalid (${r.status}) — reconnect.`);
   return { ok: true };
 }
+
+// Pull comments on recent media for the inbox.
+export async function fetchInbox(account, { mediaLimit = 8 } = {}) {
+  const creds = account.credentials;
+  const m = await fetch(`${GRAPH}/${creds.igUserId}/media?fields=id,permalink&limit=${mediaLimit}&access_token=${encodeURIComponent(creds.pageToken)}`)
+    .then((r) => r.json()).catch(() => ({}));
+  const items = [];
+  for (const media of (m.data || [])) {
+    const cm = await fetch(`${GRAPH}/${media.id}/comments?fields=id,text,username,timestamp&access_token=${encodeURIComponent(creds.pageToken)}`)
+      .then((r) => r.json()).catch(() => ({}));
+    for (const c of (cm.data || [])) {
+      items.push({
+        remoteId: c.id, type: 'comment',
+        authorHandle: c.username ? '@' + c.username : null, authorName: c.username, authorAvatar: null,
+        text: c.text || '', url: media.permalink, replyContext: { commentId: c.id }, remoteCreatedAt: c.timestamp,
+      });
+    }
+  }
+  return { items };
+}
+
+export async function reply(account, item, text) {
+  const creds = account.credentials;
+  const r = await fetch(`${GRAPH}/${item.replyContext?.commentId}/replies`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: String(text || ''), access_token: creds.pageToken }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || `Instagram reply failed (${r.status}).`);
+  return { remoteId: j.id };
+}

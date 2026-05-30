@@ -122,3 +122,39 @@ export async function verify(account) {
   if (!r.ok) throw new Error(`Facebook token is invalid (${r.status}) — reconnect.`);
   return { ok: true };
 }
+
+// Pull comments on recent Page posts for the inbox.
+export async function fetchInbox(account, { postLimit = 10 } = {}) {
+  const creds = account.credentials;
+  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
+  const token = page?.token;
+  if (!token) throw new Error('Missing Page access token.');
+  const feed = await fetch(`${GRAPH}/${creds.pageId}/feed?fields=id,permalink_url,comments.limit(25){id,message,from,created_time,permalink_url}&limit=${postLimit}&access_token=${encodeURIComponent(token)}`)
+    .then((r) => r.json()).catch(() => ({}));
+  const items = [];
+  for (const post of (feed.data || [])) {
+    for (const c of (post.comments?.data || [])) {
+      if (c.from?.id === creds.pageId) continue; // skip our own replies
+      items.push({
+        remoteId: c.id, type: 'comment',
+        authorHandle: null, authorName: c.from?.name || 'Someone', authorAvatar: null,
+        text: c.message || '', url: c.permalink_url || post.permalink_url, replyContext: { commentId: c.id }, remoteCreatedAt: c.created_time,
+      });
+    }
+  }
+  return { items };
+}
+
+export async function reply(account, item, text) {
+  const creds = account.credentials;
+  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
+  const token = page?.token;
+  if (!token) throw new Error('Missing Page access token.');
+  const r = await fetch(`${GRAPH}/${item.replyContext?.commentId}/comments`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: String(text || ''), access_token: token }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || `Facebook reply failed (${r.status}).`);
+  return { remoteId: j.id };
+}

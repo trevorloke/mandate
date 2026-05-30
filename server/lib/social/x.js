@@ -145,3 +145,42 @@ export async function verify(account) {
   if (!r.ok) throw new Error(`X token is invalid (${r.status}) — reconnect.`);
   return { ok: true, credentials: creds };
 }
+
+// Pull recent @-mentions for the inbox.
+export async function fetchInbox(account, { limit = 40 } = {}) {
+  let creds = account.credentials;
+  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  const uid = account.remoteId;
+  if (!uid) throw new Error('Missing X user id.');
+  const url = `https://api.twitter.com/2/users/${uid}/mentions?max_results=${Math.min(limit, 100)}`
+    + `&expansions=author_id&tweet.fields=created_at&user.fields=username,name,profile_image_url`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.detail || j?.title || `X mentions failed (${r.status}).`);
+  const users = {};
+  for (const u of (j.includes?.users || [])) users[u.id] = u;
+  const items = (j.data || []).map((t) => {
+    const u = users[t.author_id] || {};
+    return {
+      remoteId: t.id, type: 'mention',
+      authorHandle: u.username ? '@' + u.username : null, authorName: u.name || u.username, authorAvatar: u.profile_image_url || null,
+      text: t.text || '', url: u.username ? `https://x.com/${u.username}/status/${t.id}` : null,
+      replyContext: { tweetId: t.id }, remoteCreatedAt: t.created_at,
+    };
+  });
+  return { items, credentials: creds };
+}
+
+export async function reply(account, item, text) {
+  let creds = account.credentials;
+  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  const r = await fetch('https://api.twitter.com/2/tweets', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` },
+    body: JSON.stringify({ text: String(text || ''), reply: { in_reply_to_tweet_id: item.replyContext?.tweetId } }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.detail || j?.title || `X reply failed (${r.status}).`);
+  const id = j.data?.id;
+  const user = creds.username;
+  return { remoteId: id, url: user ? `https://x.com/${user}/status/${id}` : null, credentials: creds };
+}
