@@ -21,6 +21,52 @@ const PLAT = {
 const CHAR_LIMITS = { bluesky: 300, mastodon: 500, x: 280, meta: 2200, linkedin: 3000, instagram: 2200 };
 const platLabel = (p) => PLAT[p]?.label || p;
 
+// Highlight links / @mentions / #tags for preview rendering.
+function renderRich(text) {
+  const parts = [];
+  const re = /(https?:\/\/[^\s]+|@[a-zA-Z0-9_.-]+|#[^\s#]+)/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const tok = m[0];
+    const cls = tok[0] === '#' ? 'bs-pv-tag' : tok[0] === '@' ? 'bs-pv-men' : 'bs-pv-link';
+    parts.push(<span className={cls} key={m.index}>{tok}</span>);
+    last = m.index + tok.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+// A single platform-styled preview of the draft.
+function PreviewCard({ account, body, media, thread }) {
+  const limit = CHAR_LIMITS[account.platform];
+  const text = thread && thread.length > 1 ? thread[0] : body;
+  const over = limit && [...text].length > limit;
+  return (
+    <div className="bs-preview-card">
+      <div className="bs-preview-hd">
+        {account.avatarUrl
+          ? <img className="bs-av" src={account.avatarUrl} alt="" style={{ width: 28, height: 28 }} />
+          : <div className={'bs-av bs-av--ph bs-av--' + (PLAT[account.platform]?.cls || 'gen')} style={{ width: 28, height: 28 }}>{PLAT[account.platform]?.short}</div>}
+        <div className="bs-preview-id">
+          <b>{account.displayName || account.handle}</b>
+          <span>{account.handle} · {platLabel(account.platform)}</span>
+        </div>
+      </div>
+      <div className="bs-preview-body">{text ? renderRich(text) : <em className="bs-muted">(no text)</em>}</div>
+      {media.length > 0 && (
+        <div className={'bs-preview-media bs-preview-media--' + Math.min(media.length, 4)}>
+          {media.slice(0, 4).map((mm) => <img key={mm.id} src={mm.url} alt="" />)}
+        </div>
+      )}
+      <div className="bs-preview-ft">
+        {thread && thread.length > 1 && <span className="bs-preview-thread">🧵 1/{thread.length}</span>}
+        <span className={over ? 'bs-preview-over' : 'bs-muted'}>{[...text].length}{limit ? ` / ${limit}` : ''}{over ? ' · too long' : ''}</span>
+      </div>
+    </div>
+  );
+}
+
 function Avatar({ account, size = 34 }) {
   const p = PLAT[account.platform] || {};
   return account.avatarUrl
@@ -219,6 +265,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const [media, setMedia] = useState([]);      // [{ id, url, mime }]
   const [uploading, setUploading] = useState(false);
   const [threadMode, setThreadMode] = useState(false);
+  const [preview, setPreview] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -377,7 +424,17 @@ export function BComposer({ accounts, onClose, onPosted }) {
             <label className="bs-thread-toggle">
               <input type="checkbox" checked={threadMode} onChange={(e) => setThreadMode(e.target.checked)} />
               🧵 Thread {isThread && <span className="bs-thread-count">{threadSegments.length} posts</span>}
+              <span style={{ marginLeft: 14 }}><input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} /> 👁 Preview</span>
             </label>
+            {preview && (
+              <div className="bs-preview">
+                {connected.filter((a) => targets.includes(a.id)).length === 0
+                  ? <p className="bs-muted">Select an account to preview.</p>
+                  : connected.filter((a) => targets.includes(a.id)).map((a) => (
+                    <PreviewCard key={a.id} account={a} body={body} media={media} thread={threadSegments} />
+                  ))}
+              </div>
+            )}
             <div className="bs-media">
               {media.map((m) => (
                 <div key={m.id} className="bs-media-item">
