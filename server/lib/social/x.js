@@ -56,6 +56,23 @@ async function refresh(creds, app) {
   };
 }
 
+// Upload image bytes via the v1.1 media endpoint (works with OAuth2 user
+// context); returns a media_id_string to attach to a v2 tweet.
+async function uploadMediaX(token, m) {
+  const fd = new FormData();
+  fd.append('media', new Blob([m.bytes], { type: m.mime || 'application/octet-stream' }));
+  const res = await fetch('https://upload.twitter.com/1.1/media/upload.json', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = new Error(j?.errors?.[0]?.message || j?.error || `X media upload failed (${res.status}).`);
+    e.status = res.status;
+    throw e;
+  }
+  return j.media_id_string;
+}
+
 export async function publish(account, post) {
   let creds = account.credentials;
   if (!creds?.accessToken) throw new Error('X account is not connected.');
@@ -67,10 +84,27 @@ export async function publish(account, post) {
     creds = await refresh(creds, account._app);
   }
 
+  // Upload images (max 4), refreshing the token once on 401.
+  const media = (post.media || []).filter((m) => m.bytes).slice(0, 4);
+  const mediaIds = [];
+  for (const m of media) {
+    try {
+      mediaIds.push(await uploadMediaX(creds.accessToken, m));
+    } catch (e) {
+      if (e.status === 401 && creds.refreshToken && account._app) {
+        creds = await refresh(creds, account._app);
+        mediaIds.push(await uploadMediaX(creds.accessToken, m));
+      } else throw e;
+    }
+  }
+
+  const payload = { text };
+  if (mediaIds.length) payload.media = { media_ids: mediaIds };
+
   const doPost = (token) => fetch('https://api.twitter.com/2/tweets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(payload),
   });
 
   let res = await doPost(creds.accessToken);

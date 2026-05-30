@@ -32,19 +32,48 @@ export const oauth = {
   },
 };
 
+// Upload an image via the Assets API; returns the asset URN for the share.
+async function uploadImageLI(creds, m) {
+  const reg = await fetch('https://api.linkedin.com/v2/assets?action=registerUpload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Restli-Protocol-Version': '2.0.0', Authorization: `Bearer ${creds.accessToken}` },
+    body: JSON.stringify({
+      registerUploadRequest: {
+        recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+        owner: creds.memberUrn,
+        serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
+      },
+    }),
+  });
+  const rj = await reg.json().catch(() => ({}));
+  if (!reg.ok) throw new Error(rj?.message || `LinkedIn upload register failed (${reg.status}).`);
+  const asset = rj.value?.asset;
+  const uploadUrl = rj.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;
+  if (!asset || !uploadUrl) throw new Error('LinkedIn upload registration incomplete.');
+
+  const up = await fetch(uploadUrl, { method: 'PUT', headers: { Authorization: `Bearer ${creds.accessToken}` }, body: m.bytes });
+  if (!up.ok) throw new Error(`LinkedIn image upload failed (${up.status}).`);
+  return asset;
+}
+
 export async function publish(account, post) {
   const creds = account.credentials;
   if (!creds?.accessToken || !creds.memberUrn) throw new Error('LinkedIn account is not connected.');
 
+  const media = (post.media || []).filter((m) => m.bytes).slice(0, 9);
+  const assets = [];
+  for (const m of media) assets.push(await uploadImageLI(creds, m));
+
+  const share = {
+    shareCommentary: { text: String(post.body || '') },
+    shareMediaCategory: assets.length ? 'IMAGE' : 'NONE',
+  };
+  if (assets.length) share.media = assets.map((a) => ({ status: 'READY', media: a }));
+
   const body = {
     author: creds.memberUrn,
     lifecycleState: 'PUBLISHED',
-    specificContent: {
-      'com.linkedin.ugc.ShareContent': {
-        shareCommentary: { text: String(post.body || '') },
-        shareMediaCategory: 'NONE',
-      },
-    },
+    specificContent: { 'com.linkedin.ugc.ShareContent': share },
     visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
   };
 
