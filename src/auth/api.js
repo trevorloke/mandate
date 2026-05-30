@@ -128,6 +128,10 @@ export const api = {
   socialCompose:    (body) => fetchJson('/api/social/posts', { method: 'POST', body }),
   socialCancel:     (groupId) => fetchJson(`/api/social/posts/${groupId}/cancel`, { method: 'POST' }),
   socialRetry:      (id) => fetchJson(`/api/social/posts/${id}/retry`, { method: 'POST' }),
+  socialSubmit:     (groupId) => fetchJson(`/api/social/posts/${groupId}/submit`, { method: 'POST' }),
+  socialApprove:    (groupId) => fetchJson(`/api/social/posts/${groupId}/approve`, { method: 'POST' }),
+  socialReject:     (groupId, reason) => fetchJson(`/api/social/posts/${groupId}/reject`, { method: 'POST', body: { reason } }),
+  socialPublishNow: (groupId) => fetchJson(`/api/social/posts/${groupId}/publish`, { method: 'POST' }),
   socialRefreshMetrics: (groupId) => fetchJson(`/api/social/posts/${groupId}/metrics`, { method: 'POST' }),
   socialAnalytics:  () => fetchJson('/api/social/analytics'),
   // Developer-app credentials for OAuth platforms (X / LinkedIn / Meta).

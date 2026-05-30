@@ -235,7 +235,7 @@ app.get('/posts', async (c) => {
     if (!groups.has(p.groupId)) {
       groups.set(p.groupId, {
         groupId: p.groupId, body: p.body, createdAt: p.createdAt,
-        scheduledAt: p.scheduledAt, targets: [],
+        scheduledAt: p.scheduledAt, status: p.status, targets: [],
       });
     }
     groups.get(p.groupId).targets.push(pubPost(p));
@@ -245,7 +245,7 @@ app.get('/posts', async (c) => {
 
 app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [] } = await c.req.json().catch(() => ({}));
+  const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false } = await c.req.json().catch(() => ({}));
   const text = String(body || '').trim();
   const mediaRefs = Array.isArray(media) ? media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime })) : [];
   if (!text && mediaRefs.length === 0) return c.json({ error: 'post is empty' }, 400);
@@ -270,8 +270,14 @@ app.post('/posts', requireRole('editor'), async (c) => {
   if (when && isNaN(when.getTime())) return c.json({ error: 'invalid schedule time' }, 400);
 
   const groupId = newId('sg_');
-  // publishNow → mark scheduled-now, publish inline below. Otherwise scheduled or draft.
-  const status = publishNow ? 'scheduled' : (when ? 'scheduled' : 'draft');
+  // Status by intent. draft/pending keep any `when` so it can be scheduled on
+  // publish/approval; publishNow is marked scheduled-now and published inline.
+  let status;
+  if (publishNow) status = 'scheduled';
+  else if (submitForApproval) status = 'pending';
+  else if (saveDraft) status = 'draft';
+  else if (when) status = 'scheduled';
+  else status = 'draft';
   const mediaJson = mediaRefs.length ? JSON.stringify(mediaRefs) : null;
   const rows = accts.map((a) => ({
     id: newId('sp_'), workspaceId: me.workspaceId, groupId, accountId: a.id, platform: a.platform,
@@ -279,7 +285,7 @@ app.post('/posts', requireRole('editor'), async (c) => {
   }));
   await db.insert(socialPosts).values(rows);
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.create',
-    target: groupId, meta: JSON.stringify({ count: rows.length, publishNow: !!publishNow, scheduled: !!when }) });
+    target: groupId, meta: JSON.stringify({ count: rows.length, status }) });
 
   let results = null;
   if (publishNow) {
@@ -289,7 +295,7 @@ app.post('/posts', requireRole('editor'), async (c) => {
       results.push({ id: r.id, platform: r.platform, ...res });
     }
   }
-  try { broadcast(me.workspaceId, 'social.post', { groupId, action: publishNow ? 'published' : (when ? 'scheduled' : 'drafted') }); } catch {}
+  try { broadcast(me.workspaceId, 'social.post', { groupId, action: status }); } catch {}
 
   const fresh = await db.select().from(socialPosts).where(eq(socialPosts.groupId, groupId));
   return c.json({ ok: true, groupId, posts: fresh.map(pubPost), results });
@@ -301,11 +307,89 @@ app.post('/posts/:groupId/cancel', requireRole('editor'), async (c) => {
   const rows = await db.select().from(socialPosts)
     .where(and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.groupId, groupId)));
   if (!rows.length) return c.json({ error: 'not found' }, 404);
-  const cancelable = rows.filter((r) => ['scheduled', 'draft', 'failed'].includes(r.status));
+  const cancelable = rows.filter((r) => ['scheduled', 'draft', 'failed', 'pending', 'rejected'].includes(r.status));
   for (const r of cancelable) {
     await db.update(socialPosts).set({ status: 'canceled', updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
   }
   return c.json({ ok: true, canceled: cancelable.length });
+});
+
+// Helper: load a workspace's posts for a group.
+async function groupPosts(workspaceId, groupId) {
+  return db.select().from(socialPosts)
+    .where(and(eq(socialPosts.workspaceId, workspaceId), eq(socialPosts.groupId, groupId)));
+}
+
+// Submit a draft (or rejected) group for approval → pending.
+app.post('/posts/:groupId/submit', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const groupId = c.req.param('groupId');
+  const rows = await groupPosts(me.workspaceId, groupId);
+  if (!rows.length) return c.json({ error: 'not found' }, 404);
+  const targetable = rows.filter((r) => ['draft', 'rejected'].includes(r.status));
+  for (const r of targetable) {
+    await db.update(socialPosts).set({ status: 'pending', error: null, updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
+  }
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.submit', target: groupId });
+  try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'pending' }); } catch {}
+  return c.json({ ok: true, submitted: targetable.length });
+});
+
+// Approve a pending group (admin) → schedule if future, else publish now.
+app.post('/posts/:groupId/approve', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  const groupId = c.req.param('groupId');
+  const rows = await groupPosts(me.workspaceId, groupId);
+  if (!rows.length) return c.json({ error: 'not found' }, 404);
+  const pending = rows.filter((r) => r.status === 'pending');
+  const results = [];
+  for (const r of pending) {
+    const future = r.scheduledAt && new Date(r.scheduledAt).getTime() > Date.now();
+    if (future) {
+      await db.update(socialPosts).set({ status: 'scheduled', updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
+    } else {
+      await db.update(socialPosts).set({ status: 'scheduled', scheduledAt: new Date(), updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
+      const res = await publishPost(r.id);
+      results.push({ id: r.id, platform: r.platform, ...res });
+    }
+  }
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.approve', target: groupId, meta: JSON.stringify({ count: pending.length }) });
+  try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'approved' }); } catch {}
+  return c.json({ ok: true, approved: pending.length, results: results.length ? results : null });
+});
+
+// Reject a pending group (admin).
+app.post('/posts/:groupId/reject', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  const groupId = c.req.param('groupId');
+  const { reason = '' } = await c.req.json().catch(() => ({}));
+  const rows = await groupPosts(me.workspaceId, groupId);
+  if (!rows.length) return c.json({ error: 'not found' }, 404);
+  const pending = rows.filter((r) => r.status === 'pending');
+  for (const r of pending) {
+    await db.update(socialPosts).set({ status: 'rejected', error: String(reason || 'rejected').slice(0, 300), updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
+  }
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.reject', target: groupId });
+  try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'rejected' }); } catch {}
+  return c.json({ ok: true, rejected: pending.length });
+});
+
+// Publish a draft/pending/rejected/scheduled/failed group right now (editor).
+app.post('/posts/:groupId/publish', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const groupId = c.req.param('groupId');
+  const rows = await groupPosts(me.workspaceId, groupId);
+  if (!rows.length) return c.json({ error: 'not found' }, 404);
+  const sendable = rows.filter((r) => ['draft', 'pending', 'rejected', 'scheduled', 'failed'].includes(r.status));
+  const results = [];
+  for (const r of sendable) {
+    await db.update(socialPosts).set({ status: 'scheduled', scheduledAt: new Date(), error: null, updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
+    const res = await publishPost(r.id);
+    results.push({ id: r.id, platform: r.platform, ...res });
+  }
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.publish', target: groupId });
+  try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'published' }); } catch {}
+  return c.json({ ok: true, results });
 });
 
 // Aggregate analytics across all published posts (powers the Performance tab).

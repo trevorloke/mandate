@@ -3,6 +3,7 @@
 import React from 'react';
 import './beacon-social.css';
 import { api } from './auth/api';
+import { useAuth } from './auth/AuthContext';
 import { useSocial } from './use-social';
 
 const { useState, useEffect, useCallback, useMemo } = React;
@@ -250,12 +251,16 @@ export function BComposer({ accounts, onClose, onPosted }) {
   };
   const removeMedia = (id) => setMedia((m) => m.filter((x) => x.id !== id));
 
+  // When a future time is supplied for draft/approval, it's the intended
+  // post-publish/approval schedule.
   const submit = async () => {
     setBusy(true); setMsg(null); setResults(null);
     try {
       const payload = { body, targets, media: media.map((m) => ({ id: m.id, mime: m.mime })) };
       if (mode === 'now') payload.publishNow = true;
-      else payload.scheduledAt = new Date(when).toISOString();
+      else if (mode === 'schedule') payload.scheduledAt = new Date(when).toISOString();
+      else if (mode === 'draft') { payload.saveDraft = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
+      else if (mode === 'approval') { payload.submitForApproval = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
       const r = await api.socialCompose(payload);
       if (r.results) {
         setResults(r.results);
@@ -264,15 +269,16 @@ export function BComposer({ accounts, onClose, onPosted }) {
           ? { kind: 'err', text: `${r.results.length - failed.length} published, ${failed.length} failed.` }
           : { kind: 'ok', text: `Published to ${r.results.length} account(s).` });
       } else {
-        setMsg({ kind: 'ok', text: 'Scheduled.' });
+        setMsg({ kind: 'ok', text: mode === 'draft' ? 'Saved as draft.' : mode === 'approval' ? 'Submitted for approval.' : 'Scheduled.' });
       }
       onPosted && onPosted();
-      if (mode === 'schedule') setTimeout(onClose, 700);
+      if (mode !== 'now') setTimeout(onClose, 700);
     } catch (e) { setMsg({ kind: 'err', text: e.message || 'Failed' }); }
     finally { setBusy(false); }
   };
 
-  const canSubmit = (body.trim() || media.length) && targets.length && !over && !busy && !uploading && !igNeedsImage && (mode === 'now' || when);
+  const SUBMIT_LABEL = { now: 'Publish now', schedule: 'Schedule', draft: 'Save draft', approval: 'Submit for approval' };
+  const canSubmit = (body.trim() || media.length) && targets.length && !over && !busy && !uploading && !igNeedsImage && (mode !== 'schedule' || when);
 
   return (
     <div className="bs-modal-backdrop" onClick={onClose}>
@@ -328,14 +334,15 @@ export function BComposer({ accounts, onClose, onPosted }) {
             </div>
 
             <div className="bs-compose-when">
-              <label className={'bs-radio' + (mode === 'now' ? ' is-on' : '')}>
-                <input type="radio" checked={mode === 'now'} onChange={() => setMode('now')} /> Publish now
-              </label>
-              <label className={'bs-radio' + (mode === 'schedule' ? ' is-on' : '')}>
-                <input type="radio" checked={mode === 'schedule'} onChange={() => setMode('schedule')} /> Schedule
-              </label>
-              {mode === 'schedule' && (
-                <input className="bs-input bs-input--when" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+              {[['now', 'Publish now'], ['schedule', 'Schedule'], ['draft', 'Draft'], ['approval', 'Needs approval']].map(([m, lbl]) => (
+                <label key={m} className={'bs-radio' + (mode === m ? ' is-on' : '')}>
+                  <input type="radio" checked={mode === m} onChange={() => setMode(m)} /> {lbl}
+                </label>
+              ))}
+              {(mode === 'schedule' || mode === 'draft' || mode === 'approval') && (
+                <input className="bs-input bs-input--when" type="datetime-local" value={when}
+                  onChange={(e) => setWhen(e.target.value)}
+                  title={mode === 'schedule' ? 'when to publish' : 'optional: when to publish once live/approved'} />
               )}
             </div>
 
@@ -359,7 +366,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
           <div className="bs-modal__ft">
             <button className="bs-btn bs-btn--ghost" onClick={onClose}>Close</button>
             <button className="bs-btn" onClick={submit} disabled={!canSubmit}>
-              {busy ? 'Working…' : (mode === 'now' ? 'Publish now' : 'Schedule')}
+              {busy ? 'Working…' : SUBMIT_LABEL[mode]}
             </button>
           </div>
         )}
@@ -368,10 +375,15 @@ export function BComposer({ accounts, onClose, onPosted }) {
   );
 }
 
-// ── Outbox (real scheduled/published/failed) ────────────────────────
+// ── Outbox (drafts, approvals, scheduled, published) ────────────────
+const STATUS_FILTERS = [['all', 'All'], ['draft', 'Drafts'], ['pending', 'Approvals'], ['scheduled', 'Scheduled'], ['published', 'Published'], ['failed', 'Failed']];
+
 export function BOutbox() {
+  const { user } = useAuth();
+  const isApprover = user && (user.role === 'admin' || user.role === 'super_admin');
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -381,12 +393,22 @@ export function BOutbox() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const cancel = async (groupId) => { try { await api.socialCancel(groupId); load(); } catch { /* keep list as-is */ } };
-  const retry = async (id) => { try { await api.socialRetry(id); load(); } catch { /* keep list as-is */ } };
-  const refreshMetrics = async (groupId) => { try { await api.socialRefreshMetrics(groupId); load(); } catch { /* keep list as-is */ } };
+  const act = (fn) => async (...a) => { try { await fn(...a); load(); } catch (e) { alert(e.message || 'Action failed'); } };
+  const cancel = act((groupId) => api.socialCancel(groupId));
+  const retry = act((id) => api.socialRetry(id));
+  const refreshMetrics = act((groupId) => api.socialRefreshMetrics(groupId));
+  const submit = act((groupId) => api.socialSubmit(groupId));
+  const approve = act((groupId) => api.socialApprove(groupId));
+  const publishNow = act((groupId) => api.socialPublishNow(groupId));
+  const reject = async (groupId) => {
+    const reason = window.prompt('Reason for rejection (optional):', '');
+    if (reason === null) return;
+    try { await api.socialReject(groupId, reason); load(); } catch (e) { alert(e.message); }
+  };
 
   if (loading) return <p className="bs-muted" style={{ padding: 20 }}>Loading…</p>;
-  if (!groups.length) return <p className="bs-muted" style={{ padding: 20 }}>Nothing published or scheduled yet. Hit <b>Compose</b> to send your first real post.</p>;
+
+  const shown = filter === 'all' ? groups : groups.filter((g) => g.status === filter);
 
   const fmt = (ts) => ts ? new Date(ts * 1000).toLocaleString() : null;
   // Compact engagement string from a normalized metrics object.
@@ -404,12 +426,26 @@ export function BOutbox() {
 
   return (
     <div className="bs-outbox">
-      {groups.map((g) => {
+      <div className="bs-ob-filters">
+        {STATUS_FILTERS.map(([k, lbl]) => {
+          const n = k === 'all' ? groups.length : groups.filter((g) => g.status === k).length;
+          return (
+            <button key={k} className={'bs-ob-filter' + (filter === k ? ' is-on' : '')} onClick={() => setFilter(k)}>
+              {lbl}{n > 0 && <span className="bs-ob-filter__n">{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="bs-muted">{filter === 'all' ? 'Nothing yet. Hit Compose to create your first post.' : `No ${filter} posts.`}</p>
+      ) : shown.map((g) => {
+        const gs = g.status;
         const anyScheduled = g.targets.some((t) => t.status === 'scheduled');
         const anyPublished = g.targets.some((t) => t.status === 'published');
         return (
-          <div key={g.groupId} className="bs-ob-card">
-            <div className="bs-ob-card__body">{g.body}</div>
+          <div key={g.groupId} className={'bs-ob-card bs-ob-card--' + gs}>
+            <div className="bs-ob-card__body">{g.body || <em className="bs-muted">(image only)</em>}</div>
             <div className="bs-ob-card__targets">
               {g.targets.map((t) => (
                 <div key={t.id} className={'bs-ob-target bs-ob-target--' + t.status}>
@@ -423,9 +459,20 @@ export function BOutbox() {
               ))}
             </div>
             <div className="bs-ob-card__foot">
-              {anyScheduled && <span>scheduled for {fmt(g.scheduledAt)}</span>}
-              {anyScheduled && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => cancel(g.groupId)}>cancel</button>}
+              {gs === 'pending' && <span className="bs-ob-tag">awaiting approval</span>}
+              {gs === 'rejected' && <span className="bs-ob-tag bs-ob-tag--rej">rejected</span>}
+              {(anyScheduled || g.scheduledAt) && (gs === 'scheduled' || gs === 'pending') && <span>for {fmt(g.scheduledAt)}</span>}
+
+              {/* Draft / rejected → author actions */}
+              {(gs === 'draft' || gs === 'rejected') && <button className="bs-btn bs-btn--sm" onClick={() => publishNow(g.groupId)}>publish now</button>}
+              {(gs === 'draft' || gs === 'rejected') && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => submit(g.groupId)}>submit for approval</button>}
+
+              {/* Pending → approver actions */}
+              {gs === 'pending' && isApprover && <button className="bs-btn bs-btn--sm" onClick={() => approve(g.groupId)}>approve</button>}
+              {gs === 'pending' && isApprover && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => reject(g.groupId)}>reject</button>}
+
               {anyPublished && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => refreshMetrics(g.groupId)}>↻ metrics</button>}
+              {['draft', 'pending', 'rejected', 'scheduled', 'failed'].includes(gs) && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => cancel(g.groupId)}>cancel</button>}
             </div>
           </div>
         );
