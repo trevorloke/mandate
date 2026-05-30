@@ -85,3 +85,36 @@ export async function verify(account) {
   if (!r.ok) throw new Error(`Mastodon token is invalid (${r.status}) — reconnect.`);
   return { ok: true };
 }
+
+function stripHtml(s) {
+  return String(s || '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .trim();
+}
+
+export async function fetchInbox(account, { limit = 40 } = {}) {
+  const creds = account.credentials;
+  const r = await fetch(`${creds.instanceUrl}/api/v1/notifications?types[]=mention&limit=${limit}`, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  const arr = await r.json().catch(() => []);
+  if (!r.ok) throw new Error('Mastodon notifications failed.');
+  const items = (Array.isArray(arr) ? arr : []).filter((n) => n.type === 'mention' && n.status).map((n) => ({
+    remoteId: n.status.id, type: 'mention',
+    authorHandle: '@' + n.account.acct, authorName: n.account.display_name || n.account.username, authorAvatar: n.account.avatar || null,
+    text: stripHtml(n.status.content), parentRemoteId: n.status.in_reply_to_id || null,
+    url: n.status.url, replyContext: { statusId: n.status.id }, remoteCreatedAt: n.created_at,
+  }));
+  return { items };
+}
+
+export async function reply(account, item, text) {
+  const creds = account.credentials;
+  const statusId = item.replyContext?.statusId;
+  const r = await fetch(`${creds.instanceUrl}/api/v1/statuses`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` },
+    body: JSON.stringify({ status: String(text || ''), in_reply_to_id: statusId, visibility: 'public' }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error || 'Mastodon reply failed.');
+  return { remoteId: String(j.id), url: j.url };
+}

@@ -125,3 +125,43 @@ export async function verify(account) {
   if (!r.ok) throw new Error(r.json?.message || 'Bluesky session is invalid — reconnect.');
   return { ok: true, credentials: creds };
 }
+
+// Pull recent replies/mentions/quotes from notifications.
+export async function fetchInbox(account, { limit = 40 } = {}) {
+  let creds = account.credentials;
+  const get = (token) => xrpc(creds.service, `app.bsky.notification.listNotifications?limit=${limit}`, { token });
+  let r = await get(creds.accessJwt);
+  if (r.status === 401) { creds = await refresh(creds); r = await get(creds.accessJwt); }
+  if (!r.ok) throw new Error(r.json?.message || 'Bluesky notifications failed.');
+  const items = [];
+  for (const n of (r.json.notifications || [])) {
+    if (!['reply', 'mention', 'quote'].includes(n.reason)) continue;
+    const rec = n.record || {};
+    const rkey = String(n.uri).split('/').pop();
+    const parent = { uri: n.uri, cid: n.cid };
+    const root = rec.reply?.root ? { uri: rec.reply.root.uri, cid: rec.reply.root.cid } : parent;
+    items.push({
+      remoteId: n.uri, type: n.reason,
+      authorHandle: '@' + n.author.handle, authorName: n.author.displayName || n.author.handle, authorAvatar: n.author.avatar || null,
+      text: rec.text || '', parentRemoteId: n.reasonSubject || rec.reply?.parent?.uri || null,
+      url: `https://bsky.app/profile/${n.author.handle}/post/${rkey}`,
+      replyContext: { parent, root },
+      remoteCreatedAt: n.indexedAt,
+    });
+  }
+  return { items, credentials: creds };
+}
+
+// Reply to an inbox item (threaded).
+export async function reply(account, item, text) {
+  let creds = account.credentials;
+  const ctx = item.replyContext || {};
+  if (!ctx.parent || !ctx.root) throw new Error('Missing reply context.');
+  const record = { $type: 'app.bsky.feed.post', text: String(text || ''), createdAt: new Date().toISOString(), reply: { root: ctx.root, parent: ctx.parent } };
+  const create = (token) => xrpc(creds.service, 'com.atproto.repo.createRecord', { method: 'POST', token, body: { repo: creds.did, collection: 'app.bsky.feed.post', record } });
+  let r = await create(creds.accessJwt);
+  if (r.status === 401) { creds = await refresh(creds); r = await create(creds.accessJwt); }
+  if (!r.ok) throw new Error(r.json?.message || 'Bluesky reply failed.');
+  const rkey = String(r.json.uri).split('/').pop();
+  return { remoteId: r.json.uri, url: `https://bsky.app/profile/${creds.handle}/post/${rkey}`, credentials: creds };
+}

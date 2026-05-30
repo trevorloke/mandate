@@ -7,6 +7,7 @@ import { sqlite } from '../db/index.js';
 import { publishPost } from './social/publish.js';
 import { refreshStaleMetrics } from './social/metrics.js';
 import { checkAllAccounts } from './social/health.js';
+import { syncAllInboxes } from './social/inbox.js';
 
 const WORKER_ID = 'sw_' + randomBytes(4).toString('hex');
 const TICK_MS = 15_000;
@@ -52,9 +53,11 @@ async function tick() {
 
 const METRICS_TICK_MS = 10 * 60 * 1000; // refresh stale post metrics every 10 min
 const HEALTH_TICK_MS = 30 * 60 * 1000;  // re-check account tokens every 30 min
+const INBOX_TICK_MS = 5 * 60 * 1000;    // pull new interactions every 5 min
 let timer = null;
 let metricsTimer = null;
 let healthTimer = null;
+let inboxTimer = null;
 export function startSocialWorker() {
   if (timer) return;
   timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
@@ -63,10 +66,13 @@ export function startSocialWorker() {
   metricsTimer.unref?.();
   healthTimer = setInterval(() => { checkAllAccounts().catch(() => {}); }, HEALTH_TICK_MS);
   healthTimer.unref?.();
+  inboxTimer = setInterval(() => { syncAllInboxes().catch(() => {}); }, INBOX_TICK_MS);
+  inboxTimer.unref?.();
   console.log(`[social-worker] started (${WORKER_ID})`);
 }
 export function stopSocialWorker() {
   if (timer) { clearInterval(timer); timer = null; }
   if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
   if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+  if (inboxTimer) { clearInterval(inboxTimer); inboxTimer = null; }
 }

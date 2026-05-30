@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -21,6 +21,7 @@ import { publishPost } from '../lib/social/publish.js';
 import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
 import { refreshMetrics } from '../lib/social/metrics.js';
 import { checkAccountHealth } from '../lib/social/health.js';
+import { syncAllInboxes, replyToItem } from '../lib/social/inbox.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
@@ -446,6 +447,55 @@ app.post('/posts/:id/retry', requireRole('editor'), async (c) => {
   const res = await publishPost(id);
   const fresh = (await db.select().from(socialPosts).where(eq(socialPosts.id, id)).limit(1))[0];
   return c.json({ ok: res.ok, result: res, post: pubPost(fresh) });
+});
+
+// ── Engagement inbox ──
+const pubInbox = (r) => ({
+  id: r.id, accountId: r.accountId, platform: r.platform, type: r.type,
+  authorHandle: r.authorHandle, authorName: r.authorName, authorAvatar: r.authorAvatar,
+  text: r.text, url: r.url, status: r.status, remoteCreatedAt: r.remoteCreatedAt,
+});
+
+app.get('/inbox', async (c) => {
+  const me = c.get('user');
+  const status = c.req.query('status');
+  const where = (status && status !== 'all')
+    ? and(eq(socialInbox.workspaceId, me.workspaceId), eq(socialInbox.status, status))
+    : eq(socialInbox.workspaceId, me.workspaceId);
+  const rows = await db.select().from(socialInbox).where(where).orderBy(desc(socialInbox.remoteCreatedAt)).limit(200);
+  const unread = (await db.select().from(socialInbox)
+    .where(and(eq(socialInbox.workspaceId, me.workspaceId), eq(socialInbox.status, 'unread')))).length;
+  return c.json({ items: rows.map(pubInbox), unread });
+});
+
+// Manual refresh — pull latest interactions now.
+app.post('/inbox/sync', requireRole('editor'), async (c) => {
+  const added = await syncAllInboxes();
+  return c.json({ ok: true, added });
+});
+
+app.post('/inbox/:id/read', async (c) => {
+  const me = c.get('user');
+  await db.update(socialInbox).set({ status: 'read' })
+    .where(and(eq(socialInbox.id, c.req.param('id')), eq(socialInbox.workspaceId, me.workspaceId)));
+  return c.json({ ok: true });
+});
+
+app.post('/inbox/:id/archive', async (c) => {
+  const me = c.get('user');
+  await db.update(socialInbox).set({ status: 'archived' })
+    .where(and(eq(socialInbox.id, c.req.param('id')), eq(socialInbox.workspaceId, me.workspaceId)));
+  return c.json({ ok: true });
+});
+
+app.post('/inbox/:id/reply', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { text = '' } = await c.req.json().catch(() => ({}));
+  if (!String(text).trim()) return c.json({ error: 'reply is empty' }, 400);
+  const res = await replyToItem(c.req.param('id'), text, me.workspaceId);
+  if (!res.ok) return c.json({ error: res.error || 'reply failed' }, 400);
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.inbox.reply', target: c.req.param('id') });
+  return c.json({ ok: true, url: res.url });
 });
 
 export default app;

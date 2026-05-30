@@ -390,3 +390,27 @@ export const socialOauthStates = sqliteTable('social_oauth_states', {
   expiresAt:    integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Engagement inbox — incoming replies/mentions/comments pulled from platforms,
+// deduped by (workspace, platform, remote_id). replyContext carries whatever a
+// platform needs to post a reply (e.g. Bluesky parent/root refs).
+export const socialInbox = sqliteTable('social_inbox', {
+  id:              text('id').primaryKey(),
+  workspaceId:     text('workspace_id').notNull(),
+  accountId:       text('account_id'),
+  platform:        text('platform').notNull(),
+  type:            text('type').notNull(),          // reply | mention | comment | quote
+  remoteId:        text('remote_id').notNull(),
+  authorHandle:    text('author_handle'),
+  authorName:      text('author_name'),
+  authorAvatar:    text('author_avatar'),
+  text:            text('text'),
+  parentRemoteId:  text('parent_remote_id'),
+  url:             text('url'),
+  replyContext:    text('reply_context'),           // JSON
+  status:          text('status').notNull().default('unread'), // unread | read | replied | archived
+  repliedAt:       integer('replied_at', { mode: 'timestamp' }),
+  remoteCreatedAt: integer('remote_created_at', { mode: 'timestamp' }),
+  fetchedAt:       integer('fetched_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt:       integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
