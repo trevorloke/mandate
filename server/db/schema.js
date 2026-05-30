@@ -428,3 +428,24 @@ export const socialTemplates = sqliteTable('social_templates', {
   createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Short links with click tracking.
+export const socialLinks = sqliteTable('social_links', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  slug:        text('slug').notNull().unique(),
+  targetUrl:   text('target_url').notNull(),
+  title:       text('title'),
+  postId:      text('post_id'),
+  clicks:      integer('clicks').notNull().default(0),
+  lastClickAt: integer('last_click_at', { mode: 'timestamp' }),
+  createdById: text('created_by_id'),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+export const socialLinkClicks = sqliteTable('social_link_clicks', {
+  id:        text('id').primaryKey(),
+  linkId:    text('link_id').notNull(),
+  referrer:  text('referrer'),
+  ua:        text('ua'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

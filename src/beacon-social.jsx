@@ -236,6 +236,18 @@ export function BComposer({ accounts, onClose, onPosted }) {
     setBody(t.body || '');
     setMedia((t.media || []).map((m) => ({ ...m, url: `/api/social/media/${m.id}` })));
   };
+  // Replace each URL in the body with a tracked short link.
+  const shortenLinks = async () => {
+    const urls = [...new Set((body.match(/https?:\/\/[^\s]+/g) || []).map((u) => u.replace(/[.,;!?)\]]+$/, '')))];
+    if (!urls.length) { setMsg({ kind: 'info', text: 'No links to shorten.' }); return; }
+    let next = body;
+    for (const u of urls) {
+      try { const r = await api.socialShorten({ url: u }); next = next.split(u).join(r.shortUrl); } catch { /* skip one */ }
+    }
+    setBody(next);
+    setMsg({ kind: 'ok', text: `Shortened ${urls.length} link${urls.length > 1 ? 's' : ''}.` });
+  };
+
   const saveTemplate = async () => {
     const name = window.prompt('Template name:');
     if (!name) return;
@@ -326,6 +338,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
                 {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
               <button type="button" className="bs-btn bs-btn--ghost bs-btn--sm" onClick={saveTemplate} disabled={!body.trim() && media.length === 0}>save as template</button>
+              <button type="button" className="bs-btn bs-btn--ghost bs-btn--sm" onClick={shortenLinks} disabled={!/https?:\/\//.test(body)}>🔗 shorten links</button>
             </div>
             <textarea
               className="bs-compose-text"
@@ -538,13 +551,18 @@ const fmtHour = (h) => `${String(h).padStart(2, '0')}:00`;
 export function BPerformance() {
   const [data, setData] = useState(null);
   const [best, setBest] = useState(null);
+  const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, b] = await Promise.all([api.socialAnalytics(), api.socialBestTimes().catch(() => null)]);
-      setData(a); setBest(b);
+      const [a, b, l] = await Promise.all([
+        api.socialAnalytics(),
+        api.socialBestTimes().catch(() => null),
+        api.socialLinks().catch(() => null),
+      ]);
+      setData(a); setBest(b); setLinks((l && l.links) || []);
     } catch { setData(null); }
     finally { setLoading(false); }
   }, []);
@@ -627,6 +645,24 @@ export function BPerformance() {
             </div>
           )}
           <BestTimesHeatmap grid={best.grid} />
+        </div>
+      )}
+
+      {links.length > 0 && (
+        <div className="bs-perf__best">
+          <h4 className="bs-h">Tracked links</h4>
+          <table className="bs-perf__table">
+            <thead><tr><th>Short link</th><th>Destination</th><th>Clicks</th></tr></thead>
+            <tbody>
+              {links.slice(0, 12).map((l) => (
+                <tr key={l.id}>
+                  <td><a href={l.shortUrl} target="_blank" rel="noreferrer">/l/{l.slug}</a></td>
+                  <td className="bs-link-dest" title={l.targetUrl}>{l.title || l.targetUrl}</td>
+                  <td>{fmtN(l.clicks)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

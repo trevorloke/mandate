@@ -139,6 +139,8 @@ export const api = {
   socialSaveTemplate:    (body) => fetchJson('/api/social/templates', { method: 'POST', body }),
   socialUpdateTemplate:  (id, body) => fetchJson(`/api/social/templates/${id}`, { method: 'PUT', body }),
   socialDeleteTemplate:  (id) => fetchJson(`/api/social/templates/${id}`, { method: 'DELETE' }),
+  socialShorten:    (body) => fetchJson('/api/social/shorten', { method: 'POST', body }),
+  socialLinks:      () => fetchJson('/api/social/links'),
   socialInbox:        (status) => fetchJson(`/api/social/inbox${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   socialInboxSync:    () => fetchJson('/api/social/inbox/sync', { method: 'POST' }),
   socialInboxRead:    (id) => fetchJson(`/api/social/inbox/${id}/read`, { method: 'POST' }),

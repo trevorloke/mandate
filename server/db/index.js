@@ -472,6 +472,29 @@ function bootstrapTables() {
       updated_at    INTEGER DEFAULT (unixepoch())
     );
     CREATE INDEX IF NOT EXISTS idx_social_templates_ws ON social_templates(workspace_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS social_links (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL,
+      slug          TEXT NOT NULL UNIQUE,
+      target_url    TEXT NOT NULL,
+      title         TEXT,
+      post_id       TEXT,
+      clicks        INTEGER NOT NULL DEFAULT 0,
+      last_click_at INTEGER,
+      created_by_id TEXT,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_links_ws ON social_links(workspace_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS social_link_clicks (
+      id         TEXT PRIMARY KEY,
+      link_id    TEXT NOT NULL,
+      referrer   TEXT,
+      ua         TEXT,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_link_clicks_link ON social_link_clicks(link_id, created_at);
   `);
   // Columns added after social_posts shipped.
   alterIfMissing('social_posts', 'metrics_json', 'TEXT');

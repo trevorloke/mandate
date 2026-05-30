@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -577,6 +577,34 @@ app.delete('/templates/:id', requireRole('editor'), async (c) => {
   await db.delete(socialTemplates)
     .where(and(eq(socialTemplates.id, c.req.param('id')), eq(socialTemplates.workspaceId, me.workspaceId)));
   return c.json({ ok: true });
+});
+
+// ── Short links + click tracking ──
+const shortBase = (c) => (process.env.MANDATE_PUBLIC_URL || new URL(c.req.url).origin).replace(/\/$/, '');
+
+app.post('/shorten', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { url, title = null, postId = null } = await c.req.json().catch(() => ({}));
+  if (!/^https?:\/\//i.test(String(url || ''))) return c.json({ error: 'a valid http(s) url is required' }, 400);
+  // Random slug; retry once on the (vanishingly rare) unique collision.
+  let slug, id = newId('sl_');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    slug = randomBytes(5).toString('hex').slice(0, 7);
+    try { await db.insert(socialLinks).values({ id, workspaceId: me.workspaceId, slug, targetUrl: url, title, postId, createdById: me.id }); break; }
+    catch (e) { if (attempt === 1) return c.json({ error: 'could not create link' }, 500); }
+  }
+  return c.json({ ok: true, id, slug, shortUrl: `${shortBase(c)}/l/${slug}` });
+});
+
+app.get('/links', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(socialLinks)
+    .where(eq(socialLinks.workspaceId, me.workspaceId)).orderBy(desc(socialLinks.clicks)).limit(100);
+  const base = shortBase(c);
+  return c.json({ links: rows.map((l) => ({
+    id: l.id, slug: l.slug, shortUrl: `${base}/l/${l.slug}`, targetUrl: l.targetUrl,
+    title: l.title, clicks: l.clicks, lastClickAt: l.lastClickAt,
+  })) });
 });
 
 export default app;
