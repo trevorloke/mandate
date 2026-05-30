@@ -11,7 +11,7 @@
 import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, sqlite } from '../db/index.js';
 import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, users, workspaces, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
@@ -642,18 +642,34 @@ app.delete('/templates/:id', requireRole('editor'), async (c) => {
 // ── Short links + click tracking ──
 const shortBase = (c) => (process.env.MANDATE_PUBLIC_URL || new URL(c.req.url).origin).replace(/\/$/, '');
 
+function withUtm(url, utm) {
+  if (!utm || typeof utm !== 'object') return url;
+  try {
+    const u = new URL(url);
+    const map = { source: 'utm_source', medium: 'utm_medium', campaign: 'utm_campaign', content: 'utm_content', term: 'utm_term' };
+    for (const [k, p] of Object.entries(map)) if (utm[k]) u.searchParams.set(p, String(utm[k]));
+    return u.toString();
+  } catch { return url; }
+}
+
 app.post('/shorten', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { url, title = null, postId = null } = await c.req.json().catch(() => ({}));
+  const { url, title = null, postId = null, utm = null } = await c.req.json().catch(() => ({}));
   if (!/^https?:\/\//i.test(String(url || ''))) return c.json({ error: 'a valid http(s) url is required' }, 400);
+  const cleanUtm = utm && typeof utm === 'object'
+    ? Object.fromEntries(['source', 'medium', 'campaign', 'content', 'term'].map((k) => [k, utm[k] ? String(utm[k]).trim() : '']).filter(([, v]) => v))
+    : null;
+  const target = withUtm(url, cleanUtm);
   // Random slug; retry once on the (vanishingly rare) unique collision.
   let slug, id = newId('sl_');
   for (let attempt = 0; attempt < 2; attempt++) {
     slug = randomBytes(5).toString('hex').slice(0, 7);
-    try { await db.insert(socialLinks).values({ id, workspaceId: me.workspaceId, slug, targetUrl: url, title, postId, createdById: me.id }); break; }
-    catch (e) { if (attempt === 1) return c.json({ error: 'could not create link' }, 500); }
+    try {
+      await db.insert(socialLinks).values({ id, workspaceId: me.workspaceId, slug, targetUrl: target, title, postId, utm: cleanUtm && Object.keys(cleanUtm).length ? JSON.stringify(cleanUtm) : null, createdById: me.id });
+      break;
+    } catch (e) { if (attempt === 1) return c.json({ error: 'could not create link' }, 500); }
   }
-  return c.json({ ok: true, id, slug, shortUrl: `${shortBase(c)}/l/${slug}` });
+  return c.json({ ok: true, id, slug, shortUrl: `${shortBase(c)}/l/${slug}`, targetUrl: target });
 });
 
 app.get('/links', async (c) => {
@@ -661,9 +677,25 @@ app.get('/links', async (c) => {
   const rows = await db.select().from(socialLinks)
     .where(eq(socialLinks.workspaceId, me.workspaceId)).orderBy(desc(socialLinks.clicks)).limit(100);
   const base = shortBase(c);
+  // 14-day clicks-per-day series per link (single grouped query over events).
+  const since = Math.floor(Date.now() / 1000) - 14 * 86400;
+  const series = {};
+  try {
+    const ids = rows.map((l) => l.id);
+    if (ids.length) {
+      const placeholders = ids.map(() => '?').join(',');
+      const events = sqlite.prepare(
+        `SELECT link_id, date(created_at,'unixepoch') AS day, COUNT(*) AS n
+         FROM social_link_clicks WHERE link_id IN (${placeholders}) AND created_at >= ?
+         GROUP BY link_id, day`
+      ).all(...ids, since);
+      for (const e of events) { (series[e.link_id] || (series[e.link_id] = {}))[e.day] = e.n; }
+    }
+  } catch { /* series optional */ }
   return c.json({ links: rows.map((l) => ({
     id: l.id, slug: l.slug, shortUrl: `${base}/l/${l.slug}`, targetUrl: l.targetUrl,
     title: l.title, clicks: l.clicks, lastClickAt: l.lastClickAt,
+    utm: safeParse(l.utm) || null, series: series[l.id] || {},
   })) });
 });
 

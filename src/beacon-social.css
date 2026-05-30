@@ -231,3 +231,7 @@
 .bs-bulk-row__body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2, #2a2a2a); }
 .bs-bulk-row__acct { font-family: var(--font-mono); font-size: 11px; color: var(--ink-5, #7a7872); }
 .bs-bulk-row__when { font-family: var(--font-mono); font-size: 11px; color: var(--ink-4, #5a5956); }
+
+/* UTM campaign + sparkline */
+.bs-campaign { width: 130px; }
+.bs-spark { color: var(--m-beacon, #b8334a); display: block; }

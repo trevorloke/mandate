@@ -438,6 +438,7 @@ export const socialLinks = sqliteTable('social_links', {
   slug:        text('slug').notNull().unique(),
   targetUrl:   text('target_url').notNull(),
   title:       text('title'),
+  utm:         text('utm'),
   postId:      text('post_id'),
   clicks:      integer('clicks').notNull().default(0),
   lastClickAt: integer('last_click_at', { mode: 'timestamp' }),

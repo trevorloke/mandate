@@ -223,6 +223,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [results, setResults] = useState(null);
+  const [campaign, setCampaign] = useState('');
 
   const [templates, setTemplates] = useState([]);
 
@@ -242,12 +243,14 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const shortenLinks = async () => {
     const urls = [...new Set((body.match(/https?:\/\/[^\s]+/g) || []).map((u) => u.replace(/[.,;!?)\]]+$/, '')))];
     if (!urls.length) { setMsg({ kind: 'info', text: 'No links to shorten.' }); return; }
+    const platform = connected.find((a) => targets.includes(a.id))?.platform || 'beacon';
+    const utm = campaign.trim() ? { source: platform, medium: 'social', campaign: campaign.trim() } : null;
     let next = body;
     for (const u of urls) {
-      try { const r = await api.socialShorten({ url: u }); next = next.split(u).join(r.shortUrl); } catch { /* skip one */ }
+      try { const r = await api.socialShorten({ url: u, utm }); next = next.split(u).join(r.shortUrl); } catch { /* skip one */ }
     }
     setBody(next);
-    setMsg({ kind: 'ok', text: `Shortened ${urls.length} link${urls.length > 1 ? 's' : ''}.` });
+    setMsg({ kind: 'ok', text: `Shortened ${urls.length} link${urls.length > 1 ? 's' : ''}${utm ? ` · campaign "${campaign.trim()}"` : ''}.` });
   };
 
   // AI caption assist (improve/shorten/hashtags/rewrite/generate).
@@ -361,6 +364,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
               </select>
               <button type="button" className="bs-btn bs-btn--ghost bs-btn--sm" onClick={saveTemplate} disabled={!body.trim() && media.length === 0}>save as template</button>
               <button type="button" className="bs-btn bs-btn--ghost bs-btn--sm" onClick={shortenLinks} disabled={!/https?:\/\//.test(body)}>🔗 shorten links</button>
+              <input className="bs-tpl-select bs-campaign" placeholder="campaign (UTM)" value={campaign} onChange={(e) => setCampaign(e.target.value)} title="utm_campaign for shortened links" />
             </div>
             <textarea
               className="bs-compose-text"
@@ -754,12 +758,14 @@ export function BPerformance() {
         <div className="bs-perf__best">
           <h4 className="bs-h">Tracked links</h4>
           <table className="bs-perf__table">
-            <thead><tr><th>Short link</th><th>Destination</th><th>Clicks</th></tr></thead>
+            <thead><tr><th>Short link</th><th>Destination</th><th>Campaign</th><th>14-day</th><th>Clicks</th></tr></thead>
             <tbody>
               {links.slice(0, 12).map((l) => (
                 <tr key={l.id}>
                   <td><a href={l.shortUrl} target="_blank" rel="noreferrer">/l/{l.slug}</a></td>
                   <td className="bs-link-dest" title={l.targetUrl}>{l.title || l.targetUrl}</td>
+                  <td>{l.utm?.campaign || <span className="bs-muted">—</span>}</td>
+                  <td><Sparkline series={l.series} /></td>
                   <td>{fmtN(l.clicks)}</td>
                 </tr>
               ))}
@@ -769,6 +775,18 @@ export function BPerformance() {
       )}
     </div>
   );
+}
+
+// Tiny clicks sparkline from a {YYYY-MM-DD: n} series (chronological).
+function Sparkline({ series }) {
+  const days = Object.keys(series || {}).sort();
+  if (days.length === 0) return <span className="bs-muted">—</span>;
+  const vals = days.map((k) => series[k]);
+  const max = Math.max(1, ...vals);
+  const w = 70, h = 16;
+  const n = Math.max(vals.length - 1, 1);
+  const pts = vals.map((v, i) => `${((i / n) * w).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`).join(' ');
+  return <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="bs-spark"><polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>;
 }
 
 // Compact 7×24 heatmap of average engagement by day-of-week × hour (UTC).

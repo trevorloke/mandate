@@ -481,6 +481,7 @@ function bootstrapTables() {
       slug          TEXT NOT NULL UNIQUE,
       target_url    TEXT NOT NULL,
       title         TEXT,
+      utm           TEXT,
       post_id       TEXT,
       clicks        INTEGER NOT NULL DEFAULT 0,
       last_click_at INTEGER,
@@ -504,6 +505,7 @@ function bootstrapTables() {
   alterIfMissing('social_posts', 'thread_json', 'TEXT');
   alterIfMissing('social_inbox', 'assigned_to_id', 'TEXT');
   alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
+  alterIfMissing('social_links', 'utm', 'TEXT');
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.
