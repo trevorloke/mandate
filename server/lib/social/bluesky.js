@@ -55,8 +55,19 @@ async function refresh(creds) {
   return { ...creds, accessJwt: json.accessJwt, refreshJwt: json.refreshJwt };
 }
 
-// Publish a text post. Returns { remoteId, url, credentials } — credentials are
-// returned so the caller can persist refreshed tokens.
+// Upload raw image bytes as a blob (com.atproto.repo.uploadBlob).
+async function uploadBlob(service, token, bytes, mime) {
+  const res = await fetch(`${service}/xrpc/com.atproto.repo.uploadBlob`, {
+    method: 'POST',
+    headers: { 'Content-Type': mime || 'application/octet-stream', Authorization: `Bearer ${token}` },
+    body: bytes,
+  });
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, blob: json.blob, message: json.message };
+}
+
+// Publish a text post (optionally with up to 4 images). Returns
+// { remoteId, url, credentials } — credentials carry any refreshed tokens.
 export async function publish(account, post) {
   let creds = account.credentials;
   if (!creds?.accessJwt) throw new Error('Bluesky account is not connected.');
@@ -64,6 +75,20 @@ export async function publish(account, post) {
   if ([...text].length > CHAR_LIMIT) throw new Error(`Bluesky posts are limited to ${CHAR_LIMIT} characters.`);
 
   const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
+
+  // Attach images (max 4), uploading each as a blob; refresh token on 401.
+  const media = (post.media || []).filter((m) => m.bytes).slice(0, 4);
+  if (media.length) {
+    const images = [];
+    for (const m of media) {
+      let up = await uploadBlob(creds.service, creds.accessJwt, m.bytes, m.mime);
+      if (up.status === 401) { creds = await refresh(creds); up = await uploadBlob(creds.service, creds.accessJwt, m.bytes, m.mime); }
+      if (!up.ok || !up.blob) throw new Error(up.message || 'Bluesky image upload failed.');
+      images.push({ alt: '', image: up.blob });
+    }
+    record.embed = { $type: 'app.bsky.embed.images', images };
+  }
+
   const create = (token) => xrpc(creds.service, 'com.atproto.repo.createRecord', {
     method: 'POST', token,
     body: { repo: creds.did, collection: 'app.bsky.feed.post', record },

@@ -27,7 +27,26 @@
 .bs-av--x, .bs-prov__badge--x { background: #111; }
 .bs-av--meta, .bs-prov__badge--meta { background: #0866ff; }
 .bs-av--li, .bs-prov__badge--li { background: #0a66c2; }
+.bs-av--ig, .bs-prov__badge--ig { background: linear-gradient(45deg, #f09433, #e6683c 30%, #dc2743 50%, #cc2366 70%, #bc1888); }
 .bs-av--gen, .bs-prov__badge--gen { background: #888; }
+
+/* Composer media thumbnails */
+.bs-media { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.bs-thumb {
+  position: relative; width: 72px; height: 72px; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--rule, #c9c3aa); flex-shrink: 0;
+}
+.bs-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bs-thumb__x {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border: 0; border-radius: 50%;
+  background: rgba(0,0,0,0.6); color: #fff; cursor: pointer; font-size: 12px; line-height: 1;
+}
+.bs-thumb--add {
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: var(--paper-1, #eeeadc); color: var(--ink-4, #5a5956);
+  font-family: var(--font-mono); font-size: 11px; border-style: dashed;
+}
+.bs-thumb--add.is-busy { opacity: 0.6; }
 .bs-prov__badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 5px; color: #fff;

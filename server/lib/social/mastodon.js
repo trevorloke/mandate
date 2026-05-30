@@ -34,16 +34,36 @@ export async function connect({ instanceUrl, accessToken }) {
   };
 }
 
+async function uploadMedia(creds, m) {
+  const fd = new FormData();
+  fd.append('file', new Blob([m.bytes], { type: m.mime || 'application/octet-stream' }), m.id || 'image');
+  const res = await fetch(`${creds.instanceUrl}/api/v2/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${creds.accessToken}` },
+    body: fd,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || `Mastodon media upload failed (${res.status}).`);
+  return json.id;
+}
+
 export async function publish(account, post) {
   const creds = account.credentials;
   if (!creds?.accessToken) throw new Error('Mastodon account is not connected.');
   const status = String(post.body || '');
 
+  const media = (post.media || []).filter((m) => m.bytes).slice(0, 4);
+  const mediaIds = [];
+  for (const m of media) mediaIds.push(await uploadMedia(creds, m));
+
+  const payload = { status, visibility: 'public' };
+  if (mediaIds.length) payload.media_ids = mediaIds;
+
   const res = await fetch(`${creds.instanceUrl}/api/v1/statuses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}`,
       'Idempotency-Key': post.id || undefined },
-    body: JSON.stringify({ status, visibility: 'public' }),
+    body: JSON.stringify(payload),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error || `Mastodon publish failed (${res.status}).`);

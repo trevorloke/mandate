@@ -11,6 +11,7 @@ import * as mastodon from './mastodon.js';
 import * as x from './x.js';
 import * as linkedin from './linkedin.js';
 import * as meta from './meta.js';
+import * as instagram from './instagram.js';
 
 export const PROVIDERS = {
   bluesky: {
@@ -41,16 +42,23 @@ export const PROVIDERS = {
   },
   meta: {
     id: 'meta', label: 'Meta (Facebook Page)', open: false, requiresApp: true, connect: 'oauth', charLimit: meta.CHAR_LIMIT,
-    appHelp: 'developers.facebook.com → create an app (Business type), add Facebook Login. Posting to a Page needs pages_manage_posts (App Review for production).',
+    appHelp: 'developers.facebook.com → create an app (Business type), add Facebook Login. Posting to a Page needs pages_manage_posts (App Review for production). A linked Instagram Business account is connected automatically.',
     oauth: meta.oauth, adapter: meta,
+  },
+  instagram: {
+    // Connected automatically through Meta (no standalone OAuth); excluded from
+    // the connect catalogue but available as a publish target + via getProvider.
+    id: 'instagram', label: 'Instagram', open: false, connect: 'meta', connectVia: 'meta', charLimit: instagram.CHAR_LIMIT,
+    adapter: instagram,
   },
 };
 
 export function getProvider(id) { return PROVIDERS[id] || null; }
 
-// Public catalogue for the connect UI (no adapters/secrets).
+// Public catalogue for the connect UI (no adapters/secrets). Providers that are
+// connected through another provider (e.g. Instagram via Meta) are omitted.
 export function providerCatalog() {
-  return Object.values(PROVIDERS).map((p) => ({
+  return Object.values(PROVIDERS).filter((p) => !p.connectVia).map((p) => ({
     id: p.id, label: p.label, open: !!p.open, requiresApp: !!p.requiresApp,
     connect: p.connect, charLimit: p.charLimit || null,
     connectFields: p.connectFields || null, appHelp: p.appHelp || null,

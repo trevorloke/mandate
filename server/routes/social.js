@@ -18,6 +18,7 @@ import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
 import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.js';
 import { publishPost } from '../lib/social/publish.js';
+import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
@@ -43,8 +44,34 @@ app.get('/oauth/callback', async (c) => {
   }
 });
 
+// ── Media serving (PUBLIC — platforms like Facebook/Instagram fetch by URL).
+app.get('/media/:id', async (c) => {
+  const m = getMedia(c.req.param('id'));
+  if (!m) return c.json({ error: 'not found' }, 404);
+  return c.body(m.data, 200, {
+    'Content-Type': m.mime,
+    'Cache-Control': 'public, max-age=31536000, immutable',
+  });
+});
+
 // Everything below requires an authenticated session.
 app.use('*', requireAuth);
+
+// ── Media upload (multipart) → returns id + public url ──
+app.post('/media', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  let body;
+  try { body = await c.req.parseBody(); } catch { return c.json({ error: 'invalid upload' }, 400); }
+  const file = body.file || body.image;
+  if (!file || typeof file === 'string') return c.json({ error: 'no file provided' }, 400);
+  if (!isAllowedMime(file.type)) return c.json({ error: 'unsupported image type' }, 400);
+  const bytes = Buffer.from(await file.arrayBuffer());
+  if (bytes.length > MAX_BYTES) return c.json({ error: 'image too large (max 10MB)' }, 413);
+
+  const saved = saveMedia({ workspaceId: me.workspaceId, userId: me.id, mime: file.type, filename: file.name, bytes });
+  const origin = new URL(c.req.url).origin;
+  return c.json({ ok: true, media: { id: saved.id, mime: saved.mime, size: saved.size, url: `${origin}/api/social/media/${saved.id}` } });
+});
 
 // ── sanitizers (never leak credentials) ──
 const pubAccount = (a) => ({
@@ -215,20 +242,24 @@ app.get('/posts', async (c) => {
 
 app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { body = '', targets = [], scheduledAt = null, publishNow = false } = await c.req.json().catch(() => ({}));
+  const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [] } = await c.req.json().catch(() => ({}));
   const text = String(body || '').trim();
-  if (!text) return c.json({ error: 'post body is empty' }, 400);
+  const mediaRefs = Array.isArray(media) ? media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime })) : [];
+  if (!text && mediaRefs.length === 0) return c.json({ error: 'post is empty' }, 400);
   if (!Array.isArray(targets) || targets.length === 0) return c.json({ error: 'select at least one account' }, 400);
 
   const accts = await db.select().from(socialAccounts)
     .where(and(eq(socialAccounts.workspaceId, me.workspaceId), inArray(socialAccounts.id, targets)));
   if (accts.length === 0) return c.json({ error: 'no matching accounts' }, 400);
 
-  // Per-platform length guard.
+  // Per-platform guards: length, and Instagram requires an image.
   for (const a of accts) {
     const lim = getProvider(a.platform)?.charLimit;
     if (lim && [...text].length > lim) {
       return c.json({ error: `Too long for ${a.platform} (${[...text].length}/${lim}).` }, 400);
+    }
+    if (a.platform === 'instagram' && mediaRefs.length === 0) {
+      return c.json({ error: 'Instagram posts require an image.' }, 400);
     }
   }
 
@@ -238,9 +269,10 @@ app.post('/posts', requireRole('editor'), async (c) => {
   const groupId = newId('sg_');
   // publishNow → mark scheduled-now, publish inline below. Otherwise scheduled or draft.
   const status = publishNow ? 'scheduled' : (when ? 'scheduled' : 'draft');
+  const mediaJson = mediaRefs.length ? JSON.stringify(mediaRefs) : null;
   const rows = accts.map((a) => ({
     id: newId('sp_'), workspaceId: me.workspaceId, groupId, accountId: a.id, platform: a.platform,
-    body: text, status, scheduledAt: publishNow ? new Date() : when, createdById: me.id,
+    body: text, mediaJson, status, scheduledAt: publishNow ? new Date() : when, createdById: me.id,
   }));
   await db.insert(socialPosts).values(rows);
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.create',

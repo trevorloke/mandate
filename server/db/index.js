@@ -421,6 +421,18 @@ function bootstrapTables() {
       expires_at    INTEGER NOT NULL,
       created_at    INTEGER DEFAULT (unixepoch())
     );
+
+    CREATE TABLE IF NOT EXISTS social_media (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL,
+      mime          TEXT NOT NULL,
+      filename      TEXT,
+      size          INTEGER,
+      data          BLOB NOT NULL,
+      created_by_id TEXT,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_media_workspace ON social_media(workspace_id);
   `);
 
   // Chain audit_log entries: each row gets prev_hash + hash computed

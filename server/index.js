@@ -61,9 +61,12 @@ app.use('*', async (c, next) => {
 // Body-size cap on /api/*. Default 1 MB; backup-import path raises to 25 MB.
 const API_BODY_LIMIT    = Number(process.env.MANDATE_API_BODY_LIMIT    || 1_000_000);
 const IMPORT_BODY_LIMIT = Number(process.env.MANDATE_IMPORT_BODY_LIMIT || 25_000_000);
+const MEDIA_BODY_LIMIT  = Number(process.env.MANDATE_MEDIA_BODY_LIMIT  || 12_000_000);
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  const limit = path === '/api/workspace/backup/import' ? IMPORT_BODY_LIMIT : API_BODY_LIMIT;
+  const limit = path === '/api/workspace/backup/import' ? IMPORT_BODY_LIMIT
+    : path === '/api/social/media' ? MEDIA_BODY_LIMIT
+    : API_BODY_LIMIT;
   return bodyLimit({ maxSize: limit, onError: (c) => c.json({ error: 'request body too large' }, 413) })(c, next);
 });
 

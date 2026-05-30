@@ -40,16 +40,36 @@ export const oauth = {
     } catch { /* keep short-lived token */ }
 
     const me = await fetch(`${GRAPH}/me?fields=id,name&access_token=${encodeURIComponent(userToken)}`).then((r) => r.json());
-    const pagesResp = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(userToken)}`).then((r) => r.json());
-    const pages = (pagesResp.data || []).map((p) => ({ id: p.id, name: p.name, token: p.access_token }));
+    // Also pull each Page's linked Instagram Business account, if any.
+    const pagesResp = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,profile_picture_url}&access_token=${encodeURIComponent(userToken)}`).then((r) => r.json());
+    const pages = (pagesResp.data || []).map((p) => ({
+      id: p.id, name: p.name, token: p.access_token,
+      ig: p.instagram_business_account || null,
+    }));
     const primary = pages[0] || null;
+
+    // Each linked IG account becomes its own connected 'instagram' account.
+    const extraAccounts = [];
+    for (const p of pages) {
+      if (p.ig?.id) {
+        extraAccounts.push({
+          platform: 'instagram',
+          handle: p.ig.username ? '@' + p.ig.username : p.name,
+          displayName: p.ig.username || p.name,
+          avatarUrl: p.ig.profile_picture_url || null,
+          remoteId: p.ig.id,
+          credentials: { igUserId: p.ig.id, pageId: p.id, pageToken: p.token },
+        });
+      }
+    }
 
     return {
       remoteId: me.id,
       handle: primary ? primary.name : (me.name || 'Facebook'),
       displayName: primary ? primary.name : (me.name || 'Facebook'),
       avatarUrl: null,
-      credentials: { userToken, pages, pageId: primary?.id || null },
+      credentials: { userToken, pages: pages.map(({ ig, ...rest }) => rest), pageId: primary?.id || null },
+      extraAccounts,
     };
   },
 };
@@ -60,14 +80,25 @@ export async function publish(account, post) {
   const page = (creds.pages || []).find((p) => p.id === creds.pageId);
   if (!page?.token) throw new Error('Missing Page access token — reconnect the account.');
 
-  const res = await fetch(`${GRAPH}/${creds.pageId}/feed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: String(post.body || ''), access_token: page.token }),
+  const message = String(post.body || '');
+  const photo = (post.media || []).find((m) => m.url);
+
+  // With an image → photo post; otherwise a text feed post.
+  let endpoint, body;
+  if (photo) {
+    endpoint = `${GRAPH}/${creds.pageId}/photos`;
+    body = { url: photo.url, caption: message, access_token: page.token };
+  } else {
+    endpoint = `${GRAPH}/${creds.pageId}/feed`;
+    body = { message, access_token: page.token };
+  }
+
+  const res = await fetch(endpoint, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j?.error?.message || `Facebook publish failed (${res.status}).`);
 
-  const id = j.id; // '{pageId}_{postId}'
+  const id = j.post_id || j.id; // photos returns {id, post_id}
   return { remoteId: id, url: id ? `https://www.facebook.com/${id}` : null };
 }

@@ -101,9 +101,22 @@ export async function handleCallback({ code, state }) {
     scopes: (profile.scopes || oa.scopes || []).join(' '),
     status: 'connected', lastVerifiedAt: new Date(), createdById: row.userId || null,
   });
+
+  // Some providers surface additional linked accounts (e.g. Meta → Instagram).
+  for (const extra of (profile.extraAccounts || [])) {
+    await db.insert(socialAccounts).values({
+      id: newId('sa_'), workspaceId: row.workspaceId, platform: extra.platform,
+      handle: extra.handle, displayName: extra.displayName, avatarUrl: extra.avatarUrl || null,
+      remoteId: extra.remoteId || null, instanceUrl: extra.instanceUrl || null,
+      credentials: encryptJson(extra.credentials),
+      scopes: (extra.scopes || []).join(' '),
+      status: 'connected', lastVerifiedAt: new Date(), createdById: row.userId || null,
+    });
+  }
+
   try {
     await db.insert(auditLog).values({ id: newId('a_'), userId: row.userId || null,
-      action: 'social.account.connect', target: id, meta: JSON.stringify({ platform: provider.id, via: 'oauth' }) });
+      action: 'social.account.connect', target: id, meta: JSON.stringify({ platform: provider.id, via: 'oauth', extra: (profile.extraAccounts || []).length }) });
   } catch { /* non-fatal */ }
 
   return { workspaceId: row.workspaceId, accountId: id, returnTo: row.returnTo, platform: provider.id };

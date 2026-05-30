@@ -134,6 +134,20 @@ export const api = {
   socialDeleteApp:  (platform) => fetchJson(`/api/social/apps/${platform}`, { method: 'DELETE' }),
   // OAuth connect is a browser redirect (not fetch):
   socialConnectStartUrl: (platform, returnTo = '/') => `/api/social/connect/${platform}/start?returnTo=${encodeURIComponent(returnTo)}`,
+  // Media upload is multipart (not JSON), so it bypasses fetchJson.
+  socialUploadMedia: async (file) => {
+    await ensureCsrf();
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/social/media', {
+      method: 'POST', credentials: 'include',
+      headers: { 'X-CSRF-Token': getCsrfCookie() },
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'upload failed');
+    return data;
+  },
 
   listWebhookDeliveries: (id) => fetchJson(`/api/webhooks/${id}/deliveries`),
   retryWebhookDelivery:  (whid, did) => fetchJson(`/api/webhooks/${whid}/deliveries/${did}/retry`, { method: 'POST' }),

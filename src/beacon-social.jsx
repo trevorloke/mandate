@@ -8,12 +8,15 @@ import { useSocial } from './use-social';
 const { useState, useEffect, useCallback, useMemo } = React;
 
 const PLAT = {
-  bluesky:  { label: 'Bluesky',  short: 'BS', cls: 'bsky' },
-  mastodon: { label: 'Mastodon', short: 'MA', cls: 'masto' },
-  x:        { label: 'X',        short: 'X',  cls: 'x' },
-  meta:     { label: 'Meta',     short: 'MT', cls: 'meta' },
-  linkedin: { label: 'LinkedIn', short: 'LI', cls: 'li' },
+  bluesky:   { label: 'Bluesky',   short: 'BS', cls: 'bsky' },
+  mastodon:  { label: 'Mastodon',  short: 'MA', cls: 'masto' },
+  x:         { label: 'X',         short: 'X',  cls: 'x' },
+  meta:      { label: 'Meta',      short: 'MT', cls: 'meta' },
+  linkedin:  { label: 'LinkedIn',  short: 'LI', cls: 'li' },
+  instagram: { label: 'Instagram', short: 'IG', cls: 'ig' },
 };
+
+const CHAR_LIMITS = { bluesky: 300, mastodon: 500, x: 280, meta: 2200, linkedin: 3000, instagram: 2200 };
 const platLabel = (p) => PLAT[p]?.label || p;
 
 function Avatar({ account, size = 34 }) {
@@ -201,6 +204,8 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const [targets, setTargets] = useState(() => accounts.map((a) => a.id)); // default: all
   const [mode, setMode] = useState('now');     // 'now' | 'schedule'
   const [when, setWhen] = useState('');
+  const [media, setMedia] = useState([]);      // [{ id, url, mime }]
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [results, setResults] = useState(null);
@@ -211,17 +216,34 @@ export function BComposer({ accounts, onClose, onPosted }) {
   // Tightest character limit among selected platforms.
   const limit = useMemo(() => {
     const sel = connected.filter((a) => targets.includes(a.id));
-    const lims = { bluesky: 300, mastodon: 500, x: 280, meta: 2200, linkedin: 3000 };
-    const vals = sel.map((a) => lims[a.platform]).filter(Boolean);
+    const vals = sel.map((a) => CHAR_LIMITS[a.platform]).filter(Boolean);
     return vals.length ? Math.min(...vals) : null;
   }, [targets, connected]);
 
   const over = limit != null && [...body].length > limit;
+  // Instagram requires an image.
+  const igSelected = connected.some((a) => a.platform === 'instagram' && targets.includes(a.id));
+  const igNeedsImage = igSelected && media.length === 0;
+
+  const onPickFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    setUploading(true); setMsg(null);
+    try {
+      for (const f of files.slice(0, 4 - media.length)) {
+        const r = await api.socialUploadMedia(f);
+        setMedia((m) => [...m, r.media]);
+      }
+    } catch (err) { setMsg({ kind: 'err', text: err.message || 'Upload failed' }); }
+    finally { setUploading(false); }
+  };
+  const removeMedia = (id) => setMedia((m) => m.filter((x) => x.id !== id));
 
   const submit = async () => {
     setBusy(true); setMsg(null); setResults(null);
     try {
-      const payload = { body, targets };
+      const payload = { body, targets, media: media.map((m) => ({ id: m.id, mime: m.mime })) };
       if (mode === 'now') payload.publishNow = true;
       else payload.scheduledAt = new Date(when).toISOString();
       const r = await api.socialCompose(payload);
@@ -240,7 +262,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
     finally { setBusy(false); }
   };
 
-  const canSubmit = body.trim() && targets.length && !over && !busy && (mode === 'now' || when);
+  const canSubmit = (body.trim() || media.length) && targets.length && !over && !busy && !uploading && !igNeedsImage && (mode === 'now' || when);
 
   return (
     <div className="bs-modal-backdrop" onClick={onClose}>
@@ -264,6 +286,22 @@ export function BComposer({ accounts, onClose, onPosted }) {
               rows={5}
               autoFocus
             />
+            <div className="bs-media">
+              {media.map((m) => (
+                <div key={m.id} className="bs-thumb">
+                  <img src={m.url} alt="" />
+                  <button type="button" className="bs-thumb__x" onClick={() => removeMedia(m.id)}>×</button>
+                </div>
+              ))}
+              {media.length < 4 && (
+                <label className={'bs-thumb bs-thumb--add' + (uploading ? ' is-busy' : '')}>
+                  <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onPickFiles} />
+                  {uploading ? '…' : '+ image'}
+                </label>
+              )}
+            </div>
+            {igNeedsImage && <div className="bs-msg bs-msg--info">Instagram needs an image — add one above.</div>}
+
             <div className="bs-compose-meta">
               <div className="bs-targets">
                 {connected.map((a) => (
