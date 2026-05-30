@@ -82,7 +82,13 @@ export default function App2() {
     api.updateMe({ locale }).catch(() => {});
   }, [user?.id, user?.locale, locale, setLocale]);
 
-  const initial = (() => { try { return localStorage.getItem('mandate2:route') || 'home'; } catch { return 'home'; } })();
+  const initial = (() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.has('social_connected') || sp.has('social_error')) return 'beacon';
+      return localStorage.getItem('mandate2:route') || 'home';
+    } catch { return 'home'; }
+  })();
   const [route, setRoute] = useState(initial);
   const [conductorOpen, setConductorOpen] = useState(false);
   const { records: conductorAsks } = useLiveRecords('conductor', 'ask', []);
@@ -93,6 +99,19 @@ export default function App2() {
     try { localStorage.setItem('mandate2:route', k); } catch {}
     window.scrollTo({ top: 0, behavior: 'instant' });
   };
+
+  // After a social OAuth redirect (?social_connected / ?social_error) the
+  // initial route is already 'beacon'; here we just surface any error and clean
+  // the URL (no React state set, so this stays a pure side-effect).
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.has('social_connected') || sp.has('social_error')) {
+      const err = sp.get('social_error');
+      if (err) alert('Connection failed: ' + err);
+      try { localStorage.setItem('mandate2:route', 'beacon'); } catch { /* ignore */ }
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+    }
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => {

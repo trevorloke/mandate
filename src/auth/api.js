@@ -128,6 +128,12 @@ export const api = {
   socialCompose:    (body) => fetchJson('/api/social/posts', { method: 'POST', body }),
   socialCancel:     (groupId) => fetchJson(`/api/social/posts/${groupId}/cancel`, { method: 'POST' }),
   socialRetry:      (id) => fetchJson(`/api/social/posts/${id}/retry`, { method: 'POST' }),
+  // Developer-app credentials for OAuth platforms (X / LinkedIn / Meta).
+  socialApps:       () => fetchJson('/api/social/apps'),
+  socialSaveApp:    (platform, body) => fetchJson(`/api/social/apps/${platform}`, { method: 'PUT', body }),
+  socialDeleteApp:  (platform) => fetchJson(`/api/social/apps/${platform}`, { method: 'DELETE' }),
+  // OAuth connect is a browser redirect (not fetch):
+  socialConnectStartUrl: (platform, returnTo = '/') => `/api/social/connect/${platform}/start?returnTo=${encodeURIComponent(returnTo)}`,
 
   listWebhookDeliveries: (id) => fetchJson(`/api/webhooks/${id}/deliveries`),
   retryWebhookDelivery:  (whid, did) => fetchJson(`/api/webhooks/${whid}/deliveries/${did}/retry`, { method: 'POST' }),

@@ -55,6 +55,13 @@
 .bs-prov__label { font-size: 14px; color: var(--ink-1); }
 .bs-prov__tag { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-5); }
 
+.bs-prov__top { display: flex; align-items: center; gap: 8px; }
+.bs-prov__row { display: flex; gap: 6px; }
+.bs-prov { cursor: default; }
+.bs-prov:hover { border-color: var(--rule, #c9c3aa); }
+
+.bs-settings { padding: 4px 0; display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+
 .bs-connect-form { display: flex; flex-direction: column; gap: 12px; }
 .bs-connect-form__hd { display: flex; align-items: center; gap: 8px; }
 .bs-connect-form__hd b { flex: 1; }

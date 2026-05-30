@@ -26,10 +26,11 @@ function Avatar({ account, size = 34 }) {
 // ── Connections ──────────────────────────────────────────────────────
 export function BConnections() {
   const { accounts, providers, loading, refresh } = useSocial();
-  const [picked, setPicked] = useState(null);     // provider id being connected
+  const [picked, setPicked] = useState(null);     // credential provider being connected
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [settingsFor, setSettingsFor] = useState(null); // platform whose dev-app we're editing
 
   const prov = providers.find((p) => p.id === picked);
 
@@ -51,6 +52,13 @@ export function BConnections() {
     try { await api.socialDisconnect(a.id); refresh(); }
     catch (e) { setMsg({ kind: 'err', text: e.message }); }
   };
+
+  // OAuth providers connect via a full-page redirect to the platform.
+  const oauthConnect = (p) => { window.location.assign(api.socialConnectStartUrl(p.id, '/')); };
+
+  if (settingsFor) {
+    return <BSocialSettings platform={settingsFor} providers={providers} onBack={() => { setSettingsFor(null); refresh(); }} />;
+  }
 
   return (
     <div className="bs-conn">
@@ -77,17 +85,27 @@ export function BConnections() {
 
         {!picked ? (
           <div className="bs-prov-grid">
-            {providers.map((p) => (
-              <button
-                key={p.id}
-                className={'bs-prov' + (p.open ? '' : ' is-gated')}
-                onClick={() => p.open ? startConnect(p) : setMsg({ kind: 'info', text: `${p.label} needs a developer app + platform review. Open platforms (Bluesky, Mastodon) work today.` })}
-              >
-                <div className={'bs-prov__badge bs-prov__badge--' + (PLAT[p.id]?.cls || 'gen')}>{PLAT[p.id]?.short || '?'}</div>
-                <div className="bs-prov__label">{p.label}</div>
-                <div className="bs-prov__tag">{p.open ? 'Ready' : 'Needs setup'}</div>
-              </button>
-            ))}
+            {providers.map((p) => {
+              const ready = p.connect === 'credentials' || p.configured;
+              return (
+                <div key={p.id} className={'bs-prov' + (ready ? '' : ' is-gated')}>
+                  <div className="bs-prov__top">
+                    <div className={'bs-prov__badge bs-prov__badge--' + (PLAT[p.id]?.cls || 'gen')}>{PLAT[p.id]?.short || '?'}</div>
+                    <div className="bs-prov__label">{p.label}</div>
+                  </div>
+                  {p.connect === 'credentials' ? (
+                    <button className="bs-btn bs-btn--sm" onClick={() => startConnect(p)}>Connect</button>
+                  ) : p.configured ? (
+                    <div className="bs-prov__row">
+                      <button className="bs-btn bs-btn--sm" onClick={() => oauthConnect(p)}>Connect</button>
+                      <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setSettingsFor(p.id)}>app ⚙</button>
+                    </div>
+                  ) : (
+                    <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setSettingsFor(p.id)}>Set up app →</button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="bs-connect-form">
@@ -113,6 +131,66 @@ export function BConnections() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Developer-app credential editor for an OAuth platform.
+function BSocialSettings({ platform, providers, onBack }) {
+  const prov = providers.find((p) => p.id === platform) || { label: platform };
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [hasSecret, setHasSecret] = useState(false);
+  const [redirectUri, setRedirectUri] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    api.socialApps().then((r) => {
+      setRedirectUri(r.redirectUri || '');
+      const a = r.apps?.[platform];
+      if (a) { setClientId(a.clientId || ''); setHasSecret(!!a.hasSecret); }
+    }).catch(() => {});
+  }, [platform]);
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const body = { clientId };
+      if (clientSecret) body.clientSecret = clientSecret;
+      await api.socialSaveApp(platform, body);
+      setMsg({ kind: 'ok', text: 'Saved. You can now connect.' });
+      setHasSecret(hasSecret || !!clientSecret);
+      setClientSecret('');
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bs-settings">
+      <div className="bs-connect-form__hd">
+        <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[platform]?.cls || 'gen')}>{PLAT[platform]?.short}</span>
+        <b>{prov.label} — developer app</b>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={onBack}>← back</button>
+      </div>
+
+      {prov.appHelp && <p className="bs-muted" style={{ marginTop: 8 }}>{prov.appHelp}</p>}
+
+      <label className="bs-field">
+        <span className="bs-field__label">Redirect URI — register this exact URL in your app</span>
+        <input className="bs-input" readOnly value={redirectUri} onClick={(e) => e.target.select()} />
+      </label>
+      <label className="bs-field">
+        <span className="bs-field__label">Client ID</span>
+        <input className="bs-input" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+      </label>
+      <label className="bs-field">
+        <span className="bs-field__label">Client secret {hasSecret && <em className="bs-field__hint">· saved — leave blank to keep</em>}</span>
+        <input className="bs-input" type="password" placeholder={hasSecret ? '••••••••' : ''} value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+      </label>
+
+      {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+      <button className="bs-btn" onClick={save} disabled={busy || !clientId}>{busy ? 'Saving…' : 'Save app'}</button>
     </div>
   );
 }
