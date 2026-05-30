@@ -427,6 +427,31 @@ app.get('/analytics', async (c) => {
   return c.json({ totals, byPlatform, top, postCount: rows.length });
 });
 
+// Best-time-to-post suggestions from this workspace's own engagement history.
+app.get('/best-times', async (c) => {
+  const me = c.get('user');
+  const platform = c.req.query('platform');
+  const base = and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.status, 'published'));
+  const where = platform ? and(base, eq(socialPosts.platform, platform)) : base;
+  const rows = await db.select().from(socialPosts).where(where);
+
+  const eng = (m) => (m.likes || 0) + (m.reposts || 0) + (m.replies || 0) + (m.comments || 0) + (m.shares || 0);
+  const buckets = new Map();
+  let samples = 0;
+  for (const p of rows) {
+    if (!p.publishedAt || !p.metricsJson) continue;
+    const m = safeParse(p.metricsJson); if (!m) continue;
+    const d = p.publishedAt instanceof Date ? p.publishedAt : new Date(p.publishedAt * 1000);
+    const day = d.getUTCDay(); const hour = d.getUTCHours();
+    const key = `${day}-${hour}`;
+    const b = buckets.get(key) || { day, hour, sum: 0, n: 0 };
+    b.sum += eng(m); b.n++; buckets.set(key, b); samples++;
+  }
+  const grid = [...buckets.values()].map((b) => ({ day: b.day, hour: b.hour, avg: b.sum / b.n, n: b.n }));
+  const suggestions = grid.slice().sort((a, b) => b.avg - a.avg).slice(0, 5);
+  return c.json({ suggestions, grid, samples, tz: 'UTC' });
+});
+
 // Refresh engagement metrics for all published posts in a compose group.
 app.post('/posts/:groupId/metrics', async (c) => {
   const me = c.get('user');

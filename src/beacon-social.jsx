@@ -505,14 +505,20 @@ const fmtN = (n) => {
   return String(n);
 };
 
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const fmtHour = (h) => `${String(h).padStart(2, '0')}:00`;
+
 export function BPerformance() {
   const [data, setData] = useState(null);
+  const [best, setBest] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await api.socialAnalytics()); }
-    catch { setData(null); }
+    try {
+      const [a, b] = await Promise.all([api.socialAnalytics(), api.socialBestTimes().catch(() => null)]);
+      setData(a); setBest(b);
+    } catch { setData(null); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -580,6 +586,47 @@ export function BPerformance() {
           )}
         </div>
       </div>
+
+      {best && best.samples > 0 && (
+        <div className="bs-perf__best">
+          <h4 className="bs-h">Best times to post <em className="bs-field__hint">· from your engagement history ({best.samples} posts, {best.tz})</em></h4>
+          {best.suggestions.length > 0 && (
+            <div className="bs-best-chips">
+              {best.suggestions.map((s, i) => (
+                <span key={i} className={'bs-best-chip' + (i === 0 ? ' is-top' : '')}>
+                  {DAYS[s.day]} {fmtHour(s.hour)} <b>{fmtN(Math.round(s.avg))}</b> avg
+                </span>
+              ))}
+            </div>
+          )}
+          <BestTimesHeatmap grid={best.grid} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compact 7×24 heatmap of average engagement by day-of-week × hour (UTC).
+function BestTimesHeatmap({ grid }) {
+  const map = {};
+  let max = 0;
+  for (const g of grid) { map[`${g.day}-${g.hour}`] = g.avg; if (g.avg > max) max = g.avg; }
+  return (
+    <div className="bs-heat">
+      <div className="bs-heat__row bs-heat__row--head">
+        <span className="bs-heat__day" />
+        {Array.from({ length: 24 }, (_, h) => <span key={h} className="bs-heat__hh">{h % 6 === 0 ? h : ''}</span>)}
+      </div>
+      {DAYS.map((d, day) => (
+        <div className="bs-heat__row" key={day}>
+          <span className="bs-heat__day">{d}</span>
+          {Array.from({ length: 24 }, (_, h) => {
+            const v = map[`${day}-${h}`];
+            const op = v != null && max > 0 ? 0.12 + 0.88 * (v / max) : 0;
+            return <span key={h} className="bs-heat__cell" title={v != null ? `${d} ${fmtHour(h)} · ${Math.round(v)} avg` : ''} style={v != null ? { background: `rgba(184,51,74,${op.toFixed(2)})` } : undefined} />;
+          })}
+        </div>
+      ))}
     </div>
   );
 }

@@ -134,6 +134,7 @@ export const api = {
   socialPublishNow: (groupId) => fetchJson(`/api/social/posts/${groupId}/publish`, { method: 'POST' }),
   socialRefreshMetrics: (groupId) => fetchJson(`/api/social/posts/${groupId}/metrics`, { method: 'POST' }),
   socialAnalytics:  () => fetchJson('/api/social/analytics'),
+  socialBestTimes:  (platform) => fetchJson(`/api/social/best-times${platform ? `?platform=${platform}` : ''}`),
   socialInbox:        (status) => fetchJson(`/api/social/inbox${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   socialInboxSync:    () => fetchJson('/api/social/inbox/sync', { method: 'POST' }),
   socialInboxRead:    (id) => fetchJson(`/api/social/inbox/${id}/read`, { method: 'POST' }),
