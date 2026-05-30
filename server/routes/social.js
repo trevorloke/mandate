@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, users, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, users, workspaces, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -427,10 +427,32 @@ app.get('/analytics', async (c) => {
   return c.json({ totals, byPlatform, top, postCount: rows.length });
 });
 
+// Map the workspace's tz abbreviation to an IANA zone for DST-aware bucketing.
+const TZ_IANA = {
+  PT: 'America/Los_Angeles', MT: 'America/Denver', CT: 'America/Chicago', ET: 'America/New_York',
+  AT: 'America/Halifax', NT: 'America/St_Johns', GMT: 'Etc/UTC', BST: 'Europe/London',
+  CET: 'Europe/Paris', EET: 'Europe/Helsinki', IST: 'Asia/Kolkata',
+};
+const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+function dayHourInTz(date, tzAbbr) {
+  const timeZone = TZ_IANA[tzAbbr] || 'Etc/UTC';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(date);
+    const wd = parts.find((p) => p.type === 'weekday')?.value;
+    let hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
+    if (hour === 24) hour = 0;
+    return { day: WD[wd] ?? 0, hour: Number.isNaN(hour) ? 0 : hour };
+  } catch {
+    return { day: date.getUTCDay(), hour: date.getUTCHours() };
+  }
+}
+
 // Best-time-to-post suggestions from this workspace's own engagement history.
 app.get('/best-times', async (c) => {
   const me = c.get('user');
   const platform = c.req.query('platform');
+  const ws = (await db.select().from(workspaces).where(eq(workspaces.id, me.workspaceId)).limit(1))[0];
+  const tz = ws?.tz || 'UTC';
   const base = and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.status, 'published'));
   const where = platform ? and(base, eq(socialPosts.platform, platform)) : base;
   const rows = await db.select().from(socialPosts).where(where);
@@ -442,14 +464,14 @@ app.get('/best-times', async (c) => {
     if (!p.publishedAt || !p.metricsJson) continue;
     const m = safeParse(p.metricsJson); if (!m) continue;
     const d = p.publishedAt instanceof Date ? p.publishedAt : new Date(p.publishedAt * 1000);
-    const day = d.getUTCDay(); const hour = d.getUTCHours();
+    const { day, hour } = dayHourInTz(d, tz);
     const key = `${day}-${hour}`;
     const b = buckets.get(key) || { day, hour, sum: 0, n: 0 };
     b.sum += eng(m); b.n++; buckets.set(key, b); samples++;
   }
   const grid = [...buckets.values()].map((b) => ({ day: b.day, hour: b.hour, avg: b.sum / b.n, n: b.n }));
   const suggestions = grid.slice().sort((a, b) => b.avg - a.avg).slice(0, 5);
-  return c.json({ suggestions, grid, samples, tz: 'UTC' });
+  return c.json({ suggestions, grid, samples, tz });
 });
 
 // Refresh engagement metrics for all published posts in a compose group.
