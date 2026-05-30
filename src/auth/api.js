@@ -142,6 +142,7 @@ export const api = {
   socialShorten:    (body) => fetchJson('/api/social/shorten', { method: 'POST', body }),
   socialLinks:      () => fetchJson('/api/social/links'),
   socialBulk:       (rows) => fetchJson('/api/social/bulk', { method: 'POST', body: { rows } }),
+  socialAssist:     (body) => fetchJson('/api/social/assist', { method: 'POST', body }),
   socialInbox:        (status, assignee) => {
     const q = new URLSearchParams();
     if (status) q.set('status', status);

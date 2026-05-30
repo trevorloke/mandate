@@ -19,6 +19,7 @@ import { getProvider, providerCatalog } from '../lib/social/index.js';
 import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.js';
 import { publishPost } from '../lib/social/publish.js';
 import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
+import { generateCaption, aiConfigured } from '../lib/social/assist.js';
 import { refreshMetrics } from '../lib/social/metrics.js';
 import { checkAccountHealth } from '../lib/social/health.js';
 import { syncAllInboxes, replyToItem } from '../lib/social/inbox.js';
@@ -95,7 +96,19 @@ app.get('/providers', async (c) => {
   const me = c.get('user');
   const rows = await db.select().from(socialApps).where(eq(socialApps.workspaceId, me.workspaceId));
   const configured = new Set(rows.filter((r) => r.clientId && r.active).map((r) => r.platform));
-  return c.json({ providers: providerCatalog().map((p) => ({ ...p, configured: configured.has(p.id) })) });
+  return c.json({ providers: providerCatalog().map((p) => ({ ...p, configured: configured.has(p.id) })), aiAvailable: aiConfigured() });
+});
+
+// ── AI caption assist ──
+app.post('/assist', requireRole('editor'), async (c) => {
+  const { draft = '', mode = 'improve', platform = '', charLimit = null } = await c.req.json().catch(() => ({}));
+  if (!String(draft).trim() && mode !== 'generate') return c.json({ error: 'nothing to work with' }, 400);
+  try {
+    const r = await generateCaption({ draft, mode, platform, charLimit });
+    return c.json({ ok: true, text: r.text });
+  } catch (e) {
+    return c.json({ error: e.message, code: e.code || null }, e.code === 'no_key' ? 503 : 400);
+  }
 });
 
 // ── developer apps (client id/secret per platform; secret encrypted) ──

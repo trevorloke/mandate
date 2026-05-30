@@ -219,6 +219,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const [media, setMedia] = useState([]);      // [{ id, url, mime }]
   const [uploading, setUploading] = useState(false);
   const [threadMode, setThreadMode] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [results, setResults] = useState(null);
@@ -247,6 +248,18 @@ export function BComposer({ accounts, onClose, onPosted }) {
     }
     setBody(next);
     setMsg({ kind: 'ok', text: `Shortened ${urls.length} link${urls.length > 1 ? 's' : ''}.` });
+  };
+
+  // AI caption assist (improve/shorten/hashtags/rewrite/generate).
+  const assist = async (mode) => {
+    setAiBusy(true); setMsg(null);
+    try {
+      const platform = connected.find((a) => targets.includes(a.id))?.platform || '';
+      const r = await api.socialAssist({ draft: body, mode, platform, charLimit: limit });
+      setBody(r.text);
+    } catch (e) {
+      setMsg({ kind: /API key/i.test(e.message) ? 'info' : 'err', text: e.message });
+    } finally { setAiBusy(false); }
   };
 
   const saveTemplate = async () => {
@@ -334,6 +347,14 @@ export function BComposer({ accounts, onClose, onPosted }) {
         ) : (
           <div className="bs-modal__body">
             <div className="bs-compose-tpl">
+              <select className="bs-tpl-select" value="" disabled={aiBusy} onChange={(e) => { if (e.target.value) assist(e.target.value); e.target.value = ''; }}>
+                <option value="">{aiBusy ? '✨ thinking…' : '✨ AI assist…'}</option>
+                <option value="improve">Improve</option>
+                <option value="shorten">Shorten</option>
+                <option value="hashtags">Add hashtags</option>
+                <option value="rewrite">Rewrite</option>
+                <option value="generate">Generate from idea</option>
+              </select>
               <select className="bs-tpl-select" value="" onChange={(e) => { if (e.target.value) insertTemplate(e.target.value); e.target.value = ''; }}>
                 <option value="">📋 Insert template…</option>
                 {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
