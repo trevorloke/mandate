@@ -654,4 +654,53 @@ app.get('/links', async (c) => {
   })) });
 });
 
+// ── Bulk schedule from parsed CSV rows ──
+// Each row: { body, accounts, scheduledAt?, thread? }. `accounts` is a
+// comma/semicolon list matched against handle, platform, or account id.
+app.post('/bulk', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { rows = [] } = await c.req.json().catch(() => ({}));
+  if (!Array.isArray(rows) || rows.length === 0) return c.json({ error: 'no rows' }, 400);
+
+  const accts = await db.select().from(socialAccounts).where(eq(socialAccounts.workspaceId, me.workspaceId));
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/^@/, '');
+  const byKey = {};
+  for (const a of accts) {
+    byKey[norm(a.id)] = a;
+    if (a.handle) byKey[norm(a.handle)] = a;
+    if (!byKey[norm(a.platform)]) byKey[norm(a.platform)] = a; // first account of a platform
+  }
+
+  const results = [];
+  let created = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || {};
+    const body = String(row.body || '').trim();
+    const tokens = String(row.accounts || '').split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+    const matched = []; const unmatched = [];
+    for (const t of tokens) { const a = byKey[norm(t)]; if (a) matched.push(a); else unmatched.push(t); }
+    const uniq = [...new Map(matched.map((a) => [a.id, a])).values()];
+
+    const threadSegs = row.thread ? String(row.thread).split('||').map((s) => s.trim()).filter(Boolean) : null;
+    const isThread = threadSegs && threadSegs.length > 1;
+    if (!body && !isThread) { results.push({ row: i + 1, ok: false, error: 'empty body' }); continue; }
+    if (uniq.length === 0) { results.push({ row: i + 1, ok: false, error: `no accounts matched: ${tokens.join(', ') || '(none)'}` }); continue; }
+    const when = row.scheduledAt ? new Date(row.scheduledAt) : null;
+    if (row.scheduledAt && (!when || isNaN(when.getTime()))) { results.push({ row: i + 1, ok: false, error: 'invalid scheduledAt' }); continue; }
+
+    const groupId = newId('sg_');
+    const status = when ? 'scheduled' : 'draft';
+    const insertRows = uniq.map((a) => ({
+      id: newId('sp_'), workspaceId: me.workspaceId, groupId, accountId: a.id, platform: a.platform,
+      body: isThread ? threadSegs[0] : body, threadJson: isThread ? JSON.stringify(threadSegs) : null,
+      status, scheduledAt: when, createdById: me.id,
+    }));
+    await db.insert(socialPosts).values(insertRows);
+    created += insertRows.length;
+    results.push({ row: i + 1, ok: true, accounts: uniq.length, status, unmatched: unmatched.length ? unmatched : undefined });
+  }
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.bulk', target: 'bulk', meta: JSON.stringify({ rows: rows.length, created }) });
+  return c.json({ ok: true, created, results });
+});
+
 export default app;

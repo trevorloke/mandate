@@ -223,3 +223,11 @@
 
 /* Inbox assignee */
 .bs-in-assignee { font-size: 10px; font-family: var(--font-mono); border: 1px solid var(--rule, #c9c3aa); border-radius: 4px; padding: 1px 4px; background: var(--paper-0, #faf8f1); color: var(--ink-4, #5a5956); }
+
+/* Bulk schedule */
+.bs-bulk-preview { border: 1px solid var(--rule, #c9c3aa); border-radius: 6px; padding: 8px; margin-top: 8px; }
+.bs-bulk-row { display: flex; gap: 10px; font-size: 12px; padding: 3px 0; border-bottom: 1px solid var(--paper-2, #e6e1ce); }
+.bs-bulk-row:last-child { border-bottom: 0; }
+.bs-bulk-row__body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2, #2a2a2a); }
+.bs-bulk-row__acct { font-family: var(--font-mono); font-size: 11px; color: var(--ink-5, #7a7872); }
+.bs-bulk-row__when { font-family: var(--font-mono); font-size: 11px; color: var(--ink-4, #5a5956); }

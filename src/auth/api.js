@@ -141,6 +141,7 @@ export const api = {
   socialDeleteTemplate:  (id) => fetchJson(`/api/social/templates/${id}`, { method: 'DELETE' }),
   socialShorten:    (body) => fetchJson('/api/social/shorten', { method: 'POST', body }),
   socialLinks:      () => fetchJson('/api/social/links'),
+  socialBulk:       (rows) => fetchJson('/api/social/bulk', { method: 'POST', body: { rows } }),
   socialInbox:        (status, assignee) => {
     const q = new URLSearchParams();
     if (status) q.set('status', status);

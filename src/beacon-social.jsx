@@ -5,6 +5,7 @@ import './beacon-social.css';
 import { api } from './auth/api';
 import { useAuth } from './auth/AuthContext';
 import { useSocial } from './use-social';
+import { fromCSV, readFileAsText } from './admin/csv';
 
 const { useState, useEffect, useCallback, useMemo } = React;
 
@@ -440,6 +441,7 @@ export function BOutbox() {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -482,15 +484,19 @@ export function BOutbox() {
 
   return (
     <div className="bs-outbox">
-      <div className="bs-ob-filters">
-        {STATUS_FILTERS.map(([k, lbl]) => {
-          const n = k === 'all' ? groups.length : groups.filter((g) => g.status === k).length;
-          return (
-            <button key={k} className={'bs-ob-filter' + (filter === k ? ' is-on' : '')} onClick={() => setFilter(k)}>
-              {lbl}{n > 0 && <span className="bs-ob-filter__n">{n}</span>}
-            </button>
-          );
-        })}
+      {bulkOpen && <BBulkModal onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />}
+      <div className="bs-inbox__hd">
+        <div className="bs-ob-filters">
+          {STATUS_FILTERS.map(([k, lbl]) => {
+            const n = k === 'all' ? groups.length : groups.filter((g) => g.status === k).length;
+            return (
+              <button key={k} className={'bs-ob-filter' + (filter === k ? ' is-on' : '')} onClick={() => setFilter(k)}>
+                {lbl}{n > 0 && <span className="bs-ob-filter__n">{n}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setBulkOpen(true)}>⤓ Bulk schedule</button>
       </div>
 
       {shown.length === 0 ? (
@@ -533,6 +539,81 @@ export function BOutbox() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Bulk schedule from a CSV (columns: body, accounts, scheduledAt, thread).
+function BBulkModal({ onClose, onDone }) {
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [results, setResults] = useState(null);
+
+  const ingest = (text) => {
+    try {
+      const parsed = fromCSV(text).map((r) => ({
+        body: r.body ?? r.text ?? '', accounts: r.accounts ?? r.account ?? '',
+        scheduledAt: r.scheduledAt ?? r.schedule ?? r.when ?? '', thread: r.thread ?? '',
+      })).filter((r) => r.body || r.thread);
+      setRows(parsed); setResults(null);
+      setMsg(parsed.length ? null : { kind: 'err', text: 'No usable rows. Need a header row with a "body" column.' });
+    } catch (e) { setMsg({ kind: 'err', text: 'Could not parse CSV: ' + e.message }); }
+  };
+  const onFile = async (e) => { const f = e.target.files?.[0]; if (f) ingest(await readFileAsText(f)); };
+
+  const submit = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.socialBulk(rows);
+      setResults(r);
+      setMsg({ kind: r.created ? 'ok' : 'err', text: `Queued ${r.created} post(s) across ${rows.length} row(s).` });
+      if (r.created) setTimeout(onDone, 900);
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bs-modal-backdrop" onClick={onClose}>
+      <div className="bs-modal" onClick={(e) => e.stopPropagation()} style={{ width: 640 }}>
+        <div className="bs-modal__hd">
+          <div className="bs-modal__title">Bulk schedule</div>
+          <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={onClose}>ESC</button>
+        </div>
+        <div className="bs-modal__body">
+          <p className="bs-muted" style={{ marginTop: 0 }}>
+            CSV columns: <b>body</b>, <b>accounts</b> (handle/platform, comma-separated), <b>scheduledAt</b> (ISO; blank = draft),
+            optional <b>thread</b> (segments split by <code>||</code>).
+          </p>
+          <input type="file" accept=".csv,text/csv" onChange={onFile} className="bs-input" />
+          <textarea className="bs-compose-text" rows={5} placeholder={'body,accounts,scheduledAt\n"Hello world!",@me.bsky.social,2026-06-01T17:00\n"Big news",bluesky;mastodon,'} onChange={(e) => ingest(e.target.value)} style={{ marginTop: 10 }} />
+          {rows.length > 0 && (
+            <div className="bs-bulk-preview">
+              <div className="bs-h" style={{ margin: '10px 0 6px' }}>{rows.length} rows parsed</div>
+              {rows.slice(0, 6).map((r, i) => (
+                <div key={i} className="bs-bulk-row">
+                  <span className="bs-bulk-row__body">{r.body || '(thread)'}</span>
+                  <span className="bs-bulk-row__acct">{r.accounts || '—'}</span>
+                  <span className="bs-bulk-row__when">{r.scheduledAt || 'draft'}</span>
+                </div>
+              ))}
+              {rows.length > 6 && <div className="bs-muted">…and {rows.length - 6} more</div>}
+            </div>
+          )}
+          {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+          {results && (
+            <div className="bs-results">
+              {results.results.filter((x) => !x.ok).slice(0, 8).map((x) => (
+                <div key={x.row} className="bs-result is-err">Row {x.row}: <span className="bs-result__err">{x.error}</span></div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="bs-modal__ft">
+          <button className="bs-btn bs-btn--ghost" onClick={onClose}>Close</button>
+          <button className="bs-btn" onClick={submit} disabled={busy || rows.length === 0}>{busy ? 'Queuing…' : `Schedule ${rows.length} rows`}</button>
+        </div>
+      </div>
     </div>
   );
 }
