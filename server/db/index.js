@@ -459,6 +459,19 @@ function bootstrapTables() {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_social_inbox_unique ON social_inbox(workspace_id, platform, remote_id);
     CREATE INDEX IF NOT EXISTS idx_social_inbox_list ON social_inbox(workspace_id, status, remote_created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS social_templates (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      body          TEXT NOT NULL DEFAULT '',
+      media_json    TEXT,
+      tags          TEXT DEFAULT '[]',
+      created_by_id TEXT,
+      created_at    INTEGER DEFAULT (unixepoch()),
+      updated_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_templates_ws ON social_templates(workspace_id, updated_at DESC);
   `);
   // Columns added after social_posts shipped.
   alterIfMissing('social_posts', 'metrics_json', 'TEXT');

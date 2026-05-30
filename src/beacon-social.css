@@ -204,3 +204,16 @@
 .bs-heat__day { width: 28px; color: var(--ink-5, #7a7872); flex-shrink: 0; }
 .bs-heat__hh { width: 12px; text-align: center; color: var(--ink-6, #a8a59a); }
 .bs-heat__cell { width: 12px; height: 12px; border-radius: 2px; background: var(--paper-2, #e6e1ce); }
+
+/* Content library */
+.bs-compose-tpl { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bs-tpl-select { background: var(--paper-0, #faf8f1); border: 1px solid var(--rule, #c9c3aa); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--ink-3, #3f3f3f); }
+.bs-lib { padding: 18px 22px; }
+.bs-lib-edit { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--rule, #c9c3aa); border-radius: 8px; padding: 14px; margin-bottom: 16px; background: var(--paper-0, #faf8f1); }
+.bs-lib-list { display: flex; flex-direction: column; gap: 10px; }
+.bs-lib-card { display: flex; align-items: flex-start; gap: 12px; border: 1px solid var(--rule, #c9c3aa); border-radius: 8px; padding: 12px 14px; background: var(--paper-0, #faf8f1); }
+.bs-lib-card__main { flex: 1; min-width: 0; }
+.bs-lib-card__name { font-size: 14px; color: var(--ink-1, #1a1a1a); margin-bottom: 4px; }
+.bs-lib-card__media { font-family: var(--font-mono); font-size: 11px; color: var(--ink-5, #7a7872); }
+.bs-lib-card__body { font-size: 13px; color: var(--ink-3, #3f3f3f); white-space: pre-wrap; max-height: 60px; overflow: hidden; }
+.bs-lib-card__actions { display: flex; gap: 6px; flex-shrink: 0; }

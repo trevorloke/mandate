@@ -222,9 +222,29 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const [msg, setMsg] = useState(null);
   const [results, setResults] = useState(null);
 
+  const [templates, setTemplates] = useState([]);
+
   // In thread mode the body is split into a reply chain on lines of just '---'.
   const threadSegments = threadMode ? body.split(/^\s*---\s*$/m).map((s) => s.trim()).filter(Boolean) : null;
   const isThread = threadSegments && threadSegments.length > 1;
+
+  useEffect(() => { api.socialTemplates().then((r) => setTemplates(r.templates || [])).catch(() => {}); }, []);
+
+  const insertTemplate = (id) => {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    setBody(t.body || '');
+    setMedia((t.media || []).map((m) => ({ ...m, url: `/api/social/media/${m.id}` })));
+  };
+  const saveTemplate = async () => {
+    const name = window.prompt('Template name:');
+    if (!name) return;
+    try {
+      const r = await api.socialSaveTemplate({ name, body, media: media.map((m) => ({ id: m.id, mime: m.mime, alt: m.alt })) });
+      setTemplates((ts) => [r.template, ...ts]);
+      setMsg({ kind: 'ok', text: 'Saved to library.' });
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
 
   const connected = accounts.filter((a) => a.status === 'connected');
   const toggle = (id) => setTargets((t) => t.includes(id) ? t.filter((x) => x !== id) : [...t, id]);
@@ -300,6 +320,13 @@ export function BComposer({ accounts, onClose, onPosted }) {
           </div>
         ) : (
           <div className="bs-modal__body">
+            <div className="bs-compose-tpl">
+              <select className="bs-tpl-select" value="" onChange={(e) => { if (e.target.value) insertTemplate(e.target.value); e.target.value = ''; }}>
+                <option value="">📋 Insert template…</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <button type="button" className="bs-btn bs-btn--ghost bs-btn--sm" onClick={saveTemplate} disabled={!body.trim() && media.length === 0}>save as template</button>
+            </div>
             <textarea
               className="bs-compose-text"
               placeholder={threadMode ? "Write your thread. Separate each post with a line containing only ---" : "What's happening?"}
@@ -732,6 +759,73 @@ export function BInbox() {
         : items.length === 0
           ? <p className="bs-muted">{filter === 'unread' ? 'No unread interactions. Replies and mentions to your connected accounts land here. Hit ↻ sync to pull the latest.' : `No ${filter} items.`}</p>
           : <div className="bs-in-list">{items.map((it) => <InboxItem key={it.id} it={it} onReply={onReply} onRead={onRead} onArchive={onArchive} />)}</div>}
+    </div>
+  );
+}
+
+// ── Content library (manage reusable templates) ─────────────────────
+export function BLibrary() {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null); // {id?, name, body}
+  const [msg, setMsg] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api.socialTemplates(); setTemplates(r.templates || []); }
+    catch { setTemplates([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    if (!editing.name?.trim()) { setMsg({ kind: 'err', text: 'Name required' }); return; }
+    try {
+      if (editing.id) await api.socialUpdateTemplate(editing.id, { name: editing.name, body: editing.body });
+      else await api.socialSaveTemplate({ name: editing.name, body: editing.body });
+      setEditing(null); setMsg({ kind: 'ok', text: 'Saved.' }); load();
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
+  const del = async (t) => {
+    if (!confirm(`Delete template "${t.name}"?`)) return;
+    try { await api.socialDeleteTemplate(t.id); load(); } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
+
+  return (
+    <div className="bs-lib">
+      <div className="bs-inbox__hd">
+        <h3 className="bs-h" style={{ margin: 0 }}>Content library</h3>
+        <button className="bs-btn bs-btn--sm" onClick={() => setEditing({ name: '', body: '' })}>+ New template</button>
+      </div>
+      {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+
+      {editing && (
+        <div className="bs-lib-edit">
+          <input className="bs-input" placeholder="Template name" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+          <textarea className="bs-compose-text" rows={4} placeholder="Template body…" value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} />
+          <div className="bs-in-reply__ft">
+            <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setEditing(null)}>cancel</button>
+            <button className="bs-btn bs-btn--sm" onClick={save}>save</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? <p className="bs-muted">Loading…</p>
+        : templates.length === 0 ? <p className="bs-muted">No templates yet. Save one from the composer ("save as template") or create one here — then insert it into any post.</p>
+          : <div className="bs-lib-list">
+              {templates.map((t) => (
+                <div key={t.id} className="bs-lib-card">
+                  <div className="bs-lib-card__main">
+                    <div className="bs-lib-card__name">{t.name}{t.media?.length ? <span className="bs-lib-card__media"> · {t.media.length} image{t.media.length > 1 ? 's' : ''}</span> : ''}</div>
+                    <div className="bs-lib-card__body">{t.body || <em className="bs-muted">(no text)</em>}</div>
+                  </div>
+                  <div className="bs-lib-card__actions">
+                    <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setEditing({ id: t.id, name: t.name, body: t.body })}>edit</button>
+                    <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => del(t)}>delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>}
     </div>
   );
 }

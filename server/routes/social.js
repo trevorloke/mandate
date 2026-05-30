@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -525,6 +525,58 @@ app.post('/inbox/:id/reply', requireRole('editor'), async (c) => {
   if (!res.ok) return c.json({ error: res.error || 'reply failed' }, 400);
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.inbox.reply', target: c.req.param('id') });
   return c.json({ ok: true, url: res.url });
+});
+
+// ── Content library (reusable templates) ──
+const pubTemplate = (t) => ({
+  id: t.id, name: t.name, body: t.body, media: safeParse(t.mediaJson) || [],
+  tags: safeParse(t.tags) || [], updatedAt: t.updatedAt,
+});
+
+app.get('/templates', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(socialTemplates)
+    .where(eq(socialTemplates.workspaceId, me.workspaceId)).orderBy(desc(socialTemplates.updatedAt)).limit(200);
+  return c.json({ templates: rows.map(pubTemplate) });
+});
+
+app.post('/templates', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { name = '', body = '', media = [], tags = [] } = await c.req.json().catch(() => ({}));
+  if (!String(name).trim()) return c.json({ error: 'name required' }, 400);
+  const id = newId('tpl_');
+  const mediaRefs = Array.isArray(media) ? media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime, alt: m.alt })) : [];
+  await db.insert(socialTemplates).values({
+    id, workspaceId: me.workspaceId, name: String(name).trim(), body: String(body || ''),
+    mediaJson: mediaRefs.length ? JSON.stringify(mediaRefs) : null,
+    tags: JSON.stringify(Array.isArray(tags) ? tags : []), createdById: me.id,
+  });
+  const fresh = (await db.select().from(socialTemplates).where(eq(socialTemplates.id, id)).limit(1))[0];
+  return c.json({ ok: true, template: pubTemplate(fresh) });
+});
+
+app.put('/templates/:id', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const id = c.req.param('id');
+  const row = (await db.select().from(socialTemplates)
+    .where(and(eq(socialTemplates.id, id), eq(socialTemplates.workspaceId, me.workspaceId))).limit(1))[0];
+  if (!row) return c.json({ error: 'not found' }, 404);
+  const { name, body, media, tags } = await c.req.json().catch(() => ({}));
+  const updates = { updatedAt: new Date() };
+  if (typeof name === 'string' && name.trim()) updates.name = name.trim();
+  if (typeof body === 'string') updates.body = body;
+  if (Array.isArray(media)) updates.mediaJson = media.length ? JSON.stringify(media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime, alt: m.alt }))) : null;
+  if (Array.isArray(tags)) updates.tags = JSON.stringify(tags);
+  await db.update(socialTemplates).set(updates).where(eq(socialTemplates.id, id));
+  const fresh = (await db.select().from(socialTemplates).where(eq(socialTemplates.id, id)).limit(1))[0];
+  return c.json({ ok: true, template: pubTemplate(fresh) });
+});
+
+app.delete('/templates/:id', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  await db.delete(socialTemplates)
+    .where(and(eq(socialTemplates.id, c.req.param('id')), eq(socialTemplates.workspaceId, me.workspaceId)));
+  return c.json({ ok: true });
 });
 
 export default app;

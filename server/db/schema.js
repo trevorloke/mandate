@@ -415,3 +415,16 @@ export const socialInbox = sqliteTable('social_inbox', {
   fetchedAt:       integer('fetched_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   createdAt:       integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Reusable post templates (content library).
+export const socialTemplates = sqliteTable('social_templates', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  name:        text('name').notNull(),
+  body:        text('body').notNull().default(''),
+  mediaJson:   text('media_json'),
+  tags:        text('tags').default('[]'),
+  createdById: text('created_by_id'),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
