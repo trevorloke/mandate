@@ -118,3 +118,20 @@ export async function reply(account, item, text) {
   if (!r.ok) throw new Error(j?.error || 'Mastodon reply failed.');
   return { remoteId: String(j.id), url: j.url };
 }
+
+export async function publishThread(account, segments, opts = {}) {
+  const creds = account.credentials;
+  let prevId = null, firstId = null, firstUrl = null;
+  for (let i = 0; i < segments.length; i++) {
+    const mediaIds = [];
+    if (i === 0) for (const m of (opts.media || []).filter((x) => x.bytes).slice(0, 4)) mediaIds.push(await uploadMedia(creds, m));
+    const payload = { status: String(segments[i] || ''), visibility: 'public' };
+    if (prevId) payload.in_reply_to_id = prevId;
+    if (mediaIds.length) payload.media_ids = mediaIds;
+    const r = await fetch(`${creds.instanceUrl}/api/v1/statuses`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || `Mastodon thread post ${i + 1} failed.`);
+    prevId = j.id; if (i === 0) { firstId = j.id; firstUrl = j.url; }
+  }
+  return { remoteId: String(firstId), url: firstUrl };
+}

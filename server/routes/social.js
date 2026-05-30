@@ -246,8 +246,11 @@ app.get('/posts', async (c) => {
 
 app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false } = await c.req.json().catch(() => ({}));
-  const text = String(body || '').trim();
+  const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null } = await c.req.json().catch(() => ({}));
+  // A thread is an array of segment strings; the first segment is the head/body.
+  const threadSegs = Array.isArray(thread) ? thread.map((s) => String(s || '').trim()).filter(Boolean) : null;
+  const isThread = threadSegs && threadSegs.length > 1;
+  const text = isThread ? threadSegs[0] : String(body || '').trim();
   const mediaRefs = Array.isArray(media) ? media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime, alt: m.alt ? String(m.alt).slice(0, 1000) : undefined })) : [];
   if (!text && mediaRefs.length === 0) return c.json({ error: 'post is empty' }, 400);
   if (!Array.isArray(targets) || targets.length === 0) return c.json({ error: 'select at least one account' }, 400);
@@ -280,9 +283,10 @@ app.post('/posts', requireRole('editor'), async (c) => {
   else if (when) status = 'scheduled';
   else status = 'draft';
   const mediaJson = mediaRefs.length ? JSON.stringify(mediaRefs) : null;
+  const threadJson = isThread ? JSON.stringify(threadSegs) : null;
   const rows = accts.map((a) => ({
     id: newId('sp_'), workspaceId: me.workspaceId, groupId, accountId: a.id, platform: a.platform,
-    body: text, mediaJson, status, scheduledAt: publishNow ? new Date() : when, createdById: me.id,
+    body: text, mediaJson, threadJson, status, scheduledAt: publishNow ? new Date() : when, createdById: me.id,
   }));
   await db.insert(socialPosts).values(rows);
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.create',

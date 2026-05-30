@@ -184,3 +184,26 @@ export async function reply(account, item, text) {
   const user = creds.username;
   return { remoteId: id, url: user ? `https://x.com/${user}/status/${id}` : null, credentials: creds };
 }
+
+export async function publishThread(account, segments, opts = {}) {
+  let creds = account.credentials;
+  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  let prevId = null, firstId = null;
+  for (let i = 0; i < segments.length; i++) {
+    const text = String(segments[i] || '');
+    if ([...text].length > CHAR_LIMIT) throw new Error(`Thread tweet ${i + 1} exceeds ${CHAR_LIMIT} characters.`);
+    const payload = { text };
+    if (i === 0 && (opts.media || []).length) {
+      const ids = [];
+      for (const m of opts.media.filter((x) => x.bytes).slice(0, 4)) ids.push(await uploadMediaX(creds.accessToken, m));
+      if (ids.length) payload.media = { media_ids: ids };
+    }
+    if (prevId) payload.reply = { in_reply_to_tweet_id: prevId };
+    const r = await fetch('https://api.twitter.com/2/tweets', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.detail || j?.title || `X thread tweet ${i + 1} failed.`);
+    prevId = j.data?.id; if (i === 0) firstId = prevId;
+  }
+  const user = creds.username;
+  return { remoteId: firstId, url: firstId && user ? `https://x.com/${user}/status/${firstId}` : null, credentials: creds };
+}

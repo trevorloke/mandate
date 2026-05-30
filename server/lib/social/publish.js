@@ -44,7 +44,13 @@ export async function publishPost(postId) {
     const app = prov.connect === 'oauth' ? await getApp(account.workspaceId, post.platform).catch(() => null) : null;
     // Resolve any attached media to bytes (+ a public URL for URL-fetch platforms).
     const media = post.mediaJson ? loadMediaForPost(post.mediaJson) : [];
-    const res = await prov.adapter.publish({ ...account, credentials: creds, _app: app }, { id: post.id, body: post.body, media });
+    // Thread? Post the chain when the platform supports it; else just the head.
+    let segments = null;
+    try { segments = post.threadJson ? JSON.parse(post.threadJson) : null; } catch { segments = null; }
+    const acctCtx = { ...account, credentials: creds, _app: app };
+    const res = (Array.isArray(segments) && segments.length > 1 && prov.adapter.publishThread)
+      ? await prov.adapter.publishThread(acctCtx, segments, { media })
+      : await prov.adapter.publish(acctCtx, { id: post.id, body: Array.isArray(segments) && segments.length ? segments[0] : post.body, media });
 
     // Persist refreshed credentials if the adapter rotated them.
     if (res.credentials) {

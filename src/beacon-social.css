@@ -189,3 +189,7 @@
 .bs-in-item__replied { font-size: 11px; color: #234a2c; font-family: var(--font-mono); }
 .bs-in-reply { margin-top: 8px; }
 .bs-in-reply__ft { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* Thread toggle */
+.bs-thread-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3, #3f3f3f); cursor: pointer; margin: 6px 0; }
+.bs-thread-count { font-family: var(--font-mono); font-size: 11px; color: var(--m-beacon, #b8334a); }

@@ -245,3 +245,35 @@ export async function reply(account, item, text) {
   const rkey = String(r.json.uri).split('/').pop();
   return { remoteId: r.json.uri, url: `https://bsky.app/profile/${creds.handle}/post/${rkey}`, credentials: creds };
 }
+
+// Publish a thread (reply chain). Images go on the first post only.
+export async function publishThread(account, segments, opts = {}) {
+  let creds = account.credentials;
+  if (!creds?.accessJwt) throw new Error('Bluesky account is not connected.');
+  let root = null, parent = null, firstUrl = null, firstRemote = null;
+  for (let i = 0; i < segments.length; i++) {
+    const text = String(segments[i] || '');
+    if ([...text].length > CHAR_LIMIT) throw new Error(`Thread post ${i + 1} exceeds ${CHAR_LIMIT} characters.`);
+    const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
+    const facets = await buildFacets(text, creds.service, creds.accessJwt);
+    if (facets) record.facets = facets;
+    if (i === 0 && (opts.media || []).length) {
+      const images = [];
+      for (const m of opts.media.filter((x) => x.bytes).slice(0, 4)) {
+        let up = await uploadBlob(creds.service, creds.accessJwt, m.bytes, m.mime);
+        if (up.status === 401) { creds = await refresh(creds); up = await uploadBlob(creds.service, creds.accessJwt, m.bytes, m.mime); }
+        if (up.ok && up.blob) images.push({ alt: m.alt || '', image: up.blob });
+      }
+      if (images.length) record.embed = { $type: 'app.bsky.embed.images', images };
+    }
+    if (parent) record.reply = { root, parent };
+    const create = (token) => xrpc(creds.service, 'com.atproto.repo.createRecord', { method: 'POST', token, body: { repo: creds.did, collection: 'app.bsky.feed.post', record } });
+    let r = await create(creds.accessJwt);
+    if (r.status === 401) { creds = await refresh(creds); r = await create(creds.accessJwt); }
+    if (!r.ok) throw new Error(r.json?.message || `Bluesky thread post ${i + 1} failed.`);
+    const ref = { uri: r.json.uri, cid: r.json.cid };
+    if (i === 0) { root = ref; firstRemote = r.json.uri; const rkey = String(r.json.uri).split('/').pop(); firstUrl = `https://bsky.app/profile/${creds.handle}/post/${rkey}`; }
+    parent = ref;
+  }
+  return { remoteId: firstRemote, url: firstUrl, credentials: creds };
+}

@@ -356,6 +356,7 @@ export const socialPosts = sqliteTable('social_posts', {
   error:         text('error'),
   metricsJson:   text('metrics_json'),                 // JSON: normalized engagement counts
   metricsAt:     integer('metrics_at', { mode: 'timestamp' }),
+  threadJson:    text('thread_json'),                  // JSON: array of thread segment strings
   attempts:      integer('attempts').notNull().default(0),
   workerId:      text('worker_id'),
   leaseExpiresAt: integer('lease_expires_at', { mode: 'timestamp' }),

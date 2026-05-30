@@ -389,6 +389,7 @@ function bootstrapTables() {
       error            TEXT,
       metrics_json     TEXT,
       metrics_at       INTEGER,
+      thread_json      TEXT,
       attempts         INTEGER NOT NULL DEFAULT 0,
       worker_id        TEXT,
       lease_expires_at INTEGER,
@@ -459,9 +460,10 @@ function bootstrapTables() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_social_inbox_unique ON social_inbox(workspace_id, platform, remote_id);
     CREATE INDEX IF NOT EXISTS idx_social_inbox_list ON social_inbox(workspace_id, status, remote_created_at DESC);
   `);
-  // Metrics columns for DBs whose social_posts predates them.
+  // Columns added after social_posts shipped.
   alterIfMissing('social_posts', 'metrics_json', 'TEXT');
   alterIfMissing('social_posts', 'metrics_at', 'INTEGER');
+  alterIfMissing('social_posts', 'thread_json', 'TEXT');
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.

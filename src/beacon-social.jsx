@@ -217,9 +217,14 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const [when, setWhen] = useState('');
   const [media, setMedia] = useState([]);      // [{ id, url, mime }]
   const [uploading, setUploading] = useState(false);
+  const [threadMode, setThreadMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [results, setResults] = useState(null);
+
+  // In thread mode the body is split into a reply chain on lines of just '---'.
+  const threadSegments = threadMode ? body.split(/^\s*---\s*$/m).map((s) => s.trim()).filter(Boolean) : null;
+  const isThread = threadSegments && threadSegments.length > 1;
 
   const connected = accounts.filter((a) => a.status === 'connected');
   const toggle = (id) => setTargets((t) => t.includes(id) ? t.filter((x) => x !== id) : [...t, id]);
@@ -231,7 +236,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
     return vals.length ? Math.min(...vals) : null;
   }, [targets, connected]);
 
-  const over = limit != null && [...body].length > limit;
+  const over = limit != null && (isThread ? threadSegments.some((s) => [...s].length > limit) : [...body].length > limit);
   // Instagram requires an image.
   const igSelected = connected.some((a) => a.platform === 'instagram' && targets.includes(a.id));
   const igNeedsImage = igSelected && media.length === 0;
@@ -257,6 +262,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
     setBusy(true); setMsg(null); setResults(null);
     try {
       const payload = { body, targets, media: media.map((m) => ({ id: m.id, mime: m.mime, alt: m.alt })) };
+      if (isThread) payload.thread = threadSegments;
       if (mode === 'now') payload.publishNow = true;
       else if (mode === 'schedule') payload.scheduledAt = new Date(when).toISOString();
       else if (mode === 'draft') { payload.saveDraft = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
@@ -296,12 +302,16 @@ export function BComposer({ accounts, onClose, onPosted }) {
           <div className="bs-modal__body">
             <textarea
               className="bs-compose-text"
-              placeholder="What's happening?"
+              placeholder={threadMode ? "Write your thread. Separate each post with a line containing only ---" : "What's happening?"}
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              rows={5}
+              rows={threadMode ? 8 : 5}
               autoFocus
             />
+            <label className="bs-thread-toggle">
+              <input type="checkbox" checked={threadMode} onChange={(e) => setThreadMode(e.target.checked)} />
+              🧵 Thread {isThread && <span className="bs-thread-count">{threadSegments.length} posts</span>}
+            </label>
             <div className="bs-media">
               {media.map((m) => (
                 <div key={m.id} className="bs-media-item">
@@ -333,7 +343,9 @@ export function BComposer({ accounts, onClose, onPosted }) {
                 ))}
               </div>
               <div className={'bs-count' + (over ? ' is-over' : '')}>
-                {limit != null ? `${[...body].length} / ${limit}` : `${[...body].length}`}
+                {isThread
+                  ? `${threadSegments.length} posts${limit != null ? ` · max ${Math.max(...threadSegments.map((s) => [...s].length))}/${limit}` : ''}`
+                  : (limit != null ? `${[...body].length} / ${limit}` : `${[...body].length}`)}
               </div>
             </div>
 
