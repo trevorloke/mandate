@@ -247,7 +247,7 @@ app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
   const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false } = await c.req.json().catch(() => ({}));
   const text = String(body || '').trim();
-  const mediaRefs = Array.isArray(media) ? media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime })) : [];
+  const mediaRefs = Array.isArray(media) ? media.filter((m) => m && m.id).map((m) => ({ id: m.id, mime: m.mime, alt: m.alt ? String(m.alt).slice(0, 1000) : undefined })) : [];
   if (!text && mediaRefs.length === 0) return c.json({ error: 'post is empty' }, 400);
   if (!Array.isArray(targets) || targets.length === 0) return c.json({ error: 'select at least one account' }, 400);
 

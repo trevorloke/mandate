@@ -256,7 +256,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
   const submit = async () => {
     setBusy(true); setMsg(null); setResults(null);
     try {
-      const payload = { body, targets, media: media.map((m) => ({ id: m.id, mime: m.mime })) };
+      const payload = { body, targets, media: media.map((m) => ({ id: m.id, mime: m.mime, alt: m.alt })) };
       if (mode === 'now') payload.publishNow = true;
       else if (mode === 'schedule') payload.scheduledAt = new Date(when).toISOString();
       else if (mode === 'draft') { payload.saveDraft = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
@@ -304,9 +304,13 @@ export function BComposer({ accounts, onClose, onPosted }) {
             />
             <div className="bs-media">
               {media.map((m) => (
-                <div key={m.id} className="bs-thumb">
-                  <img src={m.url} alt="" />
-                  <button type="button" className="bs-thumb__x" onClick={() => removeMedia(m.id)}>×</button>
+                <div key={m.id} className="bs-media-item">
+                  <div className="bs-thumb">
+                    <img src={m.url} alt="" />
+                    <button type="button" className="bs-thumb__x" onClick={() => removeMedia(m.id)}>×</button>
+                  </div>
+                  <input className="bs-alt" placeholder="alt text…" value={m.alt || ''}
+                    onChange={(e) => setMedia((ms) => ms.map((x) => x.id === m.id ? { ...x, alt: e.target.value } : x))} />
                 </div>
               ))}
               {media.length < 4 && (

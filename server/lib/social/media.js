@@ -42,6 +42,6 @@ export function loadMediaForPost(mediaJson, origin) {
   return refs.map((r) => {
     const m = getMedia(r.id);
     if (!m) return null;
-    return { id: m.id, mime: m.mime, bytes: m.data, url: publicMediaUrl(m.id, origin) };
+    return { id: m.id, mime: m.mime, bytes: m.data, url: publicMediaUrl(m.id, origin), alt: r.alt || '' };
   }).filter(Boolean);
 }

@@ -84,7 +84,7 @@ export async function publish(account, post) {
       let up = await uploadBlob(creds.service, creds.accessJwt, m.bytes, m.mime);
       if (up.status === 401) { creds = await refresh(creds); up = await uploadBlob(creds.service, creds.accessJwt, m.bytes, m.mime); }
       if (!up.ok || !up.blob) throw new Error(up.message || 'Bluesky image upload failed.');
-      images.push({ alt: '', image: up.blob });
+      images.push({ alt: m.alt || '', image: up.blob });
     }
     record.embed = { $type: 'app.bsky.embed.images', images };
   }

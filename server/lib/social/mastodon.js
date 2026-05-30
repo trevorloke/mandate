@@ -37,6 +37,7 @@ export async function connect({ instanceUrl, accessToken }) {
 async function uploadMedia(creds, m) {
   const fd = new FormData();
   fd.append('file', new Blob([m.bytes], { type: m.mime || 'application/octet-stream' }), m.id || 'image');
+  if (m.alt) fd.append('description', m.alt);
   const res = await fetch(`${creds.instanceUrl}/api/v2/media`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${creds.accessToken}` },

@@ -70,6 +70,13 @@ async function uploadMediaX(token, m) {
     e.status = res.status;
     throw e;
   }
+  // Best-effort alt text.
+  if (m.alt) {
+    await fetch('https://upload.twitter.com/1.1/media/metadata/create.json', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ media_id: j.media_id_string, alt_text: { text: String(m.alt).slice(0, 1000) } }),
+    }).catch(() => {});
+  }
   return j.media_id_string;
 }
 
