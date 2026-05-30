@@ -130,3 +130,11 @@ export async function metrics(account, remoteId) {
   const m = j.data?.public_metrics || {};
   return { metrics: { likes: m.like_count || 0, reposts: m.retweet_count || 0, replies: m.reply_count || 0, quotes: m.quote_count || 0, impressions: m.impression_count || 0 }, credentials: creds };
 }
+
+export async function verify(account) {
+  let creds = account.credentials;
+  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  const r = await fetch('https://api.twitter.com/2/users/me', { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  if (!r.ok) throw new Error(`X token is invalid (${r.status}) — reconnect.`);
+  return { ok: true, credentials: creds };
+}

@@ -47,3 +47,10 @@ export async function metrics(account, remoteId) {
   if (!r.ok) throw new Error(j?.error?.message || `Instagram metrics failed (${r.status}).`);
   return { metrics: { likes: j.like_count || 0, comments: j.comments_count || 0 } };
 }
+
+export async function verify(account) {
+  const creds = account.credentials;
+  const r = await fetch(`${GRAPH}/${creds.igUserId}?fields=id&access_token=${encodeURIComponent(creds.pageToken)}`);
+  if (!r.ok) throw new Error(`Instagram token is invalid (${r.status}) — reconnect.`);
+  return { ok: true };
+}

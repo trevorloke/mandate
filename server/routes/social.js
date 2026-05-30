@@ -20,6 +20,7 @@ import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.j
 import { publishPost } from '../lib/social/publish.js';
 import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
 import { refreshMetrics } from '../lib/social/metrics.js';
+import { checkAccountHealth } from '../lib/social/health.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
@@ -202,10 +203,9 @@ app.post('/accounts/:id/verify', requireRole('editor'), async (c) => {
   const row = (await db.select().from(socialAccounts)
     .where(and(eq(socialAccounts.id, id), eq(socialAccounts.workspaceId, me.workspaceId))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
-  // Lightweight: mark verified now. (Per-platform live re-check can be added later.)
-  await db.update(socialAccounts).set({ status: 'connected', lastError: null, lastVerifiedAt: new Date(), updatedAt: new Date() })
-    .where(eq(socialAccounts.id, id));
-  return c.json({ ok: true });
+  const res = await checkAccountHealth(id); // live token check + status update
+  const fresh = (await db.select().from(socialAccounts).where(eq(socialAccounts.id, id)).limit(1))[0];
+  return c.json({ ok: res.ok, error: res.error || null, account: pubAccount(fresh) });
 });
 
 app.delete('/accounts/:id', requireRole('editor'), async (c) => {

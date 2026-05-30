@@ -77,3 +77,10 @@ export async function metrics(account, remoteId) {
   if (!r.ok) throw new Error(j?.error || `Mastodon metrics failed (${r.status}).`);
   return { metrics: { likes: j.favourites_count || 0, reposts: j.reblogs_count || 0, replies: j.replies_count || 0 } };
 }
+
+export async function verify(account) {
+  const creds = account.credentials;
+  const r = await fetch(`${creds.instanceUrl}/api/v1/accounts/verify_credentials`, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  if (!r.ok) throw new Error(`Mastodon token is invalid (${r.status}) — reconnect.`);
+  return { ok: true };
+}

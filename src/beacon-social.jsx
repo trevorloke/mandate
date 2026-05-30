@@ -56,6 +56,15 @@ export function BConnections() {
     catch (e) { setMsg({ kind: 'err', text: e.message }); }
   };
 
+  const recheck = async (a) => {
+    setMsg(null);
+    try {
+      const r = await api.socialVerify(a.id);
+      setMsg(r.ok ? { kind: 'ok', text: `${a.handle} is healthy.` } : { kind: 'err', text: r.error || 'Token check failed' });
+      refresh();
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
+
   // OAuth providers connect via a full-page redirect to the platform.
   const oauthConnect = (p) => { window.location.assign(api.socialConnectStartUrl(p.id, '/')); };
 
@@ -77,6 +86,7 @@ export function BConnections() {
               <div className="bs-acct-row__sub">{platLabel(a.platform)} · {a.handle}{a.status !== 'connected' ? ` · ${a.status}` : ''}</div>
               {a.lastError && <div className="bs-acct-row__err">{a.lastError}</div>}
             </div>
+            <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => recheck(a)}>check</button>
             <button className="bs-btn bs-btn--ghost" onClick={() => disconnect(a)}>Disconnect</button>
           </div>
         ))}

@@ -102,3 +102,10 @@ export async function metrics(account, remoteId) {
   if (!r.ok) throw new Error(j?.message || `LinkedIn metrics failed (${r.status}).`);
   return { metrics: { likes: j.likesSummary?.totalLikes || 0, comments: j.commentsSummary?.aggregatedTotalComments || 0 } };
 }
+
+export async function verify(account) {
+  const creds = account.credentials;
+  const r = await fetch('https://api.linkedin.com/v2/userinfo', { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  if (!r.ok) throw new Error(`LinkedIn token is invalid (${r.status}) — reconnect.`);
+  return { ok: true };
+}

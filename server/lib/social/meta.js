@@ -113,3 +113,12 @@ export async function metrics(account, remoteId) {
   if (!r.ok) throw new Error(j?.error?.message || `Facebook metrics failed (${r.status}).`);
   return { metrics: { likes: j.likes?.summary?.total_count || 0, comments: j.comments?.summary?.total_count || 0, shares: j.shares?.count || 0 } };
 }
+
+export async function verify(account) {
+  const creds = account.credentials;
+  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
+  const token = page?.token || creds.userToken;
+  const r = await fetch(`${GRAPH}/me?access_token=${encodeURIComponent(token)}`);
+  if (!r.ok) throw new Error(`Facebook token is invalid (${r.status}) — reconnect.`);
+  return { ok: true };
+}

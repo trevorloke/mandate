@@ -116,3 +116,12 @@ export async function metrics(account, remoteId) {
   const p = r.json.posts?.[0] || {};
   return { metrics: { likes: p.likeCount || 0, reposts: p.repostCount || 0, replies: p.replyCount || 0, quotes: p.quoteCount || 0 }, credentials: creds };
 }
+
+// Health check — confirm the session is usable, refreshing if needed.
+export async function verify(account) {
+  let creds = account.credentials;
+  let r = await xrpc(creds.service, 'com.atproto.server.getSession', { token: creds.accessJwt });
+  if (r.status === 401) { creds = await refresh(creds); r = await xrpc(creds.service, 'com.atproto.server.getSession', { token: creds.accessJwt }); }
+  if (!r.ok) throw new Error(r.json?.message || 'Bluesky session is invalid — reconnect.');
+  return { ok: true, credentials: creds };
+}
