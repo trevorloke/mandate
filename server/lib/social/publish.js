@@ -5,6 +5,7 @@ import { db } from '../../db/index.js';
 import { socialAccounts, socialPosts, auditLog } from '../../db/schema.js';
 import { randomBytes } from 'crypto';
 import { getProvider } from './index.js';
+import { getApp } from './oauth.js';
 import { encryptJson, decryptJson } from '../crypto.js';
 import { broadcast } from '../realtime.js';
 import { emitWebhook } from '../webhooks.js';
@@ -38,7 +39,9 @@ export async function publishPost(postId) {
 
   try {
     const creds = decryptJson(account.credentials);
-    const res = await prov.adapter.publish({ ...account, credentials: creds }, { id: post.id, body: post.body });
+    // OAuth providers may need the developer-app client creds to refresh tokens.
+    const app = prov.connect === 'oauth' ? await getApp(account.workspaceId, post.platform).catch(() => null) : null;
+    const res = await prov.adapter.publish({ ...account, credentials: creds, _app: app }, { id: post.id, body: post.body });
 
     // Persist refreshed credentials if the adapter rotated them.
     if (res.credentials) {

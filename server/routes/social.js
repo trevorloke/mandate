@@ -12,16 +12,38 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { socialAccounts, socialPosts, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { encryptJson } from '../lib/crypto.js';
+import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
+import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.js';
 import { publishPost } from '../lib/social/publish.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
+const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
 
 const app = new Hono();
+
+// ── OAuth callback (PUBLIC — provider redirect, verified by signed state).
+// Registered BEFORE requireAuth so it does not require the session cookie.
+app.get('/oauth/callback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  const err = c.req.query('error');
+  const fail = (msg) => c.redirect(`/?social_error=${encodeURIComponent(msg)}`);
+  if (err) return fail(c.req.query('error_description') || err);
+  if (!code || !state) return fail('missing code or state');
+  try {
+    const r = await handleCallback({ code, state });
+    const dest = (r.returnTo && r.returnTo.startsWith('/')) ? r.returnTo : '/';
+    return c.redirect(`${dest}${dest.includes('?') ? '&' : '?'}social_connected=${encodeURIComponent(r.platform)}`);
+  } catch (e) {
+    return fail(e.message || 'connection failed');
+  }
+});
+
+// Everything below requires an authenticated session.
 app.use('*', requireAuth);
 
 // ── sanitizers (never leak credentials) ──
@@ -36,8 +58,76 @@ const pubPost = (p) => ({
   remoteUrl: p.remoteUrl, error: p.error, createdAt: p.createdAt,
 });
 
-// ── providers ──
-app.get('/providers', (c) => c.json({ providers: providerCatalog() }));
+// ── providers (with per-workspace "developer app configured" flag) ──
+app.get('/providers', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(socialApps).where(eq(socialApps.workspaceId, me.workspaceId));
+  const configured = new Set(rows.filter((r) => r.clientId && r.active).map((r) => r.platform));
+  return c.json({ providers: providerCatalog().map((p) => ({ ...p, configured: configured.has(p.id) })) });
+});
+
+// ── developer apps (client id/secret per platform; secret encrypted) ──
+app.get('/apps', async (c) => {
+  const me = c.get('user');
+  const origin = new URL(c.req.url).origin;
+  const rows = await db.select().from(socialApps).where(eq(socialApps.workspaceId, me.workspaceId));
+  const apps = {};
+  for (const r of rows) {
+    apps[r.platform] = { platform: r.platform, clientId: r.clientId, hasSecret: !!r.clientSecret, active: !!r.active, extra: safeJson(r.extra) };
+  }
+  return c.json({ apps, redirectUri: `${origin}/api/social/oauth/callback` });
+});
+
+app.put('/apps/:platform', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  const platform = c.req.param('platform');
+  if (!getProvider(platform)) return c.json({ error: 'unknown platform' }, 400);
+  const { clientId, clientSecret, extra } = await c.req.json().catch(() => ({}));
+  const existing = (await db.select().from(socialApps)
+    .where(and(eq(socialApps.workspaceId, me.workspaceId), eq(socialApps.platform, platform))).limit(1))[0];
+
+  const values = {
+    clientId: clientId ?? existing?.clientId ?? null,
+    extra: JSON.stringify(extra || safeJson(existing?.extra) || {}),
+    active: true,
+  };
+  // Only overwrite the secret when a new one is supplied (so editing other
+  // fields doesn't wipe it). Encrypted at rest.
+  if (clientSecret) values.clientSecret = encrypt(clientSecret);
+  else if (existing) values.clientSecret = existing.clientSecret;
+
+  if (existing) await db.update(socialApps).set(values).where(eq(socialApps.id, existing.id));
+  else await db.insert(socialApps).values({ id: newId('app_'), workspaceId: me.workspaceId, platform, ...values });
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.app.save', target: platform });
+  return c.json({ ok: true });
+});
+
+app.delete('/apps/:platform', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  const platform = c.req.param('platform');
+  await db.delete(socialApps).where(and(eq(socialApps.workspaceId, me.workspaceId), eq(socialApps.platform, platform)));
+  return c.json({ ok: true });
+});
+
+// ── OAuth connect: redirect the browser to the provider's authorize page ──
+app.get('/connect/:platform/start', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const platform = c.req.param('platform');
+  const prov = getProvider(platform);
+  if (!prov || prov.connect !== 'oauth') return c.json({ error: 'platform does not use OAuth connect' }, 400);
+  const devApp = await getApp(me.workspaceId, platform);
+  if (!devApp || !devApp.clientId) return c.json({ error: 'configure the developer app first (Beacon → Settings)' }, 400);
+
+  const origin = new URL(c.req.url).origin;
+  const redirectUri = `${origin}/api/social/oauth/callback`;
+  const returnTo = c.req.query('returnTo') || '/';
+  try {
+    const url = await buildAuthorizeUrl({ provider: prov, app: devApp, workspaceId: me.workspaceId, userId: me.id, redirectUri, returnTo });
+    return c.redirect(url);
+  } catch (e) {
+    return c.json({ error: e.message || 'could not start OAuth' }, 400);
+  }
+});
 
 // ── accounts ──
 app.get('/accounts', async (c) => {

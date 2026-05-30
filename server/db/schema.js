@@ -374,3 +374,17 @@ export const socialApps = sqliteTable('social_apps', {
   active:       integer('active', { mode: 'boolean' }).notNull().default(true),
   createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Short-lived OAuth connection state (CSRF state + PKCE verifier) for the
+// social account-connect redirect flow. Rows are deleted on callback / expiry.
+export const socialOauthStates = sqliteTable('social_oauth_states', {
+  id:           text('id').primaryKey(),       // the `state` value
+  workspaceId:  text('workspace_id').notNull(),
+  userId:       text('user_id'),
+  platform:     text('platform').notNull(),
+  codeVerifier: text('code_verifier'),         // PKCE
+  redirectUri:  text('redirect_uri').notNull(),
+  returnTo:     text('return_to'),
+  expiresAt:    integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt:    integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

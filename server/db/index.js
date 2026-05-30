@@ -409,6 +409,18 @@ function bootstrapTables() {
       created_at    INTEGER DEFAULT (unixepoch())
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_social_apps_unique ON social_apps(workspace_id, platform);
+
+    CREATE TABLE IF NOT EXISTS social_oauth_states (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL,
+      user_id       TEXT,
+      platform      TEXT NOT NULL,
+      code_verifier TEXT,
+      redirect_uri  TEXT NOT NULL,
+      return_to     TEXT,
+      expires_at    INTEGER NOT NULL,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
   `);
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
