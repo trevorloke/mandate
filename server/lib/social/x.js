@@ -120,3 +120,13 @@ export async function publish(account, post) {
   const url = id ? (user ? `https://x.com/${user}/status/${id}` : `https://x.com/i/status/${id}`) : null;
   return { remoteId: id, url, credentials: creds };
 }
+
+export async function metrics(account, remoteId) {
+  let creds = account.credentials;
+  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  const r = await fetch(`https://api.twitter.com/2/tweets/${remoteId}?tweet.fields=public_metrics`, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.detail || j?.title || `X metrics failed (${r.status}).`);
+  const m = j.data?.public_metrics || {};
+  return { metrics: { likes: m.like_count || 0, reposts: m.retweet_count || 0, replies: m.reply_count || 0, quotes: m.quote_count || 0, impressions: m.impression_count || 0 }, credentials: creds };
+}

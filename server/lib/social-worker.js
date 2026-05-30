@@ -5,6 +5,7 @@
 import { randomBytes } from 'crypto';
 import { sqlite } from '../db/index.js';
 import { publishPost } from './social/publish.js';
+import { refreshStaleMetrics } from './social/metrics.js';
 
 const WORKER_ID = 'sw_' + randomBytes(4).toString('hex');
 const TICK_MS = 15_000;
@@ -48,11 +49,18 @@ async function tick() {
   }
 }
 
+const METRICS_TICK_MS = 10 * 60 * 1000; // refresh stale post metrics every 10 min
 let timer = null;
+let metricsTimer = null;
 export function startSocialWorker() {
   if (timer) return;
   timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
   timer.unref?.();
+  metricsTimer = setInterval(() => { refreshStaleMetrics().catch(() => {}); }, METRICS_TICK_MS);
+  metricsTimer.unref?.();
   console.log(`[social-worker] started (${WORKER_ID})`);
 }
-export function stopSocialWorker() { if (timer) { clearInterval(timer); timer = null; } }
+export function stopSocialWorker() {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
+}

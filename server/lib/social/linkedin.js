@@ -92,3 +92,13 @@ export async function publish(account, post) {
   const urn = res.headers.get('x-restli-id') || j.id;
   return { remoteId: urn, url: urn ? `https://www.linkedin.com/feed/update/${urn}` : null };
 }
+
+export async function metrics(account, remoteId) {
+  const creds = account.credentials;
+  const r = await fetch(`https://api.linkedin.com/v2/socialActions/${encodeURIComponent(remoteId)}`, {
+    headers: { Authorization: `Bearer ${creds.accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.message || `LinkedIn metrics failed (${r.status}).`);
+  return { metrics: { likes: j.likesSummary?.totalLikes || 0, comments: j.commentsSummary?.aggregatedTotalComments || 0 } };
+}

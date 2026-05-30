@@ -69,3 +69,11 @@ export async function publish(account, post) {
   if (!res.ok) throw new Error(json?.error || `Mastodon publish failed (${res.status}).`);
   return { remoteId: String(json.id), url: json.url || json.uri };
 }
+
+export async function metrics(account, remoteId) {
+  const creds = account.credentials;
+  const r = await fetch(`${creds.instanceUrl}/api/v1/statuses/${remoteId}`, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error || `Mastodon metrics failed (${r.status}).`);
+  return { metrics: { likes: j.favourites_count || 0, reposts: j.reblogs_count || 0, replies: j.replies_count || 0 } };
+}

@@ -39,3 +39,11 @@ export async function publish(account, post) {
   const user = (account.handle || '').replace(/^@/, '');
   return { remoteId: id, url: user ? `https://www.instagram.com/${user}/` : 'https://www.instagram.com/' };
 }
+
+export async function metrics(account, remoteId) {
+  const creds = account.credentials;
+  const r = await fetch(`${GRAPH}/${remoteId}?fields=like_count,comments_count&access_token=${encodeURIComponent(creds.pageToken)}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || `Instagram metrics failed (${r.status}).`);
+  return { metrics: { likes: j.like_count || 0, comments: j.comments_count || 0 } };
+}

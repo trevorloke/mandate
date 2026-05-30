@@ -373,16 +373,30 @@ export function BOutbox() {
 
   const cancel = async (groupId) => { try { await api.socialCancel(groupId); load(); } catch { /* keep list as-is */ } };
   const retry = async (id) => { try { await api.socialRetry(id); load(); } catch { /* keep list as-is */ } };
+  const refreshMetrics = async (groupId) => { try { await api.socialRefreshMetrics(groupId); load(); } catch { /* keep list as-is */ } };
 
   if (loading) return <p className="bs-muted" style={{ padding: 20 }}>Loading…</p>;
   if (!groups.length) return <p className="bs-muted" style={{ padding: 20 }}>Nothing published or scheduled yet. Hit <b>Compose</b> to send your first real post.</p>;
 
   const fmt = (ts) => ts ? new Date(ts * 1000).toLocaleString() : null;
+  // Compact engagement string from a normalized metrics object.
+  const engagement = (m) => {
+    if (!m) return null;
+    const parts = [];
+    if (m.likes != null) parts.push(`♥ ${m.likes}`);
+    if (m.reposts != null) parts.push(`↻ ${m.reposts}`);
+    if (m.replies != null) parts.push(`💬 ${m.replies}`);
+    if (m.comments != null) parts.push(`💬 ${m.comments}`);
+    if (m.shares != null) parts.push(`⇪ ${m.shares}`);
+    if (m.impressions != null) parts.push(`👁 ${m.impressions}`);
+    return parts.join('  ');
+  };
 
   return (
     <div className="bs-outbox">
       {groups.map((g) => {
         const anyScheduled = g.targets.some((t) => t.status === 'scheduled');
+        const anyPublished = g.targets.some((t) => t.status === 'published');
         return (
           <div key={g.groupId} className="bs-ob-card">
             <div className="bs-ob-card__body">{g.body}</div>
@@ -392,6 +406,7 @@ export function BOutbox() {
                   <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[t.platform]?.cls || 'gen')}>{PLAT[t.platform]?.short}</span>
                   <span className="bs-ob-target__status">{t.status}</span>
                   {t.remoteUrl && <a href={t.remoteUrl} target="_blank" rel="noreferrer">view ↗</a>}
+                  {engagement(t.metrics) && <span className="bs-ob-metrics">{engagement(t.metrics)}</span>}
                   {t.error && <span className="bs-ob-target__err" title={t.error}>{t.error}</span>}
                   {t.status === 'failed' && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => retry(t.id)}>retry</button>}
                 </div>
@@ -400,6 +415,7 @@ export function BOutbox() {
             <div className="bs-ob-card__foot">
               {anyScheduled && <span>scheduled for {fmt(g.scheduledAt)}</span>}
               {anyScheduled && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => cancel(g.groupId)}>cancel</button>}
+              {anyPublished && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => refreshMetrics(g.groupId)}>↻ metrics</button>}
             </div>
           </div>
         );

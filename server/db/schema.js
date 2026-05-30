@@ -354,6 +354,8 @@ export const socialPosts = sqliteTable('social_posts', {
   remoteId:      text('remote_id'),
   remoteUrl:     text('remote_url'),
   error:         text('error'),
+  metricsJson:   text('metrics_json'),                 // JSON: normalized engagement counts
+  metricsAt:     integer('metrics_at', { mode: 'timestamp' }),
   attempts:      integer('attempts').notNull().default(0),
   workerId:      text('worker_id'),
   leaseExpiresAt: integer('lease_expires_at', { mode: 'timestamp' }),

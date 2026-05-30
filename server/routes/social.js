@@ -19,6 +19,7 @@ import { getProvider, providerCatalog } from '../lib/social/index.js';
 import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.js';
 import { publishPost } from '../lib/social/publish.js';
 import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
+import { refreshMetrics } from '../lib/social/metrics.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
@@ -79,10 +80,12 @@ const pubAccount = (a) => ({
   avatarUrl: a.avatarUrl, status: a.status, lastError: a.lastError,
   lastVerifiedAt: a.lastVerifiedAt, createdAt: a.createdAt,
 });
+const safeParse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 const pubPost = (p) => ({
   id: p.id, groupId: p.groupId, accountId: p.accountId, platform: p.platform,
   body: p.body, status: p.status, scheduledAt: p.scheduledAt, publishedAt: p.publishedAt,
   remoteUrl: p.remoteUrl, error: p.error, createdAt: p.createdAt,
+  media: safeParse(p.mediaJson) || [], metrics: safeParse(p.metricsJson), metricsAt: p.metricsAt,
 });
 
 // ── providers (with per-workspace "developer app configured" flag) ──
@@ -303,6 +306,20 @@ app.post('/posts/:groupId/cancel', requireRole('editor'), async (c) => {
     await db.update(socialPosts).set({ status: 'canceled', updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
   }
   return c.json({ ok: true, canceled: cancelable.length });
+});
+
+// Refresh engagement metrics for all published posts in a compose group.
+app.post('/posts/:groupId/metrics', async (c) => {
+  const me = c.get('user');
+  const groupId = c.req.param('groupId');
+  const rows = await db.select().from(socialPosts)
+    .where(and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.groupId, groupId)));
+  if (!rows.length) return c.json({ error: 'not found' }, 404);
+  for (const r of rows) {
+    if (r.status === 'published' && r.remoteId) { try { await refreshMetrics(r.id); } catch { /* skip */ } }
+  }
+  const fresh = await db.select().from(socialPosts).where(eq(socialPosts.groupId, groupId));
+  return c.json({ ok: true, posts: fresh.map(pubPost) });
 });
 
 app.post('/posts/:id/retry', requireRole('editor'), async (c) => {

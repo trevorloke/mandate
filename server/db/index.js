@@ -387,6 +387,8 @@ function bootstrapTables() {
       remote_id        TEXT,
       remote_url       TEXT,
       error            TEXT,
+      metrics_json     TEXT,
+      metrics_at       INTEGER,
       attempts         INTEGER NOT NULL DEFAULT 0,
       worker_id        TEXT,
       lease_expires_at INTEGER,
@@ -434,6 +436,9 @@ function bootstrapTables() {
     );
     CREATE INDEX IF NOT EXISTS idx_social_media_workspace ON social_media(workspace_id);
   `);
+  // Metrics columns for DBs whose social_posts predates them.
+  alterIfMissing('social_posts', 'metrics_json', 'TEXT');
+  alterIfMissing('social_posts', 'metrics_at', 'INTEGER');
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.

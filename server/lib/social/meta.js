@@ -102,3 +102,14 @@ export async function publish(account, post) {
   const id = j.post_id || j.id; // photos returns {id, post_id}
   return { remoteId: id, url: id ? `https://www.facebook.com/${id}` : null };
 }
+
+export async function metrics(account, remoteId) {
+  const creds = account.credentials;
+  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
+  const token = page?.token;
+  if (!token) throw new Error('Missing Page access token.');
+  const r = await fetch(`${GRAPH}/${remoteId}?fields=likes.summary(true),comments.summary(true),shares&access_token=${encodeURIComponent(token)}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || `Facebook metrics failed (${r.status}).`);
+  return { metrics: { likes: j.likes?.summary?.total_count || 0, comments: j.comments?.summary?.total_count || 0, shares: j.shares?.count || 0 } };
+}

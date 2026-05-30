@@ -105,3 +105,14 @@ export async function publish(account, post) {
   const url = `https://bsky.app/profile/${creds.handle}/post/${rkey}`;
   return { remoteId: res.json.uri, url, credentials: creds };
 }
+
+// Fetch engagement counts for a published post (by its at:// uri).
+export async function metrics(account, remoteId) {
+  let creds = account.credentials;
+  const get = (token) => xrpc(creds.service, `app.bsky.feed.getPosts?uris=${encodeURIComponent(remoteId)}`, { token });
+  let r = await get(creds.accessJwt);
+  if (r.status === 401) { creds = await refresh(creds); r = await get(creds.accessJwt); }
+  if (!r.ok) throw new Error(r.json?.message || `Bluesky metrics failed (${r.status}).`);
+  const p = r.json.posts?.[0] || {};
+  return { metrics: { likes: p.likeCount || 0, reposts: p.repostCount || 0, replies: p.replyCount || 0, quotes: p.quoteCount || 0 }, credentials: creds };
+}
