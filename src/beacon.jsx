@@ -3,8 +3,8 @@ import './beacon.css';
 import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB, BEACON_LISTENING as BEACON_LISTENING_FB, BEACON_APPROVALS, BEACON_METRICS } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
-import { BTabQueue, BTabListening, BTabPerformance, BTabBoost, BTabPress } from './beacon-tabs';
-import { BConnections, BComposer, BOutbox } from './beacon-social';
+import { BTabQueue, BTabListening, BTabBoost, BTabPress } from './beacon-tabs';
+import { BConnections, BComposer, BOutbox, BPerformance } from './beacon-social';
 import { useSocial } from './use-social';
 
 // Mandate 2.0 — Beacon
@@ -351,7 +351,7 @@ function Beacon() {
           {tab === 'outbox'      && <BOutbox key={outboxKey} />}
           {tab === 'queue'       && <BTabQueue onOpenPost={setOpenPost} />}
           {tab === 'listen'      && <BTabListening />}
-          {tab === 'performance' && <BTabPerformance />}
+          {tab === 'performance' && <BPerformance />}
           {tab === 'boost'       && <BTabBoost />}
           {tab === 'press'       && <BTabPress />}
         </div>

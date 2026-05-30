@@ -308,6 +308,36 @@ app.post('/posts/:groupId/cancel', requireRole('editor'), async (c) => {
   return c.json({ ok: true, canceled: cancelable.length });
 });
 
+// Aggregate analytics across all published posts (powers the Performance tab).
+app.get('/analytics', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(socialPosts)
+    .where(and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.status, 'published')));
+
+  const FIELDS = ['likes', 'reposts', 'replies', 'comments', 'shares', 'impressions'];
+  const blank = () => ({ posts: 0, likes: 0, reposts: 0, replies: 0, comments: 0, shares: 0, impressions: 0 });
+  const engOf = (m) => (m.likes || 0) + (m.reposts || 0) + (m.replies || 0) + (m.comments || 0) + (m.shares || 0);
+  const add = (acc, m) => { acc.posts++; for (const k of FIELDS) acc[k] += (m?.[k] || 0); };
+
+  const totals = blank();
+  const byPlat = {};
+  const scored = [];
+  for (const p of rows) {
+    const m = safeParse(p.metricsJson) || {};
+    add(totals, m);
+    (byPlat[p.platform] || (byPlat[p.platform] = blank()));
+    add(byPlat[p.platform], m);
+    scored.push({ id: p.id, platform: p.platform, body: p.body, remoteUrl: p.remoteUrl, metrics: m, engagement: engOf(m), publishedAt: p.publishedAt });
+  }
+  totals.engagement = engOf(totals);
+  const byPlatform = Object.entries(byPlat)
+    .map(([platform, v]) => ({ platform, ...v, engagement: engOf(v) }))
+    .sort((a, b) => b.engagement - a.engagement);
+  const top = scored.filter((s) => s.engagement > 0).sort((a, b) => b.engagement - a.engagement).slice(0, 5);
+
+  return c.json({ totals, byPlatform, top, postCount: rows.length });
+});
+
 // Refresh engagement metrics for all published posts in a compose group.
 app.post('/posts/:groupId/metrics', async (c) => {
   const me = c.get('user');

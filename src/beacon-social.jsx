@@ -423,3 +423,90 @@ export function BOutbox() {
     </div>
   );
 }
+
+// ── Performance (aggregate analytics across published posts) ─────────
+const fmtN = (n) => {
+  if (n == null) return '—';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
+  return String(n);
+};
+
+export function BPerformance() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData(await api.socialAnalytics()); }
+    catch { setData(null); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <p className="bs-muted" style={{ padding: 20 }}>Loading…</p>;
+  if (!data || data.postCount === 0) {
+    return <p className="bs-muted" style={{ padding: 20 }}>No published posts yet. Once you publish, real engagement totals show up here. <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={load}>↻ refresh</button></p>;
+  }
+
+  const t = data.totals;
+  const kpis = [
+    { label: 'Published', val: data.postCount },
+    { label: 'Engagement', val: t.engagement },
+    { label: 'Likes', val: t.likes },
+    { label: 'Reposts', val: t.reposts },
+    { label: 'Replies/comments', val: (t.replies || 0) + (t.comments || 0) },
+    { label: 'Impressions', val: t.impressions },
+  ];
+
+  return (
+    <div className="bs-perf">
+      <div className="bs-perf__hd">
+        <h3 className="bs-h" style={{ margin: 0 }}>Performance · across all connected accounts</h3>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={load}>↻ refresh</button>
+      </div>
+
+      <div className="bs-perf__kpis">
+        {kpis.map((k) => (
+          <div className="bs-perf__kpi" key={k.label}>
+            <div className="bs-perf__kpi-val">{fmtN(k.val)}</div>
+            <div className="bs-perf__kpi-lbl">{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bs-perf__cols">
+        <div>
+          <h4 className="bs-h">By platform</h4>
+          <table className="bs-perf__table">
+            <thead><tr><th>Platform</th><th>Posts</th><th>Likes</th><th>Reposts</th><th>Eng.</th></tr></thead>
+            <tbody>
+              {data.byPlatform.map((p) => (
+                <tr key={p.platform}>
+                  <td><span className={'bs-prov__badge bs-prov__badge--' + (PLAT[p.platform]?.cls || 'gen')}>{PLAT[p.platform]?.short}</span> {platLabel(p.platform)}</td>
+                  <td>{p.posts}</td><td>{fmtN(p.likes)}</td><td>{fmtN(p.reposts)}</td><td>{fmtN(p.engagement)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h4 className="bs-h">Top posts</h4>
+          {data.top.length === 0 ? <p className="bs-muted">Engagement will rank posts here.</p> : (
+            <div className="bs-perf__top">
+              {data.top.map((p) => (
+                <div className="bs-perf__toprow" key={p.id}>
+                  <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[p.platform]?.cls || 'gen')}>{PLAT[p.platform]?.short}</span>
+                  <span className="bs-perf__topbody">{(p.body || '(image)').slice(0, 80)}</span>
+                  <span className="bs-perf__topeng">{fmtN(p.engagement)}</span>
+                  {p.remoteUrl && <a href={p.remoteUrl} target="_blank" rel="noreferrer">↗</a>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
