@@ -81,25 +81,47 @@ export async function publish(account, post) {
   if (!page?.token) throw new Error('Missing Page access token — reconnect the account.');
 
   const message = String(post.body || '');
-  const photo = (post.media || []).find((m) => m.url);
+  const photos = (post.media || []).filter((m) => m.url);
 
-  // With an image → photo post; otherwise a text feed post.
-  let endpoint, body;
-  if (photo) {
-    endpoint = `${GRAPH}/${creds.pageId}/photos`;
-    body = { url: photo.url, caption: message, access_token: page.token };
+  let id;
+  if (photos.length === 0) {
+    // Text feed post.
+    const r = await fetch(`${GRAPH}/${creds.pageId}/feed`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, access_token: page.token }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || `Facebook publish failed (${r.status}).`);
+    id = j.id;
+  } else if (photos.length === 1) {
+    const r = await fetch(`${GRAPH}/${creds.pageId}/photos`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: photos[0].url, caption: message, access_token: page.token }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || `Facebook publish failed (${r.status}).`);
+    id = j.post_id || j.id;
   } else {
-    endpoint = `${GRAPH}/${creds.pageId}/feed`;
-    body = { message, access_token: page.token };
+    // Multi-photo: upload each unpublished, then attach to a single feed post.
+    const attached = [];
+    for (const m of photos) {
+      const r = await fetch(`${GRAPH}/${creds.pageId}/photos`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: m.url, published: false, access_token: page.token }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error?.message || `Facebook photo upload failed (${r.status}).`);
+      attached.push({ media_fbid: j.id });
+    }
+    const r = await fetch(`${GRAPH}/${creds.pageId}/feed`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, attached_media: attached, access_token: page.token }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || `Facebook publish failed (${r.status}).`);
+    id = j.id;
   }
 
-  const res = await fetch(endpoint, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error?.message || `Facebook publish failed (${res.status}).`);
-
-  const id = j.post_id || j.id; // photos returns {id, post_id}
   return { remoteId: id, url: id ? `https://www.facebook.com/${id}` : null };
 }
 
