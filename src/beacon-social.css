@@ -220,3 +220,6 @@
 
 /* Tracked links */
 .bs-link-dest { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-4, #5a5956); }
+
+/* Inbox assignee */
+.bs-in-assignee { font-size: 10px; font-family: var(--font-mono); border: 1px solid var(--rule, #c9c3aa); border-radius: 4px; padding: 1px 4px; background: var(--paper-0, #faf8f1); color: var(--ink-4, #5a5956); }

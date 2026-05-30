@@ -705,7 +705,7 @@ const timeAgo = (ts) => {
   return Math.floor(s / 86400) + 'd';
 };
 
-function InboxItem({ it, onReply, onRead, onArchive }) {
+function InboxItem({ it, team = [], onReply, onRead, onArchive, onAssign }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -731,6 +731,12 @@ function InboxItem({ it, onReply, onRead, onArchive }) {
             <span className="bs-in-item__handle">{it.authorHandle}</span>
             <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[it.platform]?.cls || 'gen')} style={{ width: 16, height: 16, fontSize: 8 }}>{PLAT[it.platform]?.short}</span>
             <span className="bs-in-item__type">{it.type}</span>
+            {onAssign && (
+              <select className="bs-in-assignee" value={it.assignedToId || ''} onChange={(e) => onAssign(it.id, e.target.value)} title="Assign">
+                <option value="">Unassigned</option>
+                {team.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            )}
             <span className="bs-in-item__time">{timeAgo(it.remoteCreatedAt)}</span>
           </div>
           <div className="bs-in-item__text">{it.text || <em className="bs-muted">(no text)</em>}</div>
@@ -760,26 +766,31 @@ function InboxItem({ it, onReply, onRead, onArchive }) {
 export function BInbox() {
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState('unread');
+  const [mine, setMine] = useState(false);
+  const [team, setTeam] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  const load = useCallback(async (f) => {
+  const load = useCallback(async (f, m) => {
     setLoading(true);
-    try { const r = await api.socialInbox(f); setItems(r.items || []); }
+    try { const r = await api.socialInbox(f, m ? 'me' : undefined); setItems(r.items || []); }
     catch { setItems([]); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { load(filter); }, [load, filter]);
+  useEffect(() => { load(filter, mine); }, [load, filter, mine]);
+  useEffect(() => { api.socialTeam().then((r) => setTeam(r.team || [])).catch(() => {}); }, []);
 
   const sync = async () => {
     setSyncing(true);
-    try { await api.socialInboxSync(); await load(filter); }
+    try { await api.socialInboxSync(); await load(filter, mine); }
     catch { /* ignore */ }
     finally { setSyncing(false); }
   };
-  const onReply = async (id, text) => { await api.socialInboxReply(id, text); load(filter); };
-  const onRead = async (id) => { try { await api.socialInboxRead(id); load(filter); } catch { /* ignore */ } };
-  const onArchive = async (id) => { try { await api.socialInboxArchive(id); load(filter); } catch { /* ignore */ } };
+  const reload = () => load(filter, mine);
+  const onReply = async (id, text) => { await api.socialInboxReply(id, text); reload(); };
+  const onRead = async (id) => { try { await api.socialInboxRead(id); reload(); } catch { /* ignore */ } };
+  const onArchive = async (id) => { try { await api.socialInboxArchive(id); reload(); } catch { /* ignore */ } };
+  const onAssign = async (id, userId) => { try { await api.socialInboxAssign(id, userId || null); reload(); } catch { /* ignore */ } };
 
   return (
     <div className="bs-inbox">
@@ -788,13 +799,14 @@ export function BInbox() {
           {INBOX_FILTERS.map(([k, lbl]) => (
             <button key={k} className={'bs-ob-filter' + (filter === k ? ' is-on' : '')} onClick={() => setFilter(k)}>{lbl}</button>
           ))}
+          <button className={'bs-ob-filter' + (mine ? ' is-on' : '')} onClick={() => setMine((v) => !v)}>Mine</button>
         </div>
         <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : '↻ sync'}</button>
       </div>
       {loading ? <p className="bs-muted">Loading…</p>
         : items.length === 0
-          ? <p className="bs-muted">{filter === 'unread' ? 'No unread interactions. Replies and mentions to your connected accounts land here. Hit ↻ sync to pull the latest.' : `No ${filter} items.`}</p>
-          : <div className="bs-in-list">{items.map((it) => <InboxItem key={it.id} it={it} onReply={onReply} onRead={onRead} onArchive={onArchive} />)}</div>}
+          ? <p className="bs-muted">{mine ? 'Nothing assigned to you.' : filter === 'unread' ? 'No unread interactions. Replies and mentions to your connected accounts land here. Hit ↻ sync to pull the latest.' : `No ${filter} items.`}</p>
+          : <div className="bs-in-list">{items.map((it) => <InboxItem key={it.id} it={it} team={team} onReply={onReply} onRead={onRead} onArchive={onArchive} onAssign={onAssign} />)}</div>}
     </div>
   );
 }

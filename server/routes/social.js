@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, users, auditLog } from '../db/schema.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -482,15 +482,26 @@ app.post('/posts/:id/retry', requireRole('editor'), async (c) => {
 const pubInbox = (r) => ({
   id: r.id, accountId: r.accountId, platform: r.platform, type: r.type,
   authorHandle: r.authorHandle, authorName: r.authorName, authorAvatar: r.authorAvatar,
-  text: r.text, url: r.url, status: r.status, remoteCreatedAt: r.remoteCreatedAt,
+  text: r.text, url: r.url, status: r.status, assignedToId: r.assignedToId, remoteCreatedAt: r.remoteCreatedAt,
+});
+
+// Lightweight team roster for the inbox assignee picker (editor+; not the
+// full admin user list).
+app.get('/team', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(users).where(eq(users.workspaceId, me.workspaceId));
+  return c.json({ team: rows.map((u) => ({ id: u.id, name: u.name, initials: u.initials })) });
 });
 
 app.get('/inbox', async (c) => {
   const me = c.get('user');
   const status = c.req.query('status');
-  const where = (status && status !== 'all')
-    ? and(eq(socialInbox.workspaceId, me.workspaceId), eq(socialInbox.status, status))
-    : eq(socialInbox.workspaceId, me.workspaceId);
+  const assignee = c.req.query('assignee'); // 'me' | userId
+  const conds = [eq(socialInbox.workspaceId, me.workspaceId)];
+  if (status && status !== 'all') conds.push(eq(socialInbox.status, status));
+  if (assignee === 'me') conds.push(eq(socialInbox.assignedToId, me.id));
+  else if (assignee) conds.push(eq(socialInbox.assignedToId, assignee));
+  const where = conds.length > 1 ? and(...conds) : conds[0];
   const rows = await db.select().from(socialInbox).where(where).orderBy(desc(socialInbox.remoteCreatedAt)).limit(200);
   const unread = (await db.select().from(socialInbox)
     .where(and(eq(socialInbox.workspaceId, me.workspaceId), eq(socialInbox.status, 'unread')))).length;
@@ -506,6 +517,20 @@ app.post('/inbox/sync', requireRole('editor'), async (c) => {
 app.post('/inbox/:id/read', async (c) => {
   const me = c.get('user');
   await db.update(socialInbox).set({ status: 'read' })
+    .where(and(eq(socialInbox.id, c.req.param('id')), eq(socialInbox.workspaceId, me.workspaceId)));
+  return c.json({ ok: true });
+});
+
+app.post('/inbox/:id/assign', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { userId = null } = await c.req.json().catch(() => ({}));
+  // Validate the assignee is in this workspace (or null to unassign).
+  if (userId) {
+    const u = (await db.select().from(users).where(and(eq(users.id, userId), eq(users.workspaceId, me.workspaceId))).limit(1))[0];
+    if (!u) return c.json({ error: 'unknown user' }, 400);
+  }
+  await db.update(socialInbox)
+    .set({ assignedToId: userId, assignedAt: userId ? new Date() : null })
     .where(and(eq(socialInbox.id, c.req.param('id')), eq(socialInbox.workspaceId, me.workspaceId)));
   return c.json({ ok: true });
 });

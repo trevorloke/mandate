@@ -452,6 +452,8 @@ function bootstrapTables() {
       url              TEXT,
       reply_context    TEXT,
       status           TEXT NOT NULL DEFAULT 'unread',
+      assigned_to_id   TEXT,
+      assigned_at      INTEGER,
       replied_at       INTEGER,
       remote_created_at INTEGER,
       fetched_at       INTEGER DEFAULT (unixepoch()),
@@ -500,6 +502,8 @@ function bootstrapTables() {
   alterIfMissing('social_posts', 'metrics_json', 'TEXT');
   alterIfMissing('social_posts', 'metrics_at', 'INTEGER');
   alterIfMissing('social_posts', 'thread_json', 'TEXT');
+  alterIfMissing('social_inbox', 'assigned_to_id', 'TEXT');
+  alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.

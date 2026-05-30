@@ -410,6 +410,8 @@ export const socialInbox = sqliteTable('social_inbox', {
   url:             text('url'),
   replyContext:    text('reply_context'),           // JSON
   status:          text('status').notNull().default('unread'), // unread | read | replied | archived
+  assignedToId:    text('assigned_to_id'),
+  assignedAt:      integer('assigned_at', { mode: 'timestamp' }),
   repliedAt:       integer('replied_at', { mode: 'timestamp' }),
   remoteCreatedAt: integer('remote_created_at', { mode: 'timestamp' }),
   fetchedAt:       integer('fetched_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

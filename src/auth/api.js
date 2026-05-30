@@ -141,7 +141,15 @@ export const api = {
   socialDeleteTemplate:  (id) => fetchJson(`/api/social/templates/${id}`, { method: 'DELETE' }),
   socialShorten:    (body) => fetchJson('/api/social/shorten', { method: 'POST', body }),
   socialLinks:      () => fetchJson('/api/social/links'),
-  socialInbox:        (status) => fetchJson(`/api/social/inbox${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  socialInbox:        (status, assignee) => {
+    const q = new URLSearchParams();
+    if (status) q.set('status', status);
+    if (assignee) q.set('assignee', assignee);
+    const s = q.toString();
+    return fetchJson(`/api/social/inbox${s ? `?${s}` : ''}`);
+  },
+  socialTeam:         () => fetchJson('/api/social/team'),
+  socialInboxAssign:  (id, userId) => fetchJson(`/api/social/inbox/${id}/assign`, { method: 'POST', body: { userId } }),
   socialInboxSync:    () => fetchJson('/api/social/inbox/sync', { method: 'POST' }),
   socialInboxRead:    (id) => fetchJson(`/api/social/inbox/${id}/read`, { method: 'POST' }),
   socialInboxArchive: (id) => fetchJson(`/api/social/inbox/${id}/archive`, { method: 'POST' }),
