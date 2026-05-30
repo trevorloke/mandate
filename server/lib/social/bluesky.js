@@ -66,6 +66,75 @@ async function uploadBlob(service, token, bytes, mime) {
   return { ok: res.ok, status: res.status, blob: json.blob, message: json.message };
 }
 
+const enc = new TextEncoder();
+const blen = (s) => enc.encode(s).length;
+const decodeEntities = (s) => String(s || '')
+  .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+
+// Compute richtext facets (links, #tags, @mentions) with UTF-8 byte offsets so
+// they render as clickable rich text rather than plain strings.
+async function buildFacets(text, service, token) {
+  const facets = [];
+  let m;
+  const urlRe = /(https?:\/\/[^\s]+)/g;
+  while ((m = urlRe.exec(text))) {
+    const url = m[1].replace(/[.,;!?)\]]+$/, '');
+    const start = blen(text.slice(0, m.index));
+    facets.push({ index: { byteStart: start, byteEnd: start + blen(url) }, features: [{ $type: 'app.bsky.richtext.facet#link', uri: url }] });
+  }
+  const tagRe = /(^|\s)(#[^\s#]+)/g;
+  while ((m = tagRe.exec(text))) {
+    const at = m.index + m[1].length;
+    const start = blen(text.slice(0, at));
+    facets.push({ index: { byteStart: start, byteEnd: start + blen(m[2]) }, features: [{ $type: 'app.bsky.richtext.facet#tag', tag: m[2].slice(1) }] });
+  }
+  const menRe = /(^|\s)(@[a-zA-Z0-9][a-zA-Z0-9.\-]+)/g;
+  const mentions = [];
+  while ((m = menRe.exec(text))) mentions.push({ handle: m[2].slice(1).replace(/\.+$/, ''), at: m.index + m[1].length, raw: m[2] });
+  for (const mn of mentions) {
+    try {
+      const r = await fetch(`${service}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(mn.handle)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      const j = await r.json().catch(() => ({}));
+      if (j.did) {
+        const start = blen(text.slice(0, mn.at));
+        facets.push({ index: { byteStart: start, byteEnd: start + blen('@' + mn.handle) }, features: [{ $type: 'app.bsky.richtext.facet#mention', did: j.did }] });
+      }
+    } catch { /* skip unresolved mention */ }
+  }
+  return facets.length ? facets : undefined;
+}
+
+// Best-effort external link card from a URL's OpenGraph metadata.
+async function fetchCard(url, service, token) {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mandate-Beacon/1.0' }, redirect: 'follow' });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 200_000);
+    const og = (p) => {
+      const a = html.match(new RegExp(`<meta[^>]+property=["']og:${p}["'][^>]+content=["']([^"']*)["']`, 'i'));
+      const b = html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:${p}["']`, 'i'));
+      return (a && a[1]) || (b && b[1]) || null;
+    };
+    const title = decodeEntities(og('title') || (html.match(/<title>([^<]*)<\/title>/i)?.[1]) || url).slice(0, 300);
+    const description = decodeEntities(og('description') || '').slice(0, 1000);
+    const external = { uri: url, title, description };
+    // Upload the OG image as a thumb when present.
+    const img = og('image');
+    if (img) {
+      try {
+        const ir = await fetch(img);
+        if (ir.ok) {
+          const bytes = Buffer.from(await ir.arrayBuffer());
+          const mime = ir.headers.get('content-type') || 'image/jpeg';
+          const up = await uploadBlob(service, token, bytes, mime);
+          if (up.ok && up.blob) external.thumb = up.blob;
+        }
+      } catch { /* thumb optional */ }
+    }
+    return external;
+  } catch { return null; }
+}
+
 // Publish a text post (optionally with up to 4 images). Returns
 // { remoteId, url, credentials } — credentials carry any refreshed tokens.
 export async function publish(account, post) {
@@ -75,6 +144,10 @@ export async function publish(account, post) {
   if ([...text].length > CHAR_LIMIT) throw new Error(`Bluesky posts are limited to ${CHAR_LIMIT} characters.`);
 
   const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
+
+  // Rich text: clickable links, #tags, @mentions.
+  const facets = await buildFacets(text, creds.service, creds.accessJwt);
+  if (facets) record.facets = facets;
 
   // Attach images (max 4), uploading each as a blob; refresh token on 401.
   const media = (post.media || []).filter((m) => m.bytes).slice(0, 4);
@@ -87,6 +160,13 @@ export async function publish(account, post) {
       images.push({ alt: m.alt || '', image: up.blob });
     }
     record.embed = { $type: 'app.bsky.embed.images', images };
+  } else {
+    // No images — if the text has a link, attach a preview card (best-effort).
+    const firstLink = (text.match(/(https?:\/\/[^\s]+)/) || [])[0];
+    if (firstLink) {
+      const external = await fetchCard(firstLink.replace(/[.,;!?)\]]+$/, ''), creds.service, creds.accessJwt);
+      if (external) record.embed = { $type: 'app.bsky.embed.external', external };
+    }
   }
 
   const create = (token) => xrpc(creds.service, 'com.atproto.repo.createRecord', {
