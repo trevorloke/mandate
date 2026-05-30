@@ -452,3 +452,17 @@ export const socialLinkClicks = sqliteTable('social_link_clicks', {
   ua:        text('ua'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// RSS/Atom feeds that auto-import new items as drafts.
+export const socialFeeds = sqliteTable('social_feeds', {
+  id:            text('id').primaryKey(),
+  workspaceId:   text('workspace_id').notNull(),
+  url:           text('url').notNull(),
+  title:         text('title'),
+  accountIds:    text('account_ids').default('[]'),
+  lastItemGuid:  text('last_item_guid'),
+  lastCheckedAt: integer('last_checked_at', { mode: 'timestamp' }),
+  lastError:     text('last_error'),
+  createdById:   text('created_by_id'),
+  createdAt:     integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

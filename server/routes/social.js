@@ -12,7 +12,8 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db, sqlite } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, users, workspaces, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, users, workspaces, auditLog } from '../db/schema.js';
+import { syncFeed } from '../lib/social/feeds.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -746,6 +747,48 @@ app.post('/bulk', requireRole('editor'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.bulk', target: 'bulk', meta: JSON.stringify({ rows: rows.length, created }) });
   return c.json({ ok: true, created, results });
+});
+
+// ── RSS/Atom auto-import feeds ──
+const pubFeed = (f) => ({
+  id: f.id, url: f.url, title: f.title, accountIds: safeParse(f.accountIds) || [],
+  lastCheckedAt: f.lastCheckedAt, lastError: f.lastError,
+});
+
+app.get('/feeds', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(socialFeeds).where(eq(socialFeeds.workspaceId, me.workspaceId)).orderBy(desc(socialFeeds.createdAt));
+  return c.json({ feeds: rows.map(pubFeed) });
+});
+
+app.post('/feeds', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { url, title = null, accountIds = [] } = await c.req.json().catch(() => ({}));
+  if (!/^https?:\/\//i.test(String(url || ''))) return c.json({ error: 'a valid feed url is required' }, 400);
+  const id = newId('feed_');
+  await db.insert(socialFeeds).values({
+    id, workspaceId: me.workspaceId, url: String(url).trim(), title: title ? String(title) : null,
+    accountIds: JSON.stringify(Array.isArray(accountIds) ? accountIds : []), createdById: me.id,
+  });
+  syncFeed(id).catch(() => {}); // first pull in the background
+  const fresh = (await db.select().from(socialFeeds).where(eq(socialFeeds.id, id)).limit(1))[0];
+  return c.json({ ok: true, feed: pubFeed(fresh) });
+});
+
+app.post('/feeds/:id/check', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const id = c.req.param('id');
+  const row = (await db.select().from(socialFeeds).where(and(eq(socialFeeds.id, id), eq(socialFeeds.workspaceId, me.workspaceId))).limit(1))[0];
+  if (!row) return c.json({ error: 'not found' }, 404);
+  const created = await syncFeed(id);
+  const fresh = (await db.select().from(socialFeeds).where(eq(socialFeeds.id, id)).limit(1))[0];
+  return c.json({ ok: true, created, feed: pubFeed(fresh) });
+});
+
+app.delete('/feeds/:id', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  await db.delete(socialFeeds).where(and(eq(socialFeeds.id, c.req.param('id')), eq(socialFeeds.workspaceId, me.workspaceId)));
+  return c.json({ ok: true });
 });
 
 export default app;

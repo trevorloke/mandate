@@ -4,7 +4,7 @@ import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEA
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import { BTabQueue, BTabListening, BTabBoost, BTabPress } from './beacon-tabs';
-import { BConnections, BComposer, BOutbox, BPerformance, BInbox, BLibrary } from './beacon-social';
+import { BConnections, BComposer, BOutbox, BPerformance, BInbox, BLibrary, BFeeds } from './beacon-social';
 import { useSocial } from './use-social';
 
 // Mandate 2.0 — Beacon
@@ -352,7 +352,7 @@ function Beacon() {
           {tab === 'connect'     && <BConnections />}
           {tab === 'outbox'      && <BOutbox key={outboxKey} />}
           {tab === 'inbox'       && <BInbox />}
-          {tab === 'library'     && <BLibrary />}
+          {tab === 'library'     && <><BLibrary /><BFeeds /></>}
           {tab === 'queue'       && <BTabQueue onOpenPost={setOpenPost} />}
           {tab === 'listen'      && <BTabListening />}
           {tab === 'performance' && <BPerformance />}

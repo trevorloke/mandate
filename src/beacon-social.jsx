@@ -1054,3 +1054,78 @@ export function BLibrary() {
     </div>
   );
 }
+
+// ── RSS auto-import (feeds → drafts) ─────────────────────────────────
+export function BFeeds() {
+  const { accounts } = useSocial();
+  const connected = accounts.filter((a) => a.status === 'connected');
+  const [feeds, setFeeds] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [url, setUrl] = useState('');
+  const [sel, setSel] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api.socialFeeds(); setFeeds(r.feeds || []); }
+    catch { setFeeds([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = (id) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+  const add = async () => {
+    if (!/^https?:\/\//.test(url)) { setMsg({ kind: 'err', text: 'Enter a valid feed URL.' }); return; }
+    setBusy(true); setMsg(null);
+    try { await api.socialAddFeed({ url, accountIds: sel }); setUrl(''); setSel([]); setMsg({ kind: 'ok', text: 'Feed added — new items will queue as drafts.' }); load(); }
+    catch (e) { setMsg({ kind: 'err', text: e.message }); }
+    finally { setBusy(false); }
+  };
+  const check = async (f) => { try { const r = await api.socialCheckFeed(f.id); setMsg({ kind: 'ok', text: `Pulled ${r.created} new draft(s).` }); load(); } catch (e) { setMsg({ kind: 'err', text: e.message }); } };
+  const del = async (f) => { if (!confirm('Remove this feed?')) return; try { await api.socialDeleteFeed(f.id); load(); } catch (e) { setMsg({ kind: 'err', text: e.message }); } };
+
+  const fmt = (ts) => ts ? new Date(ts * 1000).toLocaleString() : 'never';
+
+  return (
+    <div className="bs-lib" style={{ marginTop: 8 }}>
+      <h3 className="bs-h" style={{ marginBottom: 10 }}>RSS auto-import <em className="bs-field__hint">· new items become drafts</em></h3>
+      {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+      <div className="bs-lib-edit">
+        <input className="bs-input" placeholder="https://example.com/feed.xml" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <div className="bs-targets">
+          {connected.length === 0 ? <span className="bs-muted">Connect an account to draft for.</span>
+            : connected.map((a) => (
+              <label key={a.id} className={'bs-target' + (sel.includes(a.id) ? ' is-on' : '')}>
+                <input type="checkbox" checked={sel.includes(a.id)} onChange={() => toggle(a.id)} />
+                <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[a.platform]?.cls || 'gen')}>{PLAT[a.platform]?.short}</span>
+                <span className="bs-target__name">{a.handle}</span>
+              </label>
+            ))}
+        </div>
+        <div className="bs-in-reply__ft">
+          <button className="bs-btn bs-btn--sm" onClick={add} disabled={busy || !url || sel.length === 0}>Add feed</button>
+        </div>
+      </div>
+
+      {loading ? <p className="bs-muted">Loading…</p>
+        : feeds.length === 0 ? <p className="bs-muted">No feeds yet.</p>
+          : <div className="bs-lib-list">
+              {feeds.map((f) => (
+                <div key={f.id} className="bs-lib-card">
+                  <div className="bs-lib-card__main">
+                    <div className="bs-lib-card__name">{f.title || f.url}</div>
+                    <div className="bs-lib-card__body" style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                      checked {fmt(f.lastCheckedAt)} · {f.accountIds.length} account(s){f.lastError ? ` · ⚠ ${f.lastError}` : ''}
+                    </div>
+                  </div>
+                  <div className="bs-lib-card__actions">
+                    <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => check(f)}>check now</button>
+                    <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => del(f)}>remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>}
+    </div>
+  );
+}

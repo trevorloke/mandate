@@ -143,6 +143,10 @@ export const api = {
   socialLinks:      () => fetchJson('/api/social/links'),
   socialBulk:       (rows) => fetchJson('/api/social/bulk', { method: 'POST', body: { rows } }),
   socialAssist:     (body) => fetchJson('/api/social/assist', { method: 'POST', body }),
+  socialFeeds:      () => fetchJson('/api/social/feeds'),
+  socialAddFeed:    (body) => fetchJson('/api/social/feeds', { method: 'POST', body }),
+  socialCheckFeed:  (id) => fetchJson(`/api/social/feeds/${id}/check`, { method: 'POST' }),
+  socialDeleteFeed: (id) => fetchJson(`/api/social/feeds/${id}`, { method: 'DELETE' }),
   socialInbox:        (status, assignee) => {
     const q = new URLSearchParams();
     if (status) q.set('status', status);
