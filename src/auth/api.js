@@ -134,6 +134,11 @@ export const api = {
   socialPublishNow: (groupId) => fetchJson(`/api/social/posts/${groupId}/publish`, { method: 'POST' }),
   socialRefreshMetrics: (groupId) => fetchJson(`/api/social/posts/${groupId}/metrics`, { method: 'POST' }),
   socialAnalytics:  () => fetchJson('/api/social/analytics'),
+  socialInbox:        (status) => fetchJson(`/api/social/inbox${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  socialInboxSync:    () => fetchJson('/api/social/inbox/sync', { method: 'POST' }),
+  socialInboxRead:    (id) => fetchJson(`/api/social/inbox/${id}/read`, { method: 'POST' }),
+  socialInboxArchive: (id) => fetchJson(`/api/social/inbox/${id}/archive`, { method: 'POST' }),
+  socialInboxReply:   (id, text) => fetchJson(`/api/social/inbox/${id}/reply`, { method: 'POST', body: { text } }),
   // Developer-app credentials for OAuth platforms (X / LinkedIn / Meta).
   socialApps:       () => fetchJson('/api/social/apps'),
   socialSaveApp:    (platform, body) => fetchJson(`/api/social/apps/${platform}`, { method: 'PUT', body }),

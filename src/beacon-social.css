@@ -169,3 +169,23 @@
 /* Composer alt text */
 .bs-media-item { display: flex; flex-direction: column; gap: 4px; }
 .bs-alt { width: 72px; font-size: 10px; padding: 3px 5px; border: 1px solid var(--rule, #c9c3aa); border-radius: 4px; background: var(--paper-0, #faf8f1); }
+
+/* Engagement inbox */
+.bs-inbox { padding: 18px 22px; }
+.bs-inbox__hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+.bs-in-list { display: flex; flex-direction: column; gap: 2px; }
+.bs-in-item { border-bottom: 1px solid var(--paper-2, #e6e1ce); padding: 12px 4px; }
+.bs-in-item--unread { background: var(--paper-0, #faf8f1); }
+.bs-in-item--unread .bs-in-item__hd b::before { content: '●'; color: var(--m-beacon, #b8334a); font-size: 9px; margin-right: 6px; vertical-align: middle; }
+.bs-in-item__main { display: flex; gap: 10px; }
+.bs-in-item__body { flex: 1; min-width: 0; }
+.bs-in-item__hd { display: flex; align-items: center; gap: 7px; font-size: 13px; flex-wrap: wrap; }
+.bs-in-item__handle { font-family: var(--font-mono); font-size: 11px; color: var(--ink-5, #7a7872); }
+.bs-in-item__type { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-5); }
+.bs-in-item__time { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--ink-5); }
+.bs-in-item__text { font-size: 14px; color: var(--ink-1, #1a1a1a); margin: 5px 0 7px; white-space: pre-wrap; }
+.bs-in-item__actions { display: flex; align-items: center; gap: 10px; }
+.bs-in-item__link { font-size: 12px; color: var(--m-beacon, #b8334a); }
+.bs-in-item__replied { font-size: 11px; color: #234a2c; font-family: var(--font-mono); }
+.bs-in-reply { margin-top: 8px; }
+.bs-in-reply__ft { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }

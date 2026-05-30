@@ -571,3 +571,108 @@ export function BPerformance() {
     </div>
   );
 }
+
+// ── Engagement inbox ─────────────────────────────────────────────────
+const INBOX_FILTERS = [['unread', 'Unread'], ['all', 'All'], ['replied', 'Replied'], ['archived', 'Archived']];
+const timeAgo = (ts) => {
+  if (!ts) return '';
+  const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
+};
+
+function InboxItem({ it, onReply, onRead, onArchive }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const send = async () => {
+    if (!text.trim()) return;
+    setBusy(true); setErr(null);
+    try { await onReply(it.id, text); setOpen(false); setText(''); }
+    catch (e) { setErr(e.message || 'Reply failed'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className={'bs-in-item bs-in-item--' + it.status}>
+      <div className="bs-in-item__main">
+        {it.authorAvatar
+          ? <img className="bs-av" src={it.authorAvatar} alt="" style={{ width: 32, height: 32 }} />
+          : <div className={'bs-av bs-av--ph bs-av--' + (PLAT[it.platform]?.cls || 'gen')} style={{ width: 32, height: 32 }}>{PLAT[it.platform]?.short}</div>}
+        <div className="bs-in-item__body">
+          <div className="bs-in-item__hd">
+            <b>{it.authorName || it.authorHandle}</b>
+            <span className="bs-in-item__handle">{it.authorHandle}</span>
+            <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[it.platform]?.cls || 'gen')} style={{ width: 16, height: 16, fontSize: 8 }}>{PLAT[it.platform]?.short}</span>
+            <span className="bs-in-item__type">{it.type}</span>
+            <span className="bs-in-item__time">{timeAgo(it.remoteCreatedAt)}</span>
+          </div>
+          <div className="bs-in-item__text">{it.text || <em className="bs-muted">(no text)</em>}</div>
+          <div className="bs-in-item__actions">
+            <button className="bs-btn bs-btn--sm" onClick={() => { setOpen((o) => !o); if (it.status === 'unread') onRead(it.id); }}>reply</button>
+            {it.url && <a className="bs-in-item__link" href={it.url} target="_blank" rel="noreferrer">open ↗</a>}
+            {it.status === 'unread' && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => onRead(it.id)}>mark read</button>}
+            <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => onArchive(it.id)}>archive</button>
+            {it.status === 'replied' && <span className="bs-in-item__replied">✓ replied</span>}
+          </div>
+          {open && (
+            <div className="bs-in-reply">
+              <textarea className="bs-compose-text" rows={2} placeholder={`Reply to ${it.authorHandle}…`} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+              {err && <div className="bs-msg bs-msg--err">{err}</div>}
+              <div className="bs-in-reply__ft">
+                <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setOpen(false)}>cancel</button>
+                <button className="bs-btn bs-btn--sm" onClick={send} disabled={busy || !text.trim()}>{busy ? 'Sending…' : 'Send reply'}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function BInbox() {
+  const [items, setItems] = useState([]);
+  const [filter, setFilter] = useState('unread');
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+
+  const load = useCallback(async (f) => {
+    setLoading(true);
+    try { const r = await api.socialInbox(f); setItems(r.items || []); }
+    catch { setItems([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(filter); }, [load, filter]);
+
+  const sync = async () => {
+    setSyncing(true);
+    try { await api.socialInboxSync(); await load(filter); }
+    catch { /* ignore */ }
+    finally { setSyncing(false); }
+  };
+  const onReply = async (id, text) => { await api.socialInboxReply(id, text); load(filter); };
+  const onRead = async (id) => { try { await api.socialInboxRead(id); load(filter); } catch { /* ignore */ } };
+  const onArchive = async (id) => { try { await api.socialInboxArchive(id); load(filter); } catch { /* ignore */ } };
+
+  return (
+    <div className="bs-inbox">
+      <div className="bs-inbox__hd">
+        <div className="bs-ob-filters">
+          {INBOX_FILTERS.map(([k, lbl]) => (
+            <button key={k} className={'bs-ob-filter' + (filter === k ? ' is-on' : '')} onClick={() => setFilter(k)}>{lbl}</button>
+          ))}
+        </div>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={sync} disabled={syncing}>{syncing ? 'Syncing…' : '↻ sync'}</button>
+      </div>
+      {loading ? <p className="bs-muted">Loading…</p>
+        : items.length === 0
+          ? <p className="bs-muted">{filter === 'unread' ? 'No unread interactions. Replies and mentions to your connected accounts land here. Hit ↻ sync to pull the latest.' : `No ${filter} items.`}</p>
+          : <div className="bs-in-list">{items.map((it) => <InboxItem key={it.id} it={it} onReply={onReply} onRead={onRead} onArchive={onArchive} />)}</div>}
+    </div>
+  );
+}
