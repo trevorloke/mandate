@@ -253,3 +253,27 @@
 .bs-preview-ft { display: flex; gap: 12px; align-items: center; margin-top: 8px; font-family: var(--font-mono); font-size: 11px; }
 .bs-preview-thread { color: var(--m-beacon, #b8334a); }
 .bs-preview-over { color: #b8334a; font-weight: 600; }
+
+/* Schedule calendar */
+.bs-cal2 { padding: 16px 20px; }
+.bs-cal2__hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.bs-cal2__nav { display: flex; gap: 6px; }
+.bs-cal2__range { font-family: var(--font-mono); font-size: 12px; color: var(--ink-4, #5a5956); }
+.bs-cal2__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.bs-cal2__col { min-height: 220px; border: 1px solid var(--rule, #c9c3aa); border-radius: 8px; background: var(--paper-0, #faf8f1); padding: 6px; }
+.bs-cal2__col.is-today { border-color: var(--m-beacon, #b8334a); }
+.bs-cal2__col-hd { font-family: var(--font-mono); font-size: 11px; color: var(--ink-5, #7a7872); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.bs-cal2__col-hd span { color: var(--ink-3, #3f3f3f); }
+.bs-cal2__chip { border: 1px solid var(--rule, #c9c3aa); border-left-width: 3px; border-radius: 5px; padding: 5px 6px; margin-bottom: 5px; background: #fff; cursor: grab; font-size: 11px; }
+.bs-cal2__chip:active { cursor: grabbing; }
+.bs-cal2__chip--scheduled { border-left-color: #c5874f; }
+.bs-cal2__chip--published { border-left-color: #2a7d4f; opacity: 0.75; }
+.bs-cal2__chip--pending { border-left-color: #b8334a; }
+.bs-cal2__chip--draft { border-left-color: var(--ink-6, #a8a59a); }
+.bs-cal2__chip-hd { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+.bs-cal2__time { font-family: var(--font-mono); color: var(--ink-4, #5a5956); }
+.bs-cal2__chip-body { color: var(--ink-2, #2a2a2a); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-cal2__tray { margin-top: 16px; border-top: 1px solid var(--rule, #c9c3aa); padding-top: 12px; }
+.bs-cal2__tray-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.bs-cal2__tray-row .bs-cal2__chip { width: 150px; }
+@media (max-width: 900px) { .bs-cal2__grid { grid-template-columns: repeat(2, 1fr); } }

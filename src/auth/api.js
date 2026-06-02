@@ -132,6 +132,7 @@ export const api = {
   socialApprove:    (groupId) => fetchJson(`/api/social/posts/${groupId}/approve`, { method: 'POST' }),
   socialReject:     (groupId, reason) => fetchJson(`/api/social/posts/${groupId}/reject`, { method: 'POST', body: { reason } }),
   socialPublishNow: (groupId) => fetchJson(`/api/social/posts/${groupId}/publish`, { method: 'POST' }),
+  socialReschedule: (groupId, scheduledAt) => fetchJson(`/api/social/posts/${groupId}/reschedule`, { method: 'POST', body: { scheduledAt } }),
   socialRefreshMetrics: (groupId) => fetchJson(`/api/social/posts/${groupId}/metrics`, { method: 'POST' }),
   socialAnalytics:  () => fetchJson('/api/social/analytics'),
   socialBestTimes:  (platform) => fetchJson(`/api/social/best-times${platform ? `?platform=${platform}` : ''}`),

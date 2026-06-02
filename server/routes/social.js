@@ -340,6 +340,22 @@ async function groupPosts(workspaceId, groupId) {
 }
 
 // Submit a draft (or rejected) group for approval → pending.
+// Reschedule a group to a new time (drag-to-reschedule on the calendar).
+app.post('/posts/:groupId/reschedule', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const groupId = c.req.param('groupId');
+  const { scheduledAt } = await c.req.json().catch(() => ({}));
+  const when = scheduledAt ? new Date(scheduledAt) : null;
+  if (!when || isNaN(when.getTime())) return c.json({ error: 'invalid time' }, 400);
+  const rows = await groupPosts(me.workspaceId, groupId);
+  if (!rows.length) return c.json({ error: 'not found' }, 404);
+  const targetable = rows.filter((r) => ['scheduled', 'draft', 'pending'].includes(r.status));
+  for (const r of targetable) {
+    await db.update(socialPosts).set({ scheduledAt: when, status: r.status === 'draft' ? 'scheduled' : r.status, updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
+  }
+  return c.json({ ok: true, rescheduled: targetable.length });
+});
+
 app.post('/posts/:groupId/submit', requireRole('editor'), async (c) => {
   const me = c.get('user');
   const groupId = c.req.param('groupId');

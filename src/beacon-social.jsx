@@ -1129,3 +1129,119 @@ export function BFeeds() {
     </div>
   );
 }
+
+// ── Schedule calendar (week view, drag-to-reschedule) ───────────────
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function startOfWeek(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  const off = (x.getDay() + 6) % 7; // Monday = 0
+  x.setDate(x.getDate() - off);
+  return x;
+}
+const pad2 = (n) => String(n).padStart(2, '0');
+const hhmm = (dt) => `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+const toLocalInput = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}T${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+
+export function BScheduleCalendar() {
+  const [groups, setGroups] = useState([]);
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [editing, setEditing] = useState(null); // {groupId, when}
+  const [drag, setDrag] = useState(null);
+
+  const load = useCallback(async () => {
+    try { const r = await api.socialPosts(); setGroups(r.groups || []); } catch { setGroups([]); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; });
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
+
+  const scheduled = groups.filter((g) => g.scheduledAt);
+  const drafts = groups.filter((g) => g.status === 'draft' && !g.scheduledAt);
+  const dayPosts = (d) => scheduled
+    .filter((g) => { const t = new Date(g.scheduledAt * 1000); return t >= d && t < new Date(d.getTime() + 86400000); })
+    .sort((a, b) => a.scheduledAt - b.scheduledAt);
+
+  const reschedule = async (groupId, when) => {
+    try { await api.socialReschedule(groupId, when.toISOString()); load(); }
+    catch (e) { alert(e.message || 'Reschedule failed'); }
+  };
+  const onDrop = (day) => {
+    if (!drag) return;
+    const src = drag.scheduledAt ? new Date(drag.scheduledAt * 1000) : null;
+    const when = new Date(day);
+    when.setHours(src ? src.getHours() : 9, src ? src.getMinutes() : 0, 0, 0);
+    setDrag(null);
+    reschedule(drag.groupId, when);
+  };
+
+  const platBadges = (g) => [...new Set(g.targets.map((t) => t.platform))];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  return (
+    <div className="bs-cal2">
+      {editing && (
+        <div className="bs-modal-backdrop" onClick={() => setEditing(null)}>
+          <div className="bs-modal" onClick={(e) => e.stopPropagation()} style={{ width: 360 }}>
+            <div className="bs-modal__hd"><div className="bs-modal__title">Reschedule</div><button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setEditing(null)}>ESC</button></div>
+            <div className="bs-modal__body">
+              <input className="bs-input" type="datetime-local" value={editing.when} onChange={(e) => setEditing({ ...editing, when: e.target.value })} />
+            </div>
+            <div className="bs-modal__ft">
+              <button className="bs-btn bs-btn--ghost" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="bs-btn" onClick={() => { reschedule(editing.groupId, new Date(editing.when)); setEditing(null); }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bs-cal2__hd">
+        <div className="bs-cal2__nav">
+          <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); }}>←</button>
+          <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>This week</button>
+          <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); }}>→</button>
+        </div>
+        <div className="bs-cal2__range">{weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>
+      </div>
+
+      <div className="bs-cal2__grid">
+        {days.map((d, i) => (
+          <div key={i} className={'bs-cal2__col' + (d.getTime() === today.getTime() ? ' is-today' : '')}
+            onDragOver={(e) => e.preventDefault()} onDrop={() => onDrop(d)}>
+            <div className="bs-cal2__col-hd">{DOW[i]} <span>{d.getDate()}</span></div>
+            {dayPosts(d).map((g) => {
+              const t = new Date(g.scheduledAt * 1000);
+              return (
+                <div key={g.groupId} className={'bs-cal2__chip bs-cal2__chip--' + g.status} draggable
+                  onDragStart={() => setDrag({ groupId: g.groupId, scheduledAt: g.scheduledAt })}
+                  onClick={() => setEditing({ groupId: g.groupId, when: toLocalInput(t) })}
+                  title={g.body}>
+                  <div className="bs-cal2__chip-hd">
+                    <span className="bs-cal2__time">{hhmm(t)}</span>
+                    {platBadges(g).map((p) => <span key={p} className={'bs-prov__badge bs-prov__badge--' + (PLAT[p]?.cls || 'gen')} style={{ width: 13, height: 13, fontSize: 7 }}>{PLAT[p]?.short}</span>)}
+                  </div>
+                  <div className="bs-cal2__chip-body">{g.body || '(image)'}</div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {drafts.length > 0 && (
+        <div className="bs-cal2__tray">
+          <div className="bs-h" style={{ margin: '0 0 8px' }}>Unscheduled drafts <em className="bs-field__hint">· drag onto a day to schedule</em></div>
+          <div className="bs-cal2__tray-row">
+            {drafts.map((g) => (
+              <div key={g.groupId} className="bs-cal2__chip bs-cal2__chip--draft" draggable
+                onDragStart={() => setDrag({ groupId: g.groupId, scheduledAt: null })} title={g.body}>
+                <div className="bs-cal2__chip-hd">{platBadges(g).map((p) => <span key={p} className={'bs-prov__badge bs-prov__badge--' + (PLAT[p]?.cls || 'gen')} style={{ width: 13, height: 13, fontSize: 7 }}>{PLAT[p]?.short}</span>)}</div>
+                <div className="bs-cal2__chip-body">{g.body || '(image)'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
