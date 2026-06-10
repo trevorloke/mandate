@@ -15,6 +15,7 @@ import { db, sqlite } from '../db/index.js';
 import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, socialKeywords, socialListening, users, workspaces, auditLog } from '../db/schema.js';
 import { syncFeed } from '../lib/social/feeds.js';
 import { syncListening } from '../lib/social/listening.js';
+import { getWorkspaceSlots, setWorkspaceSlots, nextQueueTime } from '../lib/social/slots.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -262,7 +263,14 @@ app.get('/posts', async (c) => {
 
 app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { body = '', targets = [], scheduledAt = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null } = await c.req.json().catch(() => ({}));
+  const { body = '', targets = [], scheduledAt: scheduledAtRaw = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null, queue = false } = await c.req.json().catch(() => ({}));
+  // Queue mode: server picks the next free posting slot for this workspace.
+  let scheduledAt = scheduledAtRaw;
+  if (queue && !publishNow) {
+    const q = await nextQueueTime(me.workspaceId, { sqlite });
+    if (q.error) return c.json({ error: q.error }, 400);
+    scheduledAt = q.time.toISOString();
+  }
   // A thread is an array of segment strings; the first segment is the head/body.
   const threadSegs = Array.isArray(thread) ? thread.map((s) => String(s || '').trim()).filter(Boolean) : null;
   const isThread = threadSegs && threadSegs.length > 1;
@@ -837,6 +845,20 @@ app.delete('/feeds/:id', requireRole('editor'), async (c) => {
   const me = c.get('user');
   await db.delete(socialFeeds).where(and(eq(socialFeeds.id, c.req.param('id')), eq(socialFeeds.workspaceId, me.workspaceId)));
   return c.json({ ok: true });
+});
+
+// ── Queue slots (Buffer-style posting schedule) ──
+app.get('/slots', async (c) => {
+  const me = c.get('user');
+  const { slots, tz } = await getWorkspaceSlots(me.workspaceId);
+  return c.json({ slots, tz });
+});
+
+app.put('/slots', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  const { slots = [] } = await c.req.json().catch(() => ({}));
+  const clean = await setWorkspaceSlots(me.workspaceId, slots);
+  return c.json({ ok: true, slots: clean });
 });
 
 // ── Keyword listening ──

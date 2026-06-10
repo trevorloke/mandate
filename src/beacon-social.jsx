@@ -360,6 +360,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
       const payload = { body, targets, media: media.map((m) => ({ id: m.id, mime: m.mime, alt: m.alt })) };
       if (isThread) payload.thread = threadSegments;
       if (mode === 'now') payload.publishNow = true;
+      else if (mode === 'queue') payload.queue = true;
       else if (mode === 'schedule') payload.scheduledAt = new Date(when).toISOString();
       else if (mode === 'draft') { payload.saveDraft = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
       else if (mode === 'approval') { payload.submitForApproval = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
@@ -371,7 +372,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
           ? { kind: 'err', text: `${r.results.length - failed.length} published, ${failed.length} failed.` }
           : { kind: 'ok', text: `Published to ${r.results.length} account(s).` });
       } else {
-        setMsg({ kind: 'ok', text: mode === 'draft' ? 'Saved as draft.' : mode === 'approval' ? 'Submitted for approval.' : 'Scheduled.' });
+        setMsg({ kind: 'ok', text: mode === 'draft' ? 'Saved as draft.' : mode === 'approval' ? 'Submitted for approval.' : mode === 'queue' ? 'Added to the queue (next free slot).' : 'Scheduled.' });
       }
       onPosted && onPosted();
       if (mode !== 'now') setTimeout(onClose, 700);
@@ -379,7 +380,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
     finally { setBusy(false); }
   };
 
-  const SUBMIT_LABEL = { now: 'Publish now', schedule: 'Schedule', draft: 'Save draft', approval: 'Submit for approval' };
+  const SUBMIT_LABEL = { now: 'Publish now', queue: 'Add to queue', schedule: 'Schedule', draft: 'Save draft', approval: 'Submit for approval' };
   const canSubmit = (body.trim() || media.length) && targets.length && !over && !busy && !uploading && !igNeedsImage && (mode !== 'schedule' || when);
 
   return (
@@ -473,7 +474,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
             </div>
 
             <div className="bs-compose-when">
-              {[['now', 'Publish now'], ['schedule', 'Schedule'], ['draft', 'Draft'], ['approval', 'Needs approval']].map(([m, lbl]) => (
+              {[['now', 'Publish now'], ['queue', 'Queue'], ['schedule', 'Schedule'], ['draft', 'Draft'], ['approval', 'Needs approval']].map(([m, lbl]) => (
                 <label key={m} className={'bs-radio' + (mode === m ? ' is-on' : '')}>
                   <input type="radio" checked={mode === m} onChange={() => setMode(m)} /> {lbl}
                 </label>
@@ -1167,6 +1168,7 @@ export function BScheduleCalendar() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [editing, setEditing] = useState(null); // {groupId, when}
   const [drag, setDrag] = useState(null);
+  const [slotsOpen, setSlotsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try { const r = await api.socialPosts(); setGroups(r.groups || []); } catch { setGroups([]); }
@@ -1200,6 +1202,7 @@ export function BScheduleCalendar() {
 
   return (
     <div className="bs-cal2">
+      {slotsOpen && <BSlotsEditor onClose={() => setSlotsOpen(false)} />}
       {editing && (
         <div className="bs-modal-backdrop" onClick={() => setEditing(null)}>
           <div className="bs-modal" onClick={(e) => e.stopPropagation()} style={{ width: 360 }}>
@@ -1222,6 +1225,7 @@ export function BScheduleCalendar() {
           <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); }}>→</button>
         </div>
         <div className="bs-cal2__range">{weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {new Date(weekEnd - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => setSlotsOpen(true)}>⚙ queue slots</button>
       </div>
 
       <div className="bs-cal2__grid">
@@ -1378,6 +1382,64 @@ export function BListening() {
                   </div>
                 ))}
               </div>}
+    </div>
+  );
+}
+
+// Queue-slot editor: weekly posting times used by composer "Queue" mode.
+function BSlotsEditor({ onClose }) {
+  const [slots, setSlots] = useState([]);
+  const [tz, setTz] = useState('');
+  const [day, setDay] = useState(1);
+  const [time, setTime] = useState('09:00');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const DAYS7 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  useEffect(() => { api.socialSlots().then((r) => { setSlots(r.slots || []); setTz(r.tz || ''); }).catch(() => {}); }, []);
+
+  const add = () => {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return;
+    if (slots.some((s) => s.day === day && s.time === time)) return;
+    setSlots([...slots, { day, time }].sort((a, b) => a.day - b.day || a.time.localeCompare(b.time)));
+  };
+  const remove = (s) => setSlots(slots.filter((x) => !(x.day === s.day && x.time === s.time)));
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try { await api.socialSetSlots(slots); setMsg({ kind: 'ok', text: 'Saved.' }); setTimeout(onClose, 600); }
+    catch (e) { setMsg({ kind: 'err', text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bs-modal-backdrop" onClick={onClose}>
+      <div className="bs-modal" onClick={(e) => e.stopPropagation()} style={{ width: 440 }}>
+        <div className="bs-modal__hd"><div className="bs-modal__title">Queue slots</div><button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={onClose}>ESC</button></div>
+        <div className="bs-modal__body">
+          <p className="bs-muted" style={{ marginTop: 0 }}>Composer "Queue" drops each post into the next free slot ({tz} time).</p>
+          <div className="bs-slots__add">
+            <select className="bs-tpl-select" value={day} onChange={(e) => setDay(Number(e.target.value))}>
+              {DAYS7.map((d, i) => <option key={i} value={i}>{d}</option>)}
+            </select>
+            <input className="bs-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} style={{ width: 110 }} />
+            <button className="bs-btn bs-btn--sm" onClick={add}>+ add</button>
+          </div>
+          <div className="bs-slots__list">
+            {slots.length === 0 ? <p className="bs-muted">No slots yet — add a few (e.g. Mon/Wed/Fri 09:00 & 17:00).</p>
+              : slots.map((s, i) => (
+                <span key={i} className="bs-ob-filter bs-listen__kw">
+                  <span>{DAYS7[s.day]} {s.time}</span>
+                  <button className="bs-listen__kw-x" onClick={() => remove(s)}>×</button>
+                </span>
+              ))}
+          </div>
+          {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+        </div>
+        <div className="bs-modal__ft">
+          <button className="bs-btn bs-btn--ghost" onClick={onClose}>Cancel</button>
+          <button className="bs-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save slots'}</button>
+        </div>
+      </div>
     </div>
   );
 }

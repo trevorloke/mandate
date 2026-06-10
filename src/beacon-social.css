@@ -305,3 +305,7 @@
 
 /* Auto-retry note */
 .bs-ob-retry { font-family: var(--font-mono); font-size: 10px; color: #8a5a2a; }
+
+/* Queue slots editor */
+.bs-slots__add { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.bs-slots__list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; }

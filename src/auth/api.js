@@ -159,6 +159,8 @@ export const api = {
     return fetchJson(`/api/social/listening${s ? `?${s}` : ''}`);
   },
   socialListeningSync: () => fetchJson('/api/social/listening/sync', { method: 'POST' }),
+  socialSlots:      () => fetchJson('/api/social/slots'),
+  socialSetSlots:   (slots) => fetchJson('/api/social/slots', { method: 'PUT', body: { slots } }),
   socialInbox:        (status, assignee) => {
     const q = new URLSearchParams();
     if (status) q.set('status', status);
