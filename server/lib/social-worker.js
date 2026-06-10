@@ -9,6 +9,7 @@ import { refreshStaleMetrics } from './social/metrics.js';
 import { checkAllAccounts } from './social/health.js';
 import { syncAllInboxes } from './social/inbox.js';
 import { syncAllFeeds } from './social/feeds.js';
+import { syncAllListening } from './social/listening.js';
 
 const WORKER_ID = 'sw_' + randomBytes(4).toString('hex');
 const TICK_MS = 15_000;
@@ -56,11 +57,13 @@ const METRICS_TICK_MS = 10 * 60 * 1000; // refresh stale post metrics every 10 m
 const HEALTH_TICK_MS = 30 * 60 * 1000;  // re-check account tokens every 30 min
 const INBOX_TICK_MS = 5 * 60 * 1000;    // pull new interactions every 5 min
 const FEEDS_TICK_MS = 20 * 60 * 1000;   // pull RSS feeds every 20 min
+const LISTEN_TICK_MS = 10 * 60 * 1000;  // scan keyword listening every 10 min
 let timer = null;
 let metricsTimer = null;
 let healthTimer = null;
 let inboxTimer = null;
 let feedsTimer = null;
+let listenTimer = null;
 export function startSocialWorker() {
   if (timer) return;
   timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
@@ -73,6 +76,8 @@ export function startSocialWorker() {
   inboxTimer.unref?.();
   feedsTimer = setInterval(() => { syncAllFeeds().catch(() => {}); }, FEEDS_TICK_MS);
   feedsTimer.unref?.();
+  listenTimer = setInterval(() => { syncAllListening().catch(() => {}); }, LISTEN_TICK_MS);
+  listenTimer.unref?.();
   console.log(`[social-worker] started (${WORKER_ID})`);
 }
 export function stopSocialWorker() {
@@ -81,4 +86,5 @@ export function stopSocialWorker() {
   if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
   if (inboxTimer) { clearInterval(inboxTimer); inboxTimer = null; }
   if (feedsTimer) { clearInterval(feedsTimer); feedsTimer = null; }
+  if (listenTimer) { clearInterval(listenTimer); listenTimer = null; }
 }

@@ -1245,3 +1245,119 @@ export function BScheduleCalendar() {
     </div>
   );
 }
+
+// ── Keyword listening (real search across networks) ─────────────────
+const SENT = { pos: { label: 'positive', cls: 'pos' }, neg: { label: 'negative', cls: 'neg' }, neu: { label: 'neutral', cls: 'neu' } };
+
+export function BListening() {
+  const [keywords, setKeywords] = useState([]);
+  const [items, setItems] = useState([]);
+  const [counts, setCounts] = useState({ pos: 0, neg: 0, neu: 0 });
+  const [phrase, setPhrase] = useState('');
+  const [kwFilter, setKwFilter] = useState('');
+  const [sentFilter, setSentFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const load = useCallback(async (kw, sent) => {
+    setLoading(true);
+    try {
+      const [k, l] = await Promise.all([
+        api.socialKeywords(),
+        api.socialListening({ keyword: kw || undefined, sentiment: sent || undefined }),
+      ]);
+      setKeywords(k.keywords || []);
+      setItems(l.items || []);
+      setCounts(l.counts || { pos: 0, neg: 0, neu: 0 });
+    } catch { setItems([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(kwFilter, sentFilter); }, [load, kwFilter, sentFilter]);
+
+  const add = async () => {
+    const p = phrase.trim();
+    if (!p) return;
+    try { await api.socialAddKeyword(p); setPhrase(''); setMsg({ kind: 'ok', text: `Tracking "${p}" — first scan running.` }); load(kwFilter, sentFilter); }
+    catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
+  const remove = async (k) => {
+    if (!confirm(`Stop tracking "${k.phrase}"?`)) return;
+    try { await api.socialDeleteKeyword(k.id); if (kwFilter === k.id) setKwFilter(''); load(kwFilter === k.id ? '' : kwFilter, sentFilter); }
+    catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
+  const scan = async () => {
+    setScanning(true); setMsg(null);
+    try { const r = await api.socialListeningSync(); setMsg({ kind: 'ok', text: `Scan complete — ${r.added} new mention(s).` }); load(kwFilter, sentFilter); }
+    catch (e) { setMsg({ kind: 'err', text: e.message }); }
+    finally { setScanning(false); }
+  };
+
+  const total = counts.pos + counts.neg + counts.neu;
+
+  return (
+    <div className="bs-listen">
+      <div className="bs-inbox__hd">
+        <div className="bs-listen__add">
+          <input className="bs-input" placeholder='Track a phrase… e.g. "Mount Pleasant" or a candidate name'
+            value={phrase} onChange={(e) => setPhrase(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') add(); }} style={{ width: 320 }} />
+          <button className="bs-btn bs-btn--sm" onClick={add} disabled={!phrase.trim()}>Track</button>
+        </div>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={scan} disabled={scanning || keywords.length === 0}>{scanning ? 'Scanning…' : '↻ scan now'}</button>
+      </div>
+
+      {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+
+      <div className="bs-listen__bar">
+        <div className="bs-ob-filters">
+          <button className={'bs-ob-filter' + (kwFilter === '' ? ' is-on' : '')} onClick={() => setKwFilter('')}>All phrases</button>
+          {keywords.map((k) => (
+            <span key={k.id} className={'bs-ob-filter bs-listen__kw' + (kwFilter === k.id ? ' is-on' : '')}>
+              <button className="bs-listen__kw-btn" onClick={() => setKwFilter(kwFilter === k.id ? '' : k.id)}>{k.phrase}</button>
+              <button className="bs-listen__kw-x" onClick={() => remove(k)} title="stop tracking">×</button>
+            </span>
+          ))}
+        </div>
+        {total > 0 && (
+          <div className="bs-listen__sent">
+            {['pos', 'neu', 'neg'].map((s) => (
+              <button key={s} className={'bs-sent-chip bs-sent-chip--' + s + (sentFilter === s ? ' is-on' : '')}
+                onClick={() => setSentFilter(sentFilter === s ? '' : s)}>
+                {SENT[s].label} {total ? Math.round((counts[s] / total) * 100) : 0}%
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {loading ? <p className="bs-muted">Loading…</p>
+        : keywords.length === 0 ? <p className="bs-muted">Track a phrase above — Beacon scans Bluesky (public) and your connected Mastodon instances for live mentions, scores sentiment, and keeps watching every 10 minutes.</p>
+          : items.length === 0 ? <p className="bs-muted">No mentions yet for this filter. Hit ↻ scan now.</p>
+            : <div className="bs-in-list">
+                {items.map((it) => (
+                  <div key={it.id} className={'bs-in-item bs-listen__item bs-listen__item--' + (it.sentiment || 'neu')}>
+                    <div className="bs-in-item__main">
+                      {it.authorAvatar
+                        ? <img className="bs-av" src={it.authorAvatar} alt="" style={{ width: 32, height: 32 }} />
+                        : <div className={'bs-av bs-av--ph bs-av--' + (PLAT[it.platform]?.cls || 'gen')} style={{ width: 32, height: 32 }}>{PLAT[it.platform]?.short}</div>}
+                      <div className="bs-in-item__body">
+                        <div className="bs-in-item__hd">
+                          <b>{it.authorName || it.authorHandle}</b>
+                          <span className="bs-in-item__handle">{it.authorHandle}</span>
+                          <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[it.platform]?.cls || 'gen')} style={{ width: 16, height: 16, fontSize: 8 }}>{PLAT[it.platform]?.short}</span>
+                          <span className={'bs-sent-dot bs-sent-dot--' + (it.sentiment || 'neu')} title={SENT[it.sentiment]?.label || 'neutral'} />
+                          <span className="bs-in-item__time">{timeAgo(it.remoteCreatedAt)}</span>
+                        </div>
+                        <div className="bs-in-item__text">{it.text}</div>
+                        <div className="bs-in-item__actions">
+                          {it.url && <a className="bs-in-item__link" href={it.url} target="_blank" rel="noreferrer">open ↗</a>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+    </div>
+  );
+}

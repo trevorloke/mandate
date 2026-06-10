@@ -466,3 +466,27 @@ export const socialFeeds = sqliteTable('social_feeds', {
   createdById:   text('created_by_id'),
   createdAt:     integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Keyword listening — tracked phrases and the mentions found for them.
+export const socialKeywords = sqliteTable('social_keywords', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  phrase:      text('phrase').notNull(),
+  createdById: text('created_by_id'),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+export const socialListening = sqliteTable('social_listening', {
+  id:              text('id').primaryKey(),
+  workspaceId:     text('workspace_id').notNull(),
+  keywordId:       text('keyword_id'),
+  platform:        text('platform').notNull(),
+  remoteId:        text('remote_id').notNull(),
+  authorHandle:    text('author_handle'),
+  authorName:      text('author_name'),
+  authorAvatar:    text('author_avatar'),
+  text:            text('text'),
+  url:             text('url'),
+  sentiment:       text('sentiment'),               // pos | neg | neu
+  remoteCreatedAt: integer('remote_created_at', { mode: 'timestamp' }),
+  fetchedAt:       integer('fetched_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

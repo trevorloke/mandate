@@ -148,6 +148,17 @@ export const api = {
   socialAddFeed:    (body) => fetchJson('/api/social/feeds', { method: 'POST', body }),
   socialCheckFeed:  (id) => fetchJson(`/api/social/feeds/${id}/check`, { method: 'POST' }),
   socialDeleteFeed: (id) => fetchJson(`/api/social/feeds/${id}`, { method: 'DELETE' }),
+  socialKeywords:      () => fetchJson('/api/social/keywords'),
+  socialAddKeyword:    (phrase) => fetchJson('/api/social/keywords', { method: 'POST', body: { phrase } }),
+  socialDeleteKeyword: (id) => fetchJson(`/api/social/keywords/${id}`, { method: 'DELETE' }),
+  socialListening:     (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.keyword) q.set('keyword', params.keyword);
+    if (params.sentiment) q.set('sentiment', params.sentiment);
+    const s = q.toString();
+    return fetchJson(`/api/social/listening${s ? `?${s}` : ''}`);
+  },
+  socialListeningSync: () => fetchJson('/api/social/listening/sync', { method: 'POST' }),
   socialInbox:        (status, assignee) => {
     const q = new URLSearchParams();
     if (status) q.set('status', status);

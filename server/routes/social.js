@@ -12,8 +12,9 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db, sqlite } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, users, workspaces, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, socialKeywords, socialListening, users, workspaces, auditLog } from '../db/schema.js';
 import { syncFeed } from '../lib/social/feeds.js';
+import { syncListening } from '../lib/social/listening.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -805,6 +806,63 @@ app.delete('/feeds/:id', requireRole('editor'), async (c) => {
   const me = c.get('user');
   await db.delete(socialFeeds).where(and(eq(socialFeeds.id, c.req.param('id')), eq(socialFeeds.workspaceId, me.workspaceId)));
   return c.json({ ok: true });
+});
+
+// ── Keyword listening ──
+app.get('/keywords', async (c) => {
+  const me = c.get('user');
+  const rows = await db.select().from(socialKeywords).where(eq(socialKeywords.workspaceId, me.workspaceId)).orderBy(desc(socialKeywords.createdAt));
+  return c.json({ keywords: rows.map((k) => ({ id: k.id, phrase: k.phrase })) });
+});
+
+app.post('/keywords', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { phrase = '' } = await c.req.json().catch(() => ({}));
+  const p = String(phrase).trim();
+  if (!p) return c.json({ error: 'phrase required' }, 400);
+  if (p.length > 100) return c.json({ error: 'phrase too long' }, 400);
+  const id = newId('kw_');
+  await db.insert(socialKeywords).values({ id, workspaceId: me.workspaceId, phrase: p, createdById: me.id });
+  syncListening(me.workspaceId).catch(() => {}); // first scan in the background
+  return c.json({ ok: true, keyword: { id, phrase: p } });
+});
+
+app.delete('/keywords/:id', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  await db.delete(socialKeywords).where(and(eq(socialKeywords.id, c.req.param('id')), eq(socialKeywords.workspaceId, me.workspaceId)));
+  return c.json({ ok: true });
+});
+
+app.get('/listening', async (c) => {
+  const me = c.get('user');
+  const keywordId = c.req.query('keyword');
+  const sentiment = c.req.query('sentiment');
+  const conds = [eq(socialListening.workspaceId, me.workspaceId)];
+  if (keywordId) conds.push(eq(socialListening.keywordId, keywordId));
+  if (sentiment && ['pos', 'neg', 'neu'].includes(sentiment)) conds.push(eq(socialListening.sentiment, sentiment));
+  const rows = await db.select().from(socialListening)
+    .where(conds.length > 1 ? and(...conds) : conds[0])
+    .orderBy(desc(socialListening.remoteCreatedAt)).limit(200);
+  // Sentiment counts over the whole workspace stream (for the summary strip).
+  const counts = { pos: 0, neg: 0, neu: 0 };
+  try {
+    const all = sqlite.prepare('SELECT sentiment, COUNT(*) n FROM social_listening WHERE workspace_id = ? GROUP BY sentiment').all(me.workspaceId);
+    for (const r of all) if (counts[r.sentiment] != null) counts[r.sentiment] = r.n;
+  } catch { /* counts optional */ }
+  return c.json({
+    items: rows.map((r) => ({
+      id: r.id, keywordId: r.keywordId, platform: r.platform,
+      authorHandle: r.authorHandle, authorName: r.authorName, authorAvatar: r.authorAvatar,
+      text: r.text, url: r.url, sentiment: r.sentiment, remoteCreatedAt: r.remoteCreatedAt,
+    })),
+    counts,
+  });
+});
+
+app.post('/listening/sync', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const added = await syncListening(me.workspaceId);
+  return c.json({ ok: true, added });
 });
 
 export default app;
