@@ -90,6 +90,7 @@ const pubPost = (p) => ({
   id: p.id, groupId: p.groupId, accountId: p.accountId, platform: p.platform,
   body: p.body, status: p.status, scheduledAt: p.scheduledAt, publishedAt: p.publishedAt,
   remoteUrl: p.remoteUrl, error: p.error, createdAt: p.createdAt,
+  attempts: p.attempts, nextRetryAt: p.nextRetryAt,
   media: safeParse(p.mediaJson) || [], metrics: safeParse(p.metricsJson), metricsAt: p.metricsAt,
 });
 

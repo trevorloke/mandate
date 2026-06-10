@@ -28,6 +28,7 @@ function getClaimStmt() {
          SELECT id FROM social_posts
           WHERE (status = 'scheduled'  AND scheduled_at IS NOT NULL AND scheduled_at <= ?)
              OR (status = 'publishing' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
+             OR (status = 'failed'     AND next_retry_at IS NOT NULL AND next_retry_at <= ?)
           ORDER BY scheduled_at ASC
           LIMIT ?
        )
@@ -37,12 +38,14 @@ function getClaimStmt() {
   return claimStmt;
 }
 
+export async function runPublishTickOnce() { return tick(); }
+
 async function tick() {
   const now = Math.floor(Date.now() / 1000);
   const lease = now + Math.floor(LEASE_MS / 1000);
   let claimed = [];
   try {
-    claimed = getClaimStmt().all(WORKER_ID, lease, now, now, BATCH);
+    claimed = getClaimStmt().all(WORKER_ID, lease, now, now, now, BATCH);
   } catch (e) {
     console.warn('[social-worker] claim failed:', e.message);
     return;

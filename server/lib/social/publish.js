@@ -13,13 +13,21 @@ import { emitWebhook } from '../webhooks.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
 
+const MAX_ATTEMPTS = 5;
+// Errors that retrying cannot fix — bad input or a dead/missing account.
+const PERMANENT_RE = /characters|not connected|was removed|reconnect|requires an image|not supported|needs developer-app|invalid value/i;
+
 async function markFailed(post, message) {
   const error = String(message || 'publish failed').slice(0, 500);
+  const attempts = (post.attempts || 0) + 1;
+  // Transient failures get an exponential-backoff retry (2,4,8,16 min).
+  const retryable = attempts < MAX_ATTEMPTS && !PERMANENT_RE.test(error);
+  const nextRetryAt = retryable ? new Date(Date.now() + Math.pow(2, attempts) * 60_000) : null;
   await db.update(socialPosts).set({
-    status: 'failed', error, attempts: (post.attempts || 0) + 1, updatedAt: new Date(),
+    status: 'failed', error, attempts, nextRetryAt, workerId: null, leaseExpiresAt: null, updatedAt: new Date(),
   }).where(eq(socialPosts.id, post.id));
-  try { broadcast(post.workspaceId, 'social.failed', { id: post.id, error }); } catch {}
-  return { ok: false, error };
+  try { broadcast(post.workspaceId, 'social.failed', { id: post.id, error, willRetry: retryable }); } catch {}
+  return { ok: false, error, willRetry: retryable };
 }
 
 // Publish a single social_posts row. Idempotent enough to be called from a
@@ -62,7 +70,7 @@ export async function publishPost(postId) {
     await db.update(socialPosts).set({
       status: 'published', publishedAt: new Date(),
       remoteId: res.remoteId || null, remoteUrl: res.url || null,
-      error: null, workerId: null, leaseExpiresAt: null,
+      error: null, workerId: null, leaseExpiresAt: null, nextRetryAt: null,
       attempts: (post.attempts || 0) + 1, updatedAt: new Date(),
     }).where(eq(socialPosts.id, post.id));
 

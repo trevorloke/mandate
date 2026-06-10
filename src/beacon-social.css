@@ -302,3 +302,6 @@
 /* Audience growth */
 .bs-aud-up { color: #2a7d4f; font-family: var(--font-mono); }
 .bs-aud-down { color: #b8334a; font-family: var(--font-mono); }
+
+/* Auto-retry note */
+.bs-ob-retry { font-family: var(--font-mono); font-size: 10px; color: #8a5a2a; }

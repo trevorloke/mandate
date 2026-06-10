@@ -390,6 +390,7 @@ function bootstrapTables() {
       metrics_json     TEXT,
       metrics_at       INTEGER,
       thread_json      TEXT,
+      next_retry_at    INTEGER,
       attempts         INTEGER NOT NULL DEFAULT 0,
       worker_id        TEXT,
       lease_expires_at INTEGER,
@@ -564,6 +565,7 @@ function bootstrapTables() {
   alterIfMissing('social_posts', 'metrics_json', 'TEXT');
   alterIfMissing('social_posts', 'metrics_at', 'INTEGER');
   alterIfMissing('social_posts', 'thread_json', 'TEXT');
+  alterIfMissing('social_posts', 'next_retry_at', 'INTEGER');
   alterIfMissing('social_inbox', 'assigned_to_id', 'TEXT');
   alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
   alterIfMissing('social_links', 'utm', 'TEXT');

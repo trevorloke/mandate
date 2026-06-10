@@ -598,6 +598,7 @@ export function BOutbox() {
                   {t.remoteUrl && <a href={t.remoteUrl} target="_blank" rel="noreferrer">view ↗</a>}
                   {engagement(t.metrics) && <span className="bs-ob-metrics">{engagement(t.metrics)}</span>}
                   {t.error && <span className="bs-ob-target__err" title={t.error}>{t.error}</span>}
+                  {t.status === 'failed' && t.nextRetryAt && <span className="bs-ob-retry" title={'attempt ' + (t.attempts || 1) + ' of 5'}>auto-retry queued</span>}
                   {t.status === 'failed' && <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={() => retry(t.id)}>retry</button>}
                 </div>
               ))}
