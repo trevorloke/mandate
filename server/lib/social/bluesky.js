@@ -277,3 +277,13 @@ export async function publishThread(account, segments, opts = {}) {
   }
   return { remoteId: firstRemote, url: firstUrl, credentials: creds };
 }
+
+// Current follower count (for audience growth tracking).
+export async function audience(account) {
+  let creds = account.credentials;
+  const get = (token) => xrpc(creds.service, `app.bsky.actor.getProfile?actor=${encodeURIComponent(creds.did)}`, { token });
+  let r = await get(creds.accessJwt);
+  if (r.status === 401) { creds = await refresh(creds); r = await get(creds.accessJwt); }
+  if (!r.ok) throw new Error('Bluesky profile fetch failed.');
+  return { followers: r.json.followersCount || 0, credentials: creds };
+}

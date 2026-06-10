@@ -6,6 +6,8 @@ import { socialAccounts, socialPosts } from '../../db/schema.js';
 import { getProvider } from './index.js';
 import { getApp } from './oauth.js';
 import { encryptJson, decryptJson } from '../crypto.js';
+import { randomBytes } from 'crypto';
+import { sqlite } from '../../db/index.js';
 
 export async function refreshMetrics(postId) {
   const post = (await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1))[0];
@@ -25,8 +27,17 @@ export async function refreshMetrics(postId) {
       await db.update(socialAccounts).set({ credentials: encryptJson(res.credentials), updatedAt: new Date() })
         .where(eq(socialAccounts.id, account.id));
     }
-    await db.update(socialPosts).set({ metricsJson: JSON.stringify(res.metrics || {}), metricsAt: new Date(), updatedAt: new Date() })
+    const metricsJson = JSON.stringify(res.metrics || {});
+    await db.update(socialPosts).set({ metricsJson, metricsAt: new Date(), updatedAt: new Date() })
       .where(eq(socialPosts.id, post.id));
+    // Append to the time series when the numbers actually moved (always keep
+    // the first snapshot so velocity has a baseline).
+    try {
+      if (post.metricsJson !== metricsJson || !post.metricsAt) {
+        sqlite.prepare('INSERT INTO social_metrics_history (id, workspace_id, post_id, metrics_json) VALUES (?,?,?,?)')
+          .run('mh_' + randomBytes(12).toString('hex'), post.workspaceId, post.id, metricsJson);
+      }
+    } catch { /* history is best-effort */ }
     return { ok: true, metrics: res.metrics };
   } catch (e) {
     return { ok: false, error: e.message };

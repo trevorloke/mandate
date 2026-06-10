@@ -180,3 +180,13 @@ export async function reply(account, item, text) {
   if (!r.ok) throw new Error(j?.error?.message || `Facebook reply failed (${r.status}).`);
   return { remoteId: j.id };
 }
+
+export async function audience(account) {
+  const creds = account.credentials;
+  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
+  if (!page?.token) throw new Error('Missing Page token.');
+  const r = await fetch(`${GRAPH}/${creds.pageId}?fields=fan_count&access_token=${encodeURIComponent(page.token)}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Facebook page fetch failed.');
+  return { followers: j.fan_count || 0 };
+}

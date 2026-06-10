@@ -490,3 +490,20 @@ export const socialListening = sqliteTable('social_listening', {
   remoteCreatedAt: integer('remote_created_at', { mode: 'timestamp' }),
   fetchedAt:       integer('fetched_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Time-series: post metrics snapshots + per-account daily follower counts.
+export const socialMetricsHistory = sqliteTable('social_metrics_history', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  postId:      text('post_id').notNull(),
+  metricsJson: text('metrics_json').notNull(),
+  capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+export const socialAudience = sqliteTable('social_audience', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull(),
+  accountId:   text('account_id').notNull(),
+  followers:   integer('followers').notNull(),
+  day:         text('day').notNull(),
+  capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

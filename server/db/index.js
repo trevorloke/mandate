@@ -539,6 +539,26 @@ function bootstrapTables() {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_social_listening_unique ON social_listening(workspace_id, platform, remote_id);
     CREATE INDEX IF NOT EXISTS idx_social_listening_list ON social_listening(workspace_id, remote_created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS social_metrics_history (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      post_id      TEXT NOT NULL,
+      metrics_json TEXT NOT NULL,
+      captured_at  INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_metrics_history ON social_metrics_history(post_id, captured_at);
+
+    CREATE TABLE IF NOT EXISTS social_audience (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      account_id   TEXT NOT NULL,
+      followers    INTEGER NOT NULL,
+      day          TEXT NOT NULL,
+      captured_at  INTEGER DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_social_audience_unique ON social_audience(account_id, day);
+    CREATE INDEX IF NOT EXISTS idx_social_audience_ws ON social_audience(workspace_id, day);
   `);
   // Columns added after social_posts shipped.
   alterIfMissing('social_posts', 'metrics_json', 'TEXT');

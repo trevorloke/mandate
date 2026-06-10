@@ -94,3 +94,11 @@ export async function reply(account, item, text) {
   if (!r.ok) throw new Error(j?.error?.message || `Instagram reply failed (${r.status}).`);
   return { remoteId: j.id };
 }
+
+export async function audience(account) {
+  const creds = account.credentials;
+  const r = await fetch(`${GRAPH}/${creds.igUserId}?fields=followers_count&access_token=${encodeURIComponent(creds.pageToken)}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Instagram profile fetch failed.');
+  return { followers: j.followers_count || 0 };
+}

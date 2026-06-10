@@ -811,6 +811,25 @@ export function BPerformance() {
         </div>
       )}
 
+      {(data.audience || []).length > 0 && (
+        <div className="bs-perf__best">
+          <h4 className="bs-h">Audience growth <em className="bs-field__hint">· followers, last 30 days</em></h4>
+          <table className="bs-perf__table">
+            <thead><tr><th>Account</th><th>Followers</th><th>30-day</th><th>Trend</th></tr></thead>
+            <tbody>
+              {data.audience.map((a) => (
+                <tr key={a.accountId}>
+                  <td><span className={'bs-prov__badge bs-prov__badge--' + (PLAT[a.platform]?.cls || 'gen')}>{PLAT[a.platform]?.short}</span> {a.handle}</td>
+                  <td>{fmtN(a.followers)}</td>
+                  <td className={a.delta > 0 ? 'bs-aud-up' : a.delta < 0 ? 'bs-aud-down' : ''}>{a.delta > 0 ? '+' : ''}{fmtN(a.delta)}</td>
+                  <td><Sparkline series={a.series} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {links.length > 0 && (
         <div className="bs-perf__best">
           <h4 className="bs-h">Tracked links</h4>

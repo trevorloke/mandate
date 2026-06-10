@@ -207,3 +207,12 @@ export async function publishThread(account, segments, opts = {}) {
   const user = creds.username;
   return { remoteId: firstId, url: firstId && user ? `https://x.com/${user}/status/${firstId}` : null, credentials: creds };
 }
+
+export async function audience(account) {
+  let creds = account.credentials;
+  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  const r = await fetch('https://api.twitter.com/2/users/me?user.fields=public_metrics', { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('X profile fetch failed.');
+  return { followers: j.data?.public_metrics?.followers_count || 0, credentials: creds };
+}

@@ -298,3 +298,7 @@
 .bs-listen__item--pos { border-left: 3px solid #2a7d4f; }
 .bs-listen__item--neg { border-left: 3px solid #b8334a; }
 .bs-listen__item--neu { border-left: 3px solid var(--paper-3, #d9d3bc); }
+
+/* Audience growth */
+.bs-aud-up { color: #2a7d4f; font-family: var(--font-mono); }
+.bs-aud-down { color: #b8334a; font-family: var(--font-mono); }

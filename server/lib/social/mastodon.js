@@ -135,3 +135,11 @@ export async function publishThread(account, segments, opts = {}) {
   }
   return { remoteId: String(firstId), url: firstUrl };
 }
+
+export async function audience(account) {
+  const creds = account.credentials;
+  const r = await fetch(`${creds.instanceUrl}/api/v1/accounts/verify_credentials`, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Mastodon profile fetch failed.');
+  return { followers: j.followers_count || 0 };
+}

@@ -455,7 +455,28 @@ app.get('/analytics', async (c) => {
     .sort((a, b) => b.engagement - a.engagement);
   const top = scored.filter((s) => s.engagement > 0).sort((a, b) => b.engagement - a.engagement).slice(0, 5);
 
-  return c.json({ totals, byPlatform, top, postCount: rows.length });
+  // Audience growth: latest follower count + 30-day series per account.
+  const audience = [];
+  try {
+    const accts = await db.select().from(socialAccounts).where(eq(socialAccounts.workspaceId, me.workspaceId));
+    const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+    const snapRows = sqlite.prepare(
+      'SELECT account_id, day, followers FROM social_audience WHERE workspace_id = ? AND day >= ? ORDER BY day'
+    ).all(me.workspaceId, since);
+    const byAcct = {};
+    for (const r of snapRows) (byAcct[r.account_id] || (byAcct[r.account_id] = {}))[r.day] = r.followers;
+    for (const a of accts) {
+      const series = byAcct[a.id] || {};
+      const days = Object.keys(series).sort();
+      if (!days.length) continue;
+      const latest = series[days[days.length - 1]];
+      const first = series[days[0]];
+      audience.push({ accountId: a.id, platform: a.platform, handle: a.handle, followers: latest, delta: latest - first, series });
+    }
+    audience.sort((x, y) => y.followers - x.followers);
+  } catch { /* audience optional */ }
+
+  return c.json({ totals, byPlatform, top, postCount: rows.length, audience });
 });
 
 // Map the workspace's tz abbreviation to an IANA zone for DST-aware bucketing.
@@ -503,6 +524,15 @@ app.get('/best-times', async (c) => {
   const grid = [...buckets.values()].map((b) => ({ day: b.day, hour: b.hour, avg: b.sum / b.n, n: b.n }));
   const suggestions = grid.slice().sort((a, b) => b.avg - a.avg).slice(0, 5);
   return c.json({ suggestions, grid, samples, tz });
+});
+
+// Per-post metrics history (engagement over time).
+app.get('/posts/:id/history', async (c) => {
+  const me = c.get('user');
+  const rows = sqlite.prepare(
+    'SELECT metrics_json, captured_at FROM social_metrics_history WHERE workspace_id = ? AND post_id = ? ORDER BY captured_at'
+  ).all(me.workspaceId, c.req.param('id'));
+  return c.json({ history: rows.map((r) => ({ metrics: safeParse(r.metrics_json) || {}, capturedAt: r.captured_at })) });
 });
 
 // Refresh engagement metrics for all published posts in a compose group.
