@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test": "node --test server/test/*.test.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.0",

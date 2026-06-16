@@ -27,13 +27,20 @@ function insertStmt() {
 }
 
 // ── Tiny sentiment lexicon (fast, offline; AI-grade scoring can layer on later)
-const POS = ['love', 'great', 'good', 'amazing', 'excellent', 'win', 'wins', 'winning', 'best', 'support', 'proud', 'hope', 'thank', 'thanks', 'congrats', 'congratulations', 'happy', 'excited', 'inspiring', 'brilliant', 'fantastic', 'incredible', 'yes', '❤', '🎉', '👏'];
-const NEG = ['hate', 'bad', 'terrible', 'awful', 'worst', 'lie', 'lies', 'liar', 'corrupt', 'scandal', 'fail', 'fails', 'failed', 'failure', 'angry', 'disgust', 'disgrace', 'shame', 'shameful', 'wrong', 'broken', 'disaster', 'no', 'never', '👎'];
+// Word terms match on whole-word boundaries (so 'no' doesn't fire inside
+// 'noon'/'now'); symbol terms match as substrings.
+const POS_WORDS = ['love', 'great', 'good', 'amazing', 'excellent', 'win', 'wins', 'winning', 'best', 'support', 'proud', 'hope', 'thank', 'thanks', 'congrats', 'congratulations', 'happy', 'excited', 'inspiring', 'brilliant', 'fantastic', 'incredible', 'yes'];
+const NEG_WORDS = ['hate', 'bad', 'terrible', 'awful', 'worst', 'lie', 'lies', 'liar', 'corrupt', 'scandal', 'fail', 'fails', 'failed', 'failure', 'angry', 'disgust', 'disgrace', 'shame', 'shameful', 'wrong', 'broken', 'disaster', 'no', 'never'];
+const POS_SYM = ['❤', '🎉', '👏', '🙌', '💪'];
+const NEG_SYM = ['👎', '😡', '🤬'];
 export function scoreSentiment(text) {
-  const t = String(text || '').toLowerCase();
+  const raw = String(text || '');
+  const words = new Set((raw.toLowerCase().match(/[a-z']+/g) || []));
   let s = 0;
-  for (const w of POS) if (t.includes(w)) s++;
-  for (const w of NEG) if (t.includes(w)) s--;
+  for (const w of POS_WORDS) if (words.has(w)) s++;
+  for (const w of NEG_WORDS) if (words.has(w)) s--;
+  for (const w of POS_SYM) if (raw.includes(w)) s++;
+  for (const w of NEG_SYM) if (raw.includes(w)) s--;
   return s > 0 ? 'pos' : s < 0 ? 'neg' : 'neu';
 }
 

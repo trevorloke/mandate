@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Build (frontend)
+        run: npm run build
+      - name: Test (server engine)
+        run: npm test
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true   # repo has pre-existing lint debt outside the social engine; non-blocking for now
