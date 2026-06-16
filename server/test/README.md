@@ -21,6 +21,7 @@ Coverage:
 | `retry.test.js`    | transient → exponential backoff → reclaim → heal; permanent errors never retry |
 | `metrics.test.js`  | change-only metrics history, one audience snapshot per account per day |
 | `inbox.test.js`    | mention ingest + dedupe, threaded reply marks item replied |
+| `integration.test.js` | boots the real server; auth gate, signup/session, CSRF, keywords, queue slots, short-link redirect + click tracking, clean connect failure |
 
 What these tests do **not** cover (needs real credentials / a browser):
 live platform API calls, the OAuth redirect dance, and end-to-end UI flows.
