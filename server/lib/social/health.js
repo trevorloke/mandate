@@ -3,7 +3,7 @@
 // route and a periodic worker pass.
 import { eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { socialAccounts } from '../../db/schema.js';
+import { socialAccounts, notifications } from '../../db/schema.js';
 import { getProvider } from './index.js';
 import { getApp } from './oauth.js';
 import { encryptJson, decryptJson } from '../crypto.js';
@@ -41,6 +41,15 @@ export async function checkAccountHealth(accountId) {
     await db.update(socialAccounts).set({
       status: 'error', lastError: String(e.message).slice(0, 300), lastVerifiedAt: new Date(), updatedAt: new Date(),
     }).where(eq(socialAccounts.id, accountId));
+    // Notify once, only on the connected → error transition (avoids repeat spam).
+    if (account.status === 'connected' && account.createdById) {
+      try {
+        await db.insert(notifications).values({
+          id: 'n_' + randomBytes(12).toString('hex'), userId: account.createdById, kind: 'social.account_error',
+          title: 'Social account needs attention', body: `${account.handle || account.platform}: ${String(e.message).slice(0, 200)}`, link: '/',
+        });
+      } catch { /* best-effort */ }
+    }
     return { ok: false, error: e.message };
   }
 }

@@ -2,7 +2,7 @@
 // and the scheduled-post worker, so the publish path is identical either way.
 import { eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { socialAccounts, socialPosts, auditLog } from '../../db/schema.js';
+import { socialAccounts, socialPosts, auditLog, notifications } from '../../db/schema.js';
 import { randomBytes } from 'crypto';
 import { getProvider } from './index.js';
 import { getApp } from './oauth.js';
@@ -27,6 +27,15 @@ async function markFailed(post, message) {
     status: 'failed', error, attempts, nextRetryAt, workerId: null, leaseExpiresAt: null, updatedAt: new Date(),
   }).where(eq(socialPosts.id, post.id));
   try { broadcast(post.workspaceId, 'social.failed', { id: post.id, error, willRetry: retryable }); } catch {}
+  // No more retries → tell the author so it doesn't fail silently.
+  if (!retryable && post.createdById) {
+    try {
+      await db.insert(notifications).values({
+        id: newId('n_'), userId: post.createdById, kind: 'social.failed',
+        title: 'Post failed to publish', body: `${post.platform}: ${error}`.slice(0, 300), link: '/',
+      });
+    } catch { /* notification is best-effort */ }
+  }
   return { ok: false, error, willRetry: retryable };
 }
 
