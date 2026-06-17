@@ -7,6 +7,7 @@ import { randomBytes } from 'crypto';
 import { getProvider } from './index.js';
 import { getApp } from './oauth.js';
 import { loadMediaForPost } from './media.js';
+import { take, limitFor } from './ratelimit.js';
 import { encryptJson, decryptJson } from '../crypto.js';
 import { broadcast } from '../realtime.js';
 import { emitWebhook } from '../webhooks.js';
@@ -54,6 +55,22 @@ export async function publishPost(postId) {
 
   const prov = getProvider(post.platform);
   if (!prov?.adapter?.publish) return markFailed(post, `platform "${post.platform}" is not supported`);
+
+  // Rate-limit budget: if the platform's burst is spent, DEFER (re-queue) rather
+  // than fail — the worker reclaims it once scheduled_at comes due. Not a failure,
+  // so attempts are untouched.
+  const lim = limitFor(post.platform);
+  if (lim) {
+    const gate = take(`${post.workspaceId}:${post.platform}`, lim);
+    if (!gate.ok) {
+      await db.update(socialPosts).set({
+        status: 'scheduled', scheduledAt: new Date(Date.now() + gate.retryAfterMs),
+        workerId: null, leaseExpiresAt: null, updatedAt: new Date(),
+      }).where(eq(socialPosts.id, post.id));
+      try { broadcast(post.workspaceId, 'social.deferred', { id: post.id, retryAfterMs: gate.retryAfterMs }); } catch {}
+      return { ok: false, deferred: true, error: 'rate limit — queued for retry' };
+    }
+  }
 
   try {
     const creds = decryptJson(account.credentials);
