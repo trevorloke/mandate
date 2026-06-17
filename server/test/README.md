@@ -21,6 +21,7 @@ Coverage:
 | `retry.test.js`    | transient → exponential backoff → reclaim → heal; permanent errors never retry |
 | `metrics.test.js`  | change-only metrics history, one audience snapshot per account per day |
 | `inbox.test.js`    | mention ingest + dedupe, threaded reply marks item replied |
+| `routes.test.js`   | in-process router via app.request + forged session: publish-now, schedule, draft→submit→approve→published, reject, bulk, role gate (403), bad session (401) |
 | `integration.test.js` | boots the real server; auth gate, signup/session, CSRF, keywords, queue slots, short-link redirect + click tracking, clean connect failure |
 
 What these tests do **not** cover (needs real credentials / a browser):
