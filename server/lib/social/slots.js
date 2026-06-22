@@ -48,10 +48,16 @@ export function upcomingSlotTimes(slots, tzAbbr, after, count = 1) {
   const wdFmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' });
   const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   const out = [];
+  const seenDays = new Set();
   // Walk day by day (up to 15 days covers any weekly pattern) in the target tz.
+  // Fixed 24h steps can land twice on the same local date across a 25h DST "fall
+  // back" day, so skip any local date we've already processed — otherwise that
+  // day's slots would be emitted twice.
   for (let d = 0; d < 15 && out.length < count; d++) {
     const probe = new Date(after.getTime() + d * 86400_000);
     const ymd = dayFmt.format(probe);              // YYYY-MM-DD in tz
+    if (seenDays.has(ymd)) continue;
+    seenDays.add(ymd);
     const dow = WD[wdFmt.format(probe)] ?? 0;
     const todays = slots.filter((s) => s.day === dow).sort((a, b) => a.time.localeCompare(b.time));
     for (const s of todays) {

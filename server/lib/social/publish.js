@@ -1,7 +1,7 @@
 // Shared post-publishing executor. Used by BOTH the inline "publish now" route
 // and the scheduled-post worker, so the publish path is identical either way.
 import { eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { db, sqlite } from '../../db/index.js';
 import { socialAccounts, socialPosts, auditLog, notifications } from '../../db/schema.js';
 import { randomBytes } from 'crypto';
 import { getProvider } from './index.js';
@@ -117,4 +117,26 @@ export async function publishPost(postId) {
     }
     return markFailed(post, e.message);
   }
+}
+
+// Inline publish for the interactive routes (compose "publish now", approve,
+// force-publish, retry). The background worker concurrently claims due rows with
+// an atomic `UPDATE … RETURNING`; if an inline path simply called publishPost()
+// the worker could grab the SAME row in the window between the route's status
+// write and the publish, double-posting to the real platform. So we claim the
+// row atomically here too — flipping it to 'publishing' with a lease — before
+// publishing. Only one of {inline, worker} can win the claim; the loser no-ops.
+export async function publishInline(postId) {
+  const lease = Math.floor(Date.now() / 1000) + 120;
+  const claimed = sqlite.prepare(
+    "UPDATE social_posts SET status='publishing', worker_id='inline', lease_expires_at=?, updated_at=unixepoch() " +
+    "WHERE id=? AND status NOT IN ('publishing','published') RETURNING id"
+  ).get(lease, postId);
+  if (!claimed) {
+    // Lost the race (worker is publishing it) or it's already done.
+    const cur = sqlite.prepare('SELECT status, remote_url AS url FROM social_posts WHERE id=?').get(postId);
+    if (cur?.status === 'published') return { ok: true, url: cur.url };
+    return { ok: false, skipped: true, error: 'already in progress' };
+  }
+  return publishPost(postId);
 }

@@ -20,7 +20,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
 import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.js';
-import { publishPost } from '../lib/social/publish.js';
+import { publishInline } from '../lib/social/publish.js';
 import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
 import { generateCaption, aiConfigured } from '../lib/social/assist.js';
 import { refreshMetrics } from '../lib/social/metrics.js';
@@ -301,7 +301,10 @@ app.post('/posts', requireRole('editor'), async (c) => {
   // Status by intent. draft/pending keep any `when` so it can be scheduled on
   // publish/approval; publishNow is marked scheduled-now and published inline.
   let status;
-  if (publishNow) status = 'scheduled';
+  // publishNow is inserted as a draft (which the worker never claims) and then
+  // published inline below — this closes the insert→publish window where the
+  // worker could otherwise claim a 'scheduled,now' row and double-post.
+  if (publishNow) status = 'draft';
   else if (submitForApproval) status = 'pending';
   else if (saveDraft) status = 'draft';
   else if (when) status = 'scheduled';
@@ -310,7 +313,7 @@ app.post('/posts', requireRole('editor'), async (c) => {
   const threadJson = isThread ? JSON.stringify(threadSegs) : null;
   const rows = accts.map((a) => ({
     id: newId('sp_'), workspaceId: me.workspaceId, groupId, accountId: a.id, platform: a.platform,
-    body: text, mediaJson, threadJson, status, scheduledAt: publishNow ? new Date() : when, createdById: me.id,
+    body: text, mediaJson, threadJson, status, scheduledAt: publishNow ? null : when, createdById: me.id,
   }));
   await db.insert(socialPosts).values(rows);
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.create',
@@ -320,11 +323,11 @@ app.post('/posts', requireRole('editor'), async (c) => {
   if (publishNow) {
     results = [];
     for (const r of rows) {
-      const res = await publishPost(r.id);
+      const res = await publishInline(r.id);
       results.push({ id: r.id, platform: r.platform, ...res });
     }
   }
-  try { broadcast(me.workspaceId, 'social.post', { groupId, action: status }); } catch {}
+  try { broadcast(me.workspaceId, 'social.post', { groupId, action: publishNow ? 'published' : status }); } catch {}
 
   const fresh = await db.select().from(socialPosts).where(eq(socialPosts.groupId, groupId));
   return c.json({ ok: true, groupId, posts: fresh.map(pubPost), results });
@@ -393,8 +396,7 @@ app.post('/posts/:groupId/approve', requireRole('admin'), async (c) => {
     if (future) {
       await db.update(socialPosts).set({ status: 'scheduled', updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
     } else {
-      await db.update(socialPosts).set({ status: 'scheduled', scheduledAt: new Date(), updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
-      const res = await publishPost(r.id);
+      const res = await publishInline(r.id);
       results.push({ id: r.id, platform: r.platform, ...res });
     }
   }
@@ -428,8 +430,7 @@ app.post('/posts/:groupId/publish', requireRole('editor'), async (c) => {
   const sendable = rows.filter((r) => ['draft', 'pending', 'rejected', 'scheduled', 'failed'].includes(r.status));
   const results = [];
   for (const r of sendable) {
-    await db.update(socialPosts).set({ status: 'scheduled', scheduledAt: new Date(), error: null, updatedAt: new Date() }).where(eq(socialPosts.id, r.id));
-    const res = await publishPost(r.id);
+    const res = await publishInline(r.id);
     results.push({ id: r.id, platform: r.platform, ...res });
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.publish', target: groupId });
@@ -565,7 +566,7 @@ app.post('/posts/:id/retry', requireRole('editor'), async (c) => {
     .where(and(eq(socialPosts.id, id), eq(socialPosts.workspaceId, me.workspaceId))).limit(1))[0];
   if (!row) return c.json({ error: 'not found' }, 404);
   if (!['failed', 'canceled'].includes(row.status)) return c.json({ error: 'only failed/canceled posts can be retried' }, 400);
-  const res = await publishPost(id);
+  const res = await publishInline(id);
   const fresh = (await db.select().from(socialPosts).where(eq(socialPosts.id, id)).limit(1))[0];
   return c.json({ ok: res.ok, result: res, post: pubPost(fresh) });
 });

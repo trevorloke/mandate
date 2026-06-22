@@ -59,6 +59,11 @@ export async function syncFeed(feedId) {
     ? await db.select().from(socialAccounts).where(and(eq(socialAccounts.workspaceId, feed.workspaceId), inArray(socialAccounts.id, accountIds)))
     : [];
 
+  // Advance the cursor only to the OLDEST item we actually import this run. If a
+  // feed has more new items than the per-run cap, the remainder is drained over
+  // subsequent runs instead of being skipped (jumping to items[0] lost them).
+  const nextCursor = newItems.length ? newItems[newItems.length - 1].guid : feed.lastItemGuid;
+
   let created = 0;
   for (const it of newItems.reverse()) { // oldest first so drafts read chronologically
     const body = `${it.title}${it.link ? `\n${it.link}` : ''}`;
@@ -66,7 +71,7 @@ export async function syncFeed(feedId) {
     const rows = accts.map((a) => ({ id: newId('sp_'), workspaceId: feed.workspaceId, groupId, accountId: a.id, platform: a.platform, body, status: 'draft', createdById: feed.createdById }));
     if (rows.length) { await db.insert(socialPosts).values(rows); created += rows.length; }
   }
-  await db.update(socialFeeds).set({ lastItemGuid: items[0]?.guid || feed.lastItemGuid, lastCheckedAt: new Date(), lastError: null }).where(eq(socialFeeds.id, feedId));
+  await db.update(socialFeeds).set({ lastItemGuid: nextCursor, lastCheckedAt: new Date(), lastError: null }).where(eq(socialFeeds.id, feedId));
   if (created) { try { broadcast(feed.workspaceId, 'social.feed', { feedId, created }); } catch { /* ignore */ } }
   return created;
 }
