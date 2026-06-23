@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db, sqlite } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, socialKeywords, socialListening, users, workspaces, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, socialKeywords, socialListening, users, workspaces, auditLog, notifications } from '../db/schema.js';
 import { syncFeed } from '../lib/social/feeds.js';
 import { syncListening } from '../lib/social/listening.js';
 import { getWorkspaceSlots, setWorkspaceSlots, nextQueueTime } from '../lib/social/slots.js';
@@ -39,6 +39,23 @@ const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {
 async function getWsSettings(workspaceId) {
   const ws = (await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
   return { ws, settings: safeJson(ws?.settings) };
+}
+
+// ── Approval notifications (best-effort) ──
+async function notifyApprovers(workspaceId, exceptUserId, title, body) {
+  try {
+    const approvers = await db.select().from(users)
+      .where(and(eq(users.workspaceId, workspaceId), inArray(users.role, ['admin', 'super_admin'])));
+    for (const u of approvers) {
+      if (u.id === exceptUserId) continue;
+      await db.insert(notifications).values({ id: newId('n_'), userId: u.id, kind: 'social.approval', title, body: body ? String(body).slice(0, 300) : null, link: '/' });
+    }
+  } catch { /* notifications are best-effort */ }
+}
+async function notifyUsers(userIds, kind, title, body) {
+  for (const uid of new Set([...userIds].filter(Boolean))) {
+    try { await db.insert(notifications).values({ id: newId('n_'), userId: uid, kind, title, body: body ? String(body).slice(0, 300) : null, link: '/' }); } catch { /* best-effort */ }
+  }
 }
 
 const app = new Hono();
@@ -365,6 +382,7 @@ app.post('/posts', requireRole('editor'), async (c) => {
     }
   }
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: publishNow ? 'published' : status }); } catch {}
+  if (submitForApproval) await notifyApprovers(me.workspaceId, me.id, `${me.name || 'A teammate'} submitted a post for approval`, text);
 
   const fresh = await db.select().from(socialPosts).where(eq(socialPosts.groupId, groupId));
   return c.json({ ok: true, groupId, posts: fresh.map(pubPost), results });
@@ -417,6 +435,7 @@ app.post('/posts/:groupId/submit', requireRole('editor'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.submit', target: groupId });
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'pending' }); } catch {}
+  if (targetable.length) await notifyApprovers(me.workspaceId, me.id, `${me.name || 'A teammate'} submitted a post for approval`, targetable[0].body);
   return c.json({ ok: true, submitted: targetable.length });
 });
 
@@ -439,6 +458,7 @@ app.post('/posts/:groupId/approve', requireRole('admin'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.approve', target: groupId, meta: JSON.stringify({ count: pending.length }) });
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'approved' }); } catch {}
+  if (pending.length) await notifyUsers(pending.map((r) => r.createdById).filter((id) => id !== me.id), 'social.approved', 'Your post was approved', pending[0].body);
   return c.json({ ok: true, approved: pending.length, results: results.length ? results : null });
 });
 
@@ -455,6 +475,7 @@ app.post('/posts/:groupId/reject', requireRole('admin'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.reject', target: groupId });
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'rejected' }); } catch {}
+  if (pending.length) await notifyUsers(pending.map((r) => r.createdById).filter((id) => id !== me.id), 'social.rejected', 'Your post was rejected', reason || 'No reason given');
   return c.json({ ok: true, rejected: pending.length });
 });
 
