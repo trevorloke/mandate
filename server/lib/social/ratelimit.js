@@ -37,3 +37,13 @@ export function take(key, { capacity = 30, refillPerMin = 30 } = {}, now = Date.
   const retryAfterMs = refillPerMin > 0 ? Math.ceil((needed / refillPerMin) * 60_000) : 60_000;
   return { ok: false, retryAfterMs };
 }
+
+// Read the current budget for a key WITHOUT consuming a token (for /status).
+// Mirrors take()'s refill math so the reported figure matches what take() would see.
+export function peek(key, { capacity = 30, refillPerMin = 30 } = {}, now = Date.now()) {
+  const b = buckets.get(key);
+  if (!b) return { tokens: capacity, capacity };
+  const elapsedMin = Math.max(0, (now - b.last) / 60_000);
+  const tokens = Math.min(capacity, b.tokens + elapsedMin * refillPerMin);
+  return { tokens, capacity };
+}

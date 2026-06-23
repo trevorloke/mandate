@@ -309,3 +309,35 @@
 /* Queue slots editor */
 .bs-slots__add { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .bs-slots__list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; }
+
+/* ── System health (observability) ─────────────────────────────────── */
+.bs-health { padding: 4px 2px; }
+.bs-health__banner {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--rule, #c9c3aa); border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 18px; font-size: 14px;
+}
+.bs-health__banner--ok   { background: #e7efe0; border-color: #a9c39a; color: #355a2a; }
+.bs-health__banner--warn { background: #f7efda; border-color: #d8c184; color: #7a5c12; }
+.bs-health__banner--down { background: #f7e3e2; border-color: #d9a39c; color: #8b2418; }
+.bs-health__dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px rgba(0,0,0,0.06); }
+.bs-health__kpi--warn { border-color: #d9a39c; background: #f9ece9; }
+.bs-health__kpi--warn .bs-perf__kpi-val { color: #8b2418; }
+
+.bs-health__pill {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 10px; border: 1px solid transparent;
+}
+.bs-health__pill--ok      { background: #e7efe0; color: #355a2a; border-color: #a9c39a; }
+.bs-health__pill--pending { background: var(--paper-2, #e6e1ce); color: var(--ink-5, #7a7872); }
+.bs-health__pill--stale,
+.bs-health__pill--error   { background: #f7e3e2; color: #8b2418; border-color: #d9a39c; }
+.bs-health__pill--stopped { background: #ece9e0; color: #7a7872; border: 1px dashed #c9c3aa; }
+
+.bs-health__budget { margin-bottom: 12px; }
+.bs-health__budget-hd { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 4px; }
+.bs-health__bar { height: 7px; border-radius: 4px; background: var(--paper-2, #e6e1ce); overflow: hidden; }
+.bs-health__bar-fill { height: 100%; background: var(--m-beacon, #b8334a); border-radius: 4px; transition: width 0.4s ease; }
+
+.bs-health__fail { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--paper-2, #e6e1ce); }
+.bs-health__fail-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8b2418; }

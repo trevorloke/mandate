@@ -26,6 +26,8 @@ import { generateCaption, aiConfigured } from '../lib/social/assist.js';
 import { refreshMetrics } from '../lib/social/metrics.js';
 import { checkAccountHealth } from '../lib/social/health.js';
 import { syncAllInboxes, replyToItem } from '../lib/social/inbox.js';
+import { getWorkerStatus } from '../lib/social-worker.js';
+import { peek, limitFor } from '../lib/social/ratelimit.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
@@ -487,6 +489,57 @@ app.get('/analytics', async (c) => {
   } catch { /* audience optional */ }
 
   return c.json({ totals, byPlatform, top, postCount: rows.length, audience });
+});
+
+// ── Observability: worker liveness + queue depth + budgets + account health ──
+// Powers the System/Health panel so operators can trust the publishing pipeline.
+app.get('/status', async (c) => {
+  const me = c.get('user');
+  const ws = me.workspaceId;
+  const now = Math.floor(Date.now() / 1000);
+
+  // Queue depth (this workspace).
+  const byStatus = {};
+  for (const r of sqlite.prepare('SELECT status, COUNT(*) n FROM social_posts WHERE workspace_id = ? GROUP BY status').all(ws)) {
+    byStatus[r.status] = r.n;
+  }
+  const one = (sql, ...args) => sqlite.prepare(sql).get(ws, ...args).n;
+  const dueNow = one("SELECT COUNT(*) n FROM social_posts WHERE workspace_id=? AND status='scheduled' AND scheduled_at IS NOT NULL AND scheduled_at<=?", now);
+  // Scheduled, past due by >2 min and still not picked up → worker may be behind.
+  const overdue = one("SELECT COUNT(*) n FROM social_posts WHERE workspace_id=? AND status='scheduled' AND scheduled_at IS NOT NULL AND scheduled_at<?", now - 120);
+  const retrying = one("SELECT COUNT(*) n FROM social_posts WHERE workspace_id=? AND status='failed' AND next_retry_at IS NOT NULL", );
+  const failedTerminal = one("SELECT COUNT(*) n FROM social_posts WHERE workspace_id=? AND status='failed' AND next_retry_at IS NULL", );
+  // Stuck in 'publishing' with an expired lease → a crashed/slow publish.
+  const stuck = one("SELECT COUNT(*) n FROM social_posts WHERE workspace_id=? AND status='publishing' AND lease_expires_at IS NOT NULL AND lease_expires_at<?", now);
+  const nextRow = sqlite.prepare("SELECT MIN(scheduled_at) m FROM social_posts WHERE workspace_id=? AND status='scheduled' AND scheduled_at IS NOT NULL AND scheduled_at>?").get(ws, now);
+
+  // Account health + rate-limit budgets for each connected platform.
+  const accounts = sqlite.prepare(
+    'SELECT id, platform, handle, status, last_error AS lastError, last_verified_at AS lastVerifiedAt FROM social_accounts WHERE workspace_id = ? ORDER BY platform'
+  ).all(ws);
+  const summary = { total: accounts.length, connected: 0, error: 0 };
+  for (const a of accounts) { if (a.status === 'connected') summary.connected++; else if (a.status === 'error') summary.error++; }
+
+  const platforms = [...new Set(accounts.filter((a) => a.status === 'connected').map((a) => a.platform))];
+  const budgets = platforms.map((p) => {
+    const lim = limitFor(p) || {};
+    const b = peek(`${ws}:${p}`, lim);
+    return { platform: p, tokens: Math.floor(b.tokens), capacity: b.capacity, refillPerMin: lim.refillPerMin ?? null };
+  });
+
+  // Recent failures for context (most recent first).
+  const failures = sqlite.prepare(
+    "SELECT id, platform, error, attempts, next_retry_at AS nextRetryAt, updated_at AS at FROM social_posts WHERE workspace_id=? AND status='failed' ORDER BY updated_at DESC LIMIT 10"
+  ).all(ws);
+
+  return c.json({
+    serverTime: now,
+    worker: getWorkerStatus(),
+    queue: { byStatus, dueNow, overdue, retrying, failedTerminal, stuck, nextScheduledAt: nextRow?.m ?? null },
+    accounts: { summary, list: accounts },
+    budgets,
+    failures,
+  });
 });
 
 // Map the workspace's tz abbreviation to an IANA zone for DST-aware bucketing.

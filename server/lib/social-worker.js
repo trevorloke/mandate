@@ -38,12 +38,12 @@ function getClaimStmt() {
   return claimStmt;
 }
 
-export async function runPublishTickOnce() { return tick(); }
+export async function runPublishTickOnce() { return runPass('publish', tick); }
 
 async function tick() {
   const now = Math.floor(Date.now() / 1000);
   const lease = now + Math.floor(LEASE_MS / 1000);
-  let claimed = [];
+  let claimed;
   try {
     claimed = getClaimStmt().all(WORKER_ID, lease, now, now, now, BATCH);
   } catch (e) {
@@ -61,6 +61,51 @@ const HEALTH_TICK_MS = 30 * 60 * 1000;  // re-check account tokens every 30 min
 const INBOX_TICK_MS = 5 * 60 * 1000;    // pull new interactions every 5 min
 const FEEDS_TICK_MS = 20 * 60 * 1000;   // pull RSS feeds every 20 min
 const LISTEN_TICK_MS = 10 * 60 * 1000;  // scan keyword listening every 10 min
+
+const PASS_INTERVALS = {
+  publish: TICK_MS, metrics: METRICS_TICK_MS, health: HEALTH_TICK_MS,
+  inbox: INBOX_TICK_MS, feeds: FEEDS_TICK_MS, listening: LISTEN_TICK_MS,
+};
+
+// Heartbeats: each pass records when it last completed, how long it took, and
+// whether it errored. Powers the /status observability endpoint so operators can
+// see worker liveness and catch a wedged/silent pass. In-memory (single-process
+// worker, like the rate limiter); a multi-node deploy would persist these.
+const heartbeats = Object.create(null); // pass -> { at, ms, ok, error, runs }
+let startedAt = null;
+
+async function runPass(name, fn) {
+  const t = Date.now();
+  const prev = heartbeats[name];
+  try {
+    await fn();
+    heartbeats[name] = { at: Date.now(), ms: Date.now() - t, ok: true, error: null, runs: (prev?.runs || 0) + 1 };
+  } catch (e) {
+    heartbeats[name] = { at: Date.now(), ms: Date.now() - t, ok: false, error: String(e?.message || e).slice(0, 200), runs: (prev?.runs || 0) + 1 };
+  }
+}
+
+// A snapshot of worker liveness for the status endpoint. A pass is "stale" if it
+// hasn't completed within ~2.5 of its own intervals (i.e. it likely hung).
+export function getWorkerStatus() {
+  const now = Date.now();
+  const passes = {};
+  for (const [name, intervalMs] of Object.entries(PASS_INTERVALS)) {
+    const hb = heartbeats[name] || null;
+    passes[name] = {
+      intervalMs,
+      lastRunAt: hb?.at ?? null,
+      lastDurationMs: hb?.ms ?? null,
+      ok: hb?.ok ?? null,
+      error: hb?.error ?? null,
+      runs: hb?.runs ?? 0,
+      pending: !!(startedAt && !hb),
+      stale: !!(startedAt && hb && now - hb.at > intervalMs * 2.5),
+    };
+  }
+  return { id: WORKER_ID, running: !!timer, startedAt, uptimeMs: startedAt ? now - startedAt : 0, passes };
+}
+
 let timer = null;
 let metricsTimer = null;
 let healthTimer = null;
@@ -69,17 +114,18 @@ let feedsTimer = null;
 let listenTimer = null;
 export function startSocialWorker() {
   if (timer) return;
-  timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
+  startedAt = Date.now();
+  timer = setInterval(() => runPass('publish', tick), TICK_MS);
   timer.unref?.();
-  metricsTimer = setInterval(() => { refreshStaleMetrics().catch(() => {}); }, METRICS_TICK_MS);
+  metricsTimer = setInterval(() => runPass('metrics', refreshStaleMetrics), METRICS_TICK_MS);
   metricsTimer.unref?.();
-  healthTimer = setInterval(() => { checkAllAccounts().catch(() => {}); }, HEALTH_TICK_MS);
+  healthTimer = setInterval(() => runPass('health', checkAllAccounts), HEALTH_TICK_MS);
   healthTimer.unref?.();
-  inboxTimer = setInterval(() => { syncAllInboxes().catch(() => {}); }, INBOX_TICK_MS);
+  inboxTimer = setInterval(() => runPass('inbox', syncAllInboxes), INBOX_TICK_MS);
   inboxTimer.unref?.();
-  feedsTimer = setInterval(() => { syncAllFeeds().catch(() => {}); }, FEEDS_TICK_MS);
+  feedsTimer = setInterval(() => runPass('feeds', syncAllFeeds), FEEDS_TICK_MS);
   feedsTimer.unref?.();
-  listenTimer = setInterval(() => { syncAllListening().catch(() => {}); }, LISTEN_TICK_MS);
+  listenTimer = setInterval(() => runPass('listening', syncAllListening), LISTEN_TICK_MS);
   listenTimer.unref?.();
   console.log(`[social-worker] started (${WORKER_ID})`);
 }
@@ -90,4 +136,5 @@ export function stopSocialWorker() {
   if (inboxTimer) { clearInterval(inboxTimer); inboxTimer = null; }
   if (feedsTimer) { clearInterval(feedsTimer); feedsTimer = null; }
   if (listenTimer) { clearInterval(listenTimer); listenTimer = null; }
+  startedAt = null;
 }

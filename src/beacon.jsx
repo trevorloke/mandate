@@ -4,7 +4,7 @@ import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_POSTS as BEACON_POSTS_FB,
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import { BTabQueue, BTabBoost, BTabPress } from './beacon-tabs';
-import { BConnections, BComposer, BOutbox, BPerformance, BInbox, BLibrary, BFeeds, BScheduleCalendar, BListening } from './beacon-social';
+import { BConnections, BComposer, BOutbox, BPerformance, BInbox, BLibrary, BFeeds, BScheduleCalendar, BListening, BHealth } from './beacon-social';
 import { useSocial } from './use-social';
 
 // Mandate 2.0 — Beacon
@@ -150,6 +150,7 @@ function Beacon() {
           ['queue','Publishing queue'],
           ['listen','Listening'],
           ['performance','Performance'],
+          ['health','System'],
           ['boost','Boost'],
           ['press','Press list'],
         ].map(([k, l]) => (
@@ -175,6 +176,7 @@ function Beacon() {
         {tab === 'queue'       && <BTabQueue onOpenPost={setOpenPost} />}
         {tab === 'listen'      && <BListening />}
         {tab === 'performance' && <BPerformance />}
+        {tab === 'health'      && <BHealth />}
         {tab === 'boost'       && <BTabBoost />}
         {tab === 'press'       && <BTabPress />}
       </div>

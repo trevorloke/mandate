@@ -713,6 +713,16 @@ const fmtN = (n) => {
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const fmtHour = (h) => `${String(h).padStart(2, '0')}:00`;
 
+// Compact human duration from milliseconds (for worker uptime / intervals).
+const fmtDur = (ms) => {
+  if (!ms || ms < 0) return '0s';
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+  return Math.floor(sec / 86400) + 'd ' + Math.floor((sec % 86400) / 3600) + 'h';
+};
+
 export function BPerformance() {
   const [data, setData] = useState(null);
   const [best, setBest] = useState(null);
@@ -1438,6 +1448,141 @@ function BSlotsEditor({ onClose }) {
         <div className="bs-modal__ft">
           <button className="bs-btn bs-btn--ghost" onClick={onClose}>Cancel</button>
           <button className="bs-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save slots'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── System health (observability) ────────────────────────────────────
+// Operator view of the publishing pipeline: worker liveness/heartbeats, queue
+// depth, per-platform rate-limit budgets, account health, and recent failures.
+// Polls /api/social/status every 15s so a wedged worker or growing backlog is
+// visible at a glance.
+const PASS_LABEL = {
+  publish: 'Publishing', metrics: 'Metrics refresh', health: 'Account health',
+  inbox: 'Inbox sync', feeds: 'Feed import', listening: 'Listening scan',
+};
+
+export function BHealth() {
+  const [s, setS] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(async () => {
+    try { setS(await api.socialStatus()); setErr(null); }
+    catch (e) { setErr(e.message || 'failed to load'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 15_000); // live refresh
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (loading) return <p className="bs-muted" style={{ padding: 20 }}>Loading…</p>;
+  if (err || !s) return <p className="bs-muted" style={{ padding: 20 }}>Couldn’t load system status. <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={load}>↻ retry</button></p>;
+
+  const agoMs = (ms) => (ms ? timeAgo(Math.floor(ms / 1000)) : '—'); // worker times are ms
+  const agoS = (sec) => (sec ? timeAgo(sec) : '—');                  // db times are seconds
+  const w = s.worker || {};
+  const q = s.queue || {};
+  const passes = w.passes || {};
+  const anyBadPass = Object.values(passes).some((p) => p.stale || p.ok === false);
+
+  let level = 'ok', label = 'All systems operational';
+  if (!w.running) { level = 'down'; label = 'Worker not running'; }
+  else if (q.stuck > 0 || anyBadPass) { level = 'warn'; label = 'Degraded — needs attention'; }
+  else if (q.overdue > 0 || (s.accounts?.summary?.error > 0)) { level = 'warn'; label = 'Minor issues'; }
+
+  const cards = [
+    { k: 'Scheduled', v: q.byStatus?.scheduled || 0 },
+    { k: 'Due now', v: q.dueNow || 0 },
+    { k: 'Overdue', v: q.overdue || 0, warn: q.overdue > 0 },
+    { k: 'Retrying', v: q.retrying || 0 },
+    { k: 'Failed', v: q.failedTerminal || 0, warn: q.failedTerminal > 0 },
+    { k: 'Stuck', v: q.stuck || 0, warn: q.stuck > 0 },
+  ];
+
+  return (
+    <div className="bs-health">
+      <div className="bs-perf__hd">
+        <h3 className="bs-h" style={{ margin: 0 }}>System health · publishing pipeline</h3>
+        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={load}>↻ refresh</button>
+      </div>
+
+      <div className={'bs-health__banner bs-health__banner--' + level}>
+        <span className="bs-health__dot" />
+        <b>{label}</b>
+        {w.running && <span className="bs-muted" style={{ marginLeft: 'auto' }}>worker {w.id} · up {fmtDur(w.uptimeMs)}</span>}
+      </div>
+
+      <div className="bs-perf__kpis">
+        {cards.map((c) => (
+          <div className={'bs-perf__kpi' + (c.warn ? ' bs-health__kpi--warn' : '')} key={c.k}>
+            <div className="bs-perf__kpi-val">{c.v}</div>
+            <div className="bs-perf__kpi-lbl">{c.k}</div>
+          </div>
+        ))}
+      </div>
+      {q.nextScheduledAt && <p className="bs-muted" style={{ marginTop: 2 }}>Next scheduled post in {agoS(q.nextScheduledAt)}.</p>}
+
+      <div className="bs-perf__cols">
+        <div>
+          <h4 className="bs-h">Background workers</h4>
+          <table className="bs-perf__table">
+            <thead><tr><th>Pass</th><th>Last run</th><th>Took</th><th>Status</th></tr></thead>
+            <tbody>
+              {Object.entries(passes).map(([name, p]) => {
+                const st = !w.running ? 'stopped' : p.pending ? 'pending' : p.stale ? 'stale' : p.ok === false ? 'error' : 'ok';
+                return (
+                  <tr key={name}>
+                    <td>{PASS_LABEL[name] || name} <span className="bs-muted">· every {fmtDur(p.intervalMs)}</span></td>
+                    <td>{p.pending ? '—' : agoMs(p.lastRunAt)}</td>
+                    <td>{p.lastDurationMs != null ? p.lastDurationMs + 'ms' : '—'}</td>
+                    <td>
+                      <span className={'bs-health__pill bs-health__pill--' + st}>{st}</span>
+                      {p.error ? <span className="bs-muted" title={p.error}> · {p.error.slice(0, 36)}</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <h4 className="bs-h">Accounts</h4>
+          <p className="bs-muted">{s.accounts?.summary?.connected || 0} connected · {s.accounts?.summary?.error || 0} error · {s.accounts?.summary?.total || 0} total</p>
+          {(s.accounts?.list || []).filter((a) => a.status !== 'connected').map((a) => (
+            <div key={a.id} className="bs-msg bs-msg--err" style={{ marginTop: 6 }}>
+              <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[a.platform]?.cls || 'gen')}>{PLAT[a.platform]?.short}</span> {a.handle} — {a.lastError || a.status}
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <h4 className="bs-h">Rate-limit budget</h4>
+          {(s.budgets || []).length === 0
+            ? <p className="bs-muted">No connected platforms.</p>
+            : s.budgets.map((b) => (
+              <div key={b.platform} className="bs-health__budget">
+                <div className="bs-health__budget-hd">
+                  <span><span className={'bs-prov__badge bs-prov__badge--' + (PLAT[b.platform]?.cls || 'gen')}>{PLAT[b.platform]?.short}</span> {platLabel(b.platform)}</span>
+                  <span className="bs-muted">{b.tokens}/{b.capacity}{b.refillPerMin ? ` · +${b.refillPerMin}/min` : ''}</span>
+                </div>
+                <div className="bs-health__bar"><div className="bs-health__bar-fill" style={{ width: Math.round((b.tokens / Math.max(1, b.capacity)) * 100) + '%' }} /></div>
+              </div>
+            ))}
+
+          <h4 className="bs-h">Recent failures</h4>
+          {(s.failures || []).length === 0
+            ? <p className="bs-muted">None 🎉</p>
+            : s.failures.map((f) => (
+              <div key={f.id} className="bs-health__fail">
+                <span className={'bs-prov__badge bs-prov__badge--' + (PLAT[f.platform]?.cls || 'gen')}>{PLAT[f.platform]?.short}</span>
+                <span className="bs-health__fail-msg" title={f.error}>{f.error || 'failed'}</span>
+                <span className="bs-muted">×{f.attempts}{f.nextRetryAt ? ' · retry queued' : ''}</span>
+              </div>
+            ))}
         </div>
       </div>
     </div>
