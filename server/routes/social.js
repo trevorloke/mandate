@@ -16,6 +16,7 @@ import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, 
 import { syncFeed } from '../lib/social/feeds.js';
 import { syncListening } from '../lib/social/listening.js';
 import { getWorkspaceSlots, setWorkspaceSlots, nextQueueTime } from '../lib/social/slots.js';
+import { bestTimes, nextBestTime } from '../lib/social/besttime.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -294,13 +295,18 @@ app.get('/posts', async (c) => {
 
 app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { body = '', targets = [], scheduledAt: scheduledAtRaw = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null, queue = false } = await c.req.json().catch(() => ({}));
+  const { body = '', targets = [], scheduledAt: scheduledAtRaw = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null, queue = false, bestTime = false } = await c.req.json().catch(() => ({}));
   // Queue mode: server picks the next free posting slot for this workspace.
+  // Best-time mode: server picks the next high-engagement window from history.
   let scheduledAt = scheduledAtRaw;
   if (queue && !publishNow) {
     const q = await nextQueueTime(me.workspaceId, { sqlite });
     if (q.error) return c.json({ error: q.error }, 400);
     scheduledAt = q.time.toISOString();
+  } else if (bestTime && !publishNow) {
+    const b = await nextBestTime(me.workspaceId, {});
+    if (b.error) return c.json({ error: b.error }, 400);
+    scheduledAt = b.time.toISOString();
   }
   // A thread is an array of segment strings; the first segment is the head/body.
   const threadSegs = Array.isArray(thread) ? thread.map((s) => String(s || '').trim()).filter(Boolean) : null;
@@ -580,50 +586,11 @@ app.get('/status', async (c) => {
   });
 });
 
-// Map the workspace's tz abbreviation to an IANA zone for DST-aware bucketing.
-const TZ_IANA = {
-  PT: 'America/Los_Angeles', MT: 'America/Denver', CT: 'America/Chicago', ET: 'America/New_York',
-  AT: 'America/Halifax', NT: 'America/St_Johns', GMT: 'Etc/UTC', BST: 'Europe/London',
-  CET: 'Europe/Paris', EET: 'Europe/Helsinki', IST: 'Asia/Kolkata',
-};
-const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-function dayHourInTz(date, tzAbbr) {
-  const timeZone = TZ_IANA[tzAbbr] || 'Etc/UTC';
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(date);
-    const wd = parts.find((p) => p.type === 'weekday')?.value;
-    let hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
-    if (hour === 24) hour = 0;
-    return { day: WD[wd] ?? 0, hour: Number.isNaN(hour) ? 0 : hour };
-  } catch {
-    return { day: date.getUTCDay(), hour: date.getUTCHours() };
-  }
-}
-
 // Best-time-to-post suggestions from this workspace's own engagement history.
 app.get('/best-times', async (c) => {
   const me = c.get('user');
-  const platform = c.req.query('platform');
-  const ws = (await db.select().from(workspaces).where(eq(workspaces.id, me.workspaceId)).limit(1))[0];
-  const tz = ws?.tz || 'UTC';
-  const base = and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.status, 'published'));
-  const where = platform ? and(base, eq(socialPosts.platform, platform)) : base;
-  const rows = await db.select().from(socialPosts).where(where);
-
-  const eng = (m) => (m.likes || 0) + (m.reposts || 0) + (m.replies || 0) + (m.comments || 0) + (m.shares || 0);
-  const buckets = new Map();
-  let samples = 0;
-  for (const p of rows) {
-    if (!p.publishedAt || !p.metricsJson) continue;
-    const m = safeParse(p.metricsJson); if (!m) continue;
-    const d = p.publishedAt instanceof Date ? p.publishedAt : new Date(p.publishedAt * 1000);
-    const { day, hour } = dayHourInTz(d, tz);
-    const key = `${day}-${hour}`;
-    const b = buckets.get(key) || { day, hour, sum: 0, n: 0 };
-    b.sum += eng(m); b.n++; buckets.set(key, b); samples++;
-  }
-  const grid = [...buckets.values()].map((b) => ({ day: b.day, hour: b.hour, avg: b.sum / b.n, n: b.n }));
-  const suggestions = grid.slice().sort((a, b) => b.avg - a.avg).slice(0, 5);
+  const platform = c.req.query('platform') || null;
+  const { suggestions, grid, samples, tz } = await bestTimes(me.workspaceId, platform);
   return c.json({ suggestions, grid, samples, tz });
 });
 

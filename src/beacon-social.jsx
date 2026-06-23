@@ -406,6 +406,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
       if (isThread) payload.thread = threadSegments;
       if (mode === 'now') payload.publishNow = true;
       else if (mode === 'queue') payload.queue = true;
+      else if (mode === 'best') payload.bestTime = true;
       else if (mode === 'schedule') payload.scheduledAt = new Date(when).toISOString();
       else if (mode === 'draft') { payload.saveDraft = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
       else if (mode === 'approval') { payload.submitForApproval = true; if (when) payload.scheduledAt = new Date(when).toISOString(); }
@@ -417,7 +418,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
           ? { kind: 'err', text: `${r.results.length - failed.length} published, ${failed.length} failed.` }
           : { kind: 'ok', text: `Published to ${r.results.length} account(s).` });
       } else {
-        setMsg({ kind: 'ok', text: mode === 'draft' ? 'Saved as draft.' : mode === 'approval' ? 'Submitted for approval.' : mode === 'queue' ? 'Added to the queue (next free slot).' : 'Scheduled.' });
+        setMsg({ kind: 'ok', text: mode === 'draft' ? 'Saved as draft.' : mode === 'approval' ? 'Submitted for approval.' : mode === 'queue' ? 'Added to the queue (next free slot).' : mode === 'best' ? 'Scheduled at the next best time (from your engagement history).' : 'Scheduled.' });
       }
       onPosted && onPosted();
       if (mode !== 'now') setTimeout(onClose, 700);
@@ -425,7 +426,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
     finally { setBusy(false); }
   };
 
-  const SUBMIT_LABEL = { now: 'Publish now', queue: 'Add to queue', schedule: 'Schedule', draft: 'Save draft', approval: 'Submit for approval' };
+  const SUBMIT_LABEL = { now: 'Publish now', queue: 'Add to queue', best: 'Schedule at best time', schedule: 'Schedule', draft: 'Save draft', approval: 'Submit for approval' };
   const canSubmit = (body.trim() || media.length) && targets.length && !over && !busy && !uploading && !igNeedsImage && (mode !== 'schedule' || when);
 
   return (
@@ -519,7 +520,7 @@ export function BComposer({ accounts, onClose, onPosted }) {
             </div>
 
             <div className="bs-compose-when">
-              {[['now', 'Publish now'], ['queue', 'Queue'], ['schedule', 'Schedule'], ['draft', 'Draft'], ['approval', 'Needs approval']].map(([m, lbl]) => (
+              {[['now', 'Publish now'], ['queue', 'Queue'], ['best', '✨ Best time'], ['schedule', 'Schedule'], ['draft', 'Draft'], ['approval', 'Needs approval']].map(([m, lbl]) => (
                 <label key={m} className={'bs-radio' + (mode === m ? ' is-on' : '')}>
                   <input type="radio" checked={mode === m} onChange={() => setMode(m)} /> {lbl}
                 </label>
