@@ -60,3 +60,28 @@ test('syncListening stores mentions, dedupes on re-run, and scores sentiment', a
     assert.deepEqual(rows.map((r) => r.sentiment), ['pos', 'neg']);
   } finally { restore(); }
 });
+
+test('syncListening raises one aggregated sentiment alert to the keyword owner', async () => {
+  await db.insert(schema.workspaces).values({ id: 'ws_a', name: 'A' });
+  await db.insert(schema.users).values({ id: 'u_a', email: 'a2@t.com', passwordHash: 'x', name: 'A', workspaceId: 'ws_a' });
+  await db.insert(schema.socialKeywords).values({ id: 'kw_a', workspaceId: 'ws_a', phrase: 'taxes', createdById: 'u_a' });
+
+  const restore = mockFetch((url) => {
+    if (url.includes('searchPosts')) return jsonResponse({ posts: [
+      { uri: 'at://x/app.bsky.feed.post/n1', cid: 'c', author: { handle: 'c.bsky.social' }, record: { text: 'taxes are a disaster and a scandal' }, indexedAt: '2026-06-02T10:00:00Z' },
+      { uri: 'at://x/app.bsky.feed.post/n2', cid: 'c', author: { handle: 'd.bsky.social' }, record: { text: 'these taxes are terrible' }, indexedAt: '2026-06-02T11:00:00Z' },
+      { uri: 'at://x/app.bsky.feed.post/n3', cid: 'c', author: { handle: 'e.bsky.social' }, record: { text: 'love the taxes plan' }, indexedAt: '2026-06-02T12:00:00Z' },
+    ] });
+    return jsonResponse({});
+  });
+  try {
+    assert.equal(await listening.syncListening('ws_a'), 3);
+    const notif = sqlite.prepare("SELECT title FROM notifications WHERE user_id='u_a' AND kind='social.sentiment'").all();
+    assert.equal(notif.length, 1, 'one aggregated alert, not one per mention');
+    assert.match(notif[0].title, /2 new negative mentions/);
+    // Re-sync dedupes the mentions → no fresh negatives → no new alert.
+    await listening.syncListening('ws_a');
+    const after = sqlite.prepare("SELECT COUNT(*) n FROM notifications WHERE user_id='u_a' AND kind='social.sentiment'").get();
+    assert.equal(after.n, 1, 'no duplicate alert when nothing new is negative');
+  } finally { restore(); }
+});

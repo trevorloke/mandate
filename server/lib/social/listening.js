@@ -5,7 +5,7 @@
 import { randomBytes } from 'crypto';
 import { and, eq } from 'drizzle-orm';
 import { db, sqlite } from '../../db/index.js';
-import { socialKeywords, socialAccounts } from '../../db/schema.js';
+import { socialKeywords, socialAccounts, notifications } from '../../db/schema.js';
 import { decryptJson } from '../crypto.js';
 import { broadcast } from '../realtime.js';
 
@@ -102,13 +102,23 @@ export async function syncListening(workspaceId) {
   const bskyCreds = bskyAcct ? decryptJson(bskyAcct.credentials) : null;
 
   let added = 0;
+  // Track NEW negative mentions per keyword so we can raise a single, aggregated
+  // sentiment alert per keyword (rather than one notification per mention).
+  const negByKw = new Map(); // kw.id -> { kw, count, sample }
   const store = (kw, platform, items) => {
     for (const it of items) {
       const ts = it.remoteCreatedAt ? Math.floor(new Date(it.remoteCreatedAt).getTime() / 1000) : Math.floor(Date.now() / 1000);
+      const sentiment = scoreSentiment(it.text);
       const r = insertStmt().run(newId('lm_'), workspaceId, kw.id, platform, it.remoteId,
         it.authorHandle || null, it.authorName || null, it.authorAvatar || null,
-        it.text || null, it.url || null, scoreSentiment(it.text), ts);
-      if (r.changes > 0) added++;
+        it.text || null, it.url || null, sentiment, ts);
+      if (r.changes > 0) {
+        added++;
+        if (sentiment === 'neg') {
+          const e = negByKw.get(kw.id) || { kw, count: 0, sample: it.text || '' };
+          e.count++; negByKw.set(kw.id, e);
+        }
+      }
     }
   };
 
@@ -118,7 +128,22 @@ export async function syncListening(workspaceId) {
       try { store(kw, 'mastodon', await searchMastodon(decryptJson(a.credentials), kw.phrase)); } catch { /* skip */ }
     }
   }
-  if (added) { try { broadcast(workspaceId, 'social.listening', { added }); } catch { /* ignore */ } }
+
+  // Sentiment alerts: notify the keyword's owner about new negative chatter.
+  let negative = 0;
+  for (const { kw, count, sample } of negByKw.values()) {
+    negative += count;
+    if (!kw.createdById) continue;
+    try {
+      await db.insert(notifications).values({
+        id: newId('n_'), userId: kw.createdById, kind: 'social.sentiment',
+        title: `${count} new negative mention${count > 1 ? 's' : ''} for “${kw.phrase}”`,
+        body: String(sample || '').slice(0, 200), link: '/',
+      });
+    } catch { /* notification is best-effort */ }
+  }
+
+  if (added) { try { broadcast(workspaceId, 'social.listening', { added, negative }); } catch { /* ignore */ } }
   return added;
 }
 

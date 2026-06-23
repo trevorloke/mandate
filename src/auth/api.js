@@ -175,6 +175,7 @@ export const api = {
   socialInboxRead:    (id) => fetchJson(`/api/social/inbox/${id}/read`, { method: 'POST' }),
   socialInboxArchive: (id) => fetchJson(`/api/social/inbox/${id}/archive`, { method: 'POST' }),
   socialInboxReply:   (id, text) => fetchJson(`/api/social/inbox/${id}/reply`, { method: 'POST', body: { text } }),
+  socialInboxSuggest: (id, tone) => fetchJson(`/api/social/inbox/${id}/suggest-reply`, { method: 'POST', body: { tone } }),
   // Developer-app credentials for OAuth platforms (X / LinkedIn / Meta).
   socialApps:       () => fetchJson('/api/social/apps'),
   socialSaveApp:    (platform, body) => fetchJson(`/api/social/apps/${platform}`, { method: 'PUT', body }),

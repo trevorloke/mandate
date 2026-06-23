@@ -22,7 +22,7 @@ import { getProvider, providerCatalog } from '../lib/social/index.js';
 import { buildAuthorizeUrl, handleCallback, getApp } from '../lib/social/oauth.js';
 import { publishInline } from '../lib/social/publish.js';
 import { saveMedia, getMedia, isAllowedMime, MAX_BYTES } from '../lib/social/media.js';
-import { generateCaption, aiConfigured } from '../lib/social/assist.js';
+import { generateCaption, suggestReply, aiConfigured } from '../lib/social/assist.js';
 import { refreshMetrics } from '../lib/social/metrics.js';
 import { checkAccountHealth } from '../lib/social/health.js';
 import { syncAllInboxes, replyToItem } from '../lib/social/inbox.js';
@@ -696,6 +696,25 @@ app.post('/inbox/:id/reply', requireRole('editor'), async (c) => {
   if (!res.ok) return c.json({ error: res.error || 'reply failed' }, 400);
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.inbox.reply', target: c.req.param('id') });
   return c.json({ ok: true, url: res.url });
+});
+
+// AI-drafted reply suggestion for an inbox item (does not send — fills the box).
+app.post('/inbox/:id/suggest-reply', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { tone = 'friendly' } = await c.req.json().catch(() => ({}));
+  const item = (await db.select().from(socialInbox)
+    .where(and(eq(socialInbox.id, c.req.param('id')), eq(socialInbox.workspaceId, me.workspaceId))).limit(1))[0];
+  if (!item) return c.json({ error: 'not found' }, 404);
+  try {
+    const charLimit = getProvider(item.platform)?.charLimit || null;
+    const { text } = await suggestReply({
+      text: item.text || '', authorHandle: item.authorHandle, platform: item.platform,
+      type: item.type, tone, charLimit,
+    });
+    return c.json({ ok: true, text });
+  } catch (e) {
+    return c.json({ error: e.message, code: e.code || null }, e.code === 'no_key' ? 400 : 502);
+  }
 });
 
 // ── Content library (reusable templates) ──

@@ -913,11 +913,13 @@ const timeAgo = (ts) => {
   return Math.floor(s / 86400) + 'd';
 };
 
-function InboxItem({ it, team = [], onReply, onRead, onArchive, onAssign }) {
+function InboxItem({ it, team = [], aiAvailable = false, onReply, onRead, onArchive, onAssign }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [tone, setTone] = useState('friendly');
+  const [drafting, setDrafting] = useState(false);
 
   const send = async () => {
     if (!text.trim()) return;
@@ -925,6 +927,13 @@ function InboxItem({ it, team = [], onReply, onRead, onArchive, onAssign }) {
     try { await onReply(it.id, text); setOpen(false); setText(''); }
     catch (e) { setErr(e.message || 'Reply failed'); }
     finally { setBusy(false); }
+  };
+
+  const draft = async () => {
+    setDrafting(true); setErr(null);
+    try { const r = await api.socialInboxSuggest(it.id, tone); setText(r.text || ''); }
+    catch (e) { setErr(e.message || 'Could not draft a reply'); }
+    finally { setDrafting(false); }
   };
 
   return (
@@ -957,6 +966,19 @@ function InboxItem({ it, team = [], onReply, onRead, onArchive, onAssign }) {
           </div>
           {open && (
             <div className="bs-in-reply">
+              {aiAvailable && (
+                <div className="bs-in-reply__ai">
+                  <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={draft} disabled={drafting} title="Draft a reply with AI">
+                    {drafting ? '✨ Drafting…' : '✨ Suggest reply'}
+                  </button>
+                  <select className="bs-in-assignee" value={tone} onChange={(e) => setTone(e.target.value)} title="Tone" disabled={drafting}>
+                    <option value="friendly">Friendly</option>
+                    <option value="professional">Professional</option>
+                    <option value="grateful">Grateful</option>
+                    <option value="deescalate">De-escalate</option>
+                  </select>
+                </div>
+              )}
               <textarea className="bs-compose-text" rows={2} placeholder={`Reply to ${it.authorHandle}…`} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
               {err && <div className="bs-msg bs-msg--err">{err}</div>}
               <div className="bs-in-reply__ft">
@@ -976,6 +998,7 @@ export function BInbox() {
   const [filter, setFilter] = useState('unread');
   const [mine, setMine] = useState(false);
   const [team, setTeam] = useState([]);
+  const [aiAvailable, setAiAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
@@ -987,6 +1010,7 @@ export function BInbox() {
   }, []);
   useEffect(() => { load(filter, mine); }, [load, filter, mine]);
   useEffect(() => { api.socialTeam().then((r) => setTeam(r.team || [])).catch(() => {}); }, []);
+  useEffect(() => { api.socialProviders().then((r) => setAiAvailable(!!r.aiAvailable)).catch(() => {}); }, []);
 
   const sync = async () => {
     setSyncing(true);
@@ -1014,7 +1038,7 @@ export function BInbox() {
       {loading ? <p className="bs-muted">Loading…</p>
         : items.length === 0
           ? <p className="bs-muted">{mine ? 'Nothing assigned to you.' : filter === 'unread' ? 'No unread interactions. Replies and mentions to your connected accounts land here. Hit ↻ sync to pull the latest.' : `No ${filter} items.`}</p>
-          : <div className="bs-in-list">{items.map((it) => <InboxItem key={it.id} it={it} team={team} onReply={onReply} onRead={onRead} onArchive={onArchive} onAssign={onAssign} />)}</div>}
+          : <div className="bs-in-list">{items.map((it) => <InboxItem key={it.id} it={it} team={team} aiAvailable={aiAvailable} onReply={onReply} onRead={onRead} onArchive={onArchive} onAssign={onAssign} />)}</div>}
     </div>
   );
 }

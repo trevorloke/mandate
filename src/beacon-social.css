@@ -341,3 +341,6 @@
 
 .bs-health__fail { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--paper-2, #e6e1ce); }
 .bs-health__fail-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8b2418; }
+
+/* Inbox AI reply drafting */
+.bs-in-reply__ai { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
