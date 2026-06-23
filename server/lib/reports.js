@@ -11,6 +11,7 @@ import { db } from '../db/index.js';
 import { scheduledReports, moduleData, auditLog, users, workspaces } from '../db/schema.js';
 import { and, eq, gte, isNull, isNotNull, lte, asc, desc } from 'drizzle-orm';
 import { sendEmail } from './email.js';
+import { socialAnalyticsRows, socialAnalyticsCsvFromRows } from './social/report.js';
 
 const POLL_MS = Number(process.env.MANDATE_REPORTS_POLL_MS || 60_000);
 
@@ -74,9 +75,20 @@ async function generateAuditLog({ workspaceId, params, lastRunAt }) {
   };
 }
 
+async function generateSocialAnalytics({ workspaceId }) {
+  const rows = await socialAnalyticsRows(workspaceId);
+  const totalEng = rows.reduce((s, r) => s + r.engagement, 0);
+  return {
+    csv: socialAnalyticsCsvFromRows(rows),
+    count: rows.length,
+    summary: `${rows.length} published post${rows.length === 1 ? '' : 's'}, ${totalEng} total engagement`,
+  };
+}
+
 const GENERATORS = {
-  bucket_csv: generateBucketCsv,
-  audit_log:  generateAuditLog,
+  bucket_csv:       generateBucketCsv,
+  audit_log:        generateAuditLog,
+  social_analytics: generateSocialAnalytics,
 };
 
 // ── Run a single report ─────────────────────────────────────────────────

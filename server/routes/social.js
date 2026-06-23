@@ -28,6 +28,7 @@ import { checkAccountHealth } from '../lib/social/health.js';
 import { syncAllInboxes, replyToItem } from '../lib/social/inbox.js';
 import { getWorkerStatus } from '../lib/social-worker.js';
 import { peek, limitFor } from '../lib/social/ratelimit.js';
+import { socialAnalyticsCsv } from '../lib/social/report.js';
 import { broadcast } from '../lib/realtime.js';
 
 const newId = (p) => p + randomBytes(12).toString('hex');
@@ -517,6 +518,15 @@ app.get('/analytics', async (c) => {
   } catch { /* audience optional */ }
 
   return c.json({ totals, byPlatform, top, postCount: rows.length, audience });
+});
+
+// Download all published-post performance as a CSV (one row per post).
+app.get('/analytics/export', async (c) => {
+  const me = c.get('user');
+  const csv = await socialAnalyticsCsv(me.workspaceId);
+  c.header('Content-Type', 'text/csv; charset=utf-8');
+  c.header('Content-Disposition', `attachment; filename="beacon-analytics-${new Date().toISOString().slice(0, 10)}.csv"`);
+  return c.body(csv);
 });
 
 // ── Observability: worker liveness + queue depth + budgets + account health ──

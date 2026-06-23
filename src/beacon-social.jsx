@@ -807,7 +807,10 @@ export function BPerformance() {
     <div className="bs-perf">
       <div className="bs-perf__hd">
         <h3 className="bs-h" style={{ margin: 0 }}>Performance · across all connected accounts</h3>
-        <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={load}>↻ refresh</button>
+        <span style={{ display: 'flex', gap: 8 }}>
+          <a className="bs-btn bs-btn--ghost bs-btn--sm" href={api.socialAnalyticsExportUrl()} download>⬇ Export CSV</a>
+          <button className="bs-btn bs-btn--ghost bs-btn--sm" onClick={load}>↻ refresh</button>
+        </span>
       </div>
 
       <div className="bs-perf__kpis">

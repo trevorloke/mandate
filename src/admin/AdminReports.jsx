@@ -5,8 +5,9 @@ import { api } from '../auth/api';
 import { MODULE_KINDS } from './AdminData';
 
 const KINDS = [
-  { value: 'bucket_csv', label: 'Bucket → CSV', desc: 'Export all records of a (module, kind) bucket.' },
-  { value: 'audit_log',  label: 'Audit log',    desc: 'Audit-log entries since the last run.' },
+  { value: 'bucket_csv',       label: 'Bucket → CSV',     desc: 'Export all records of a (module, kind) bucket.' },
+  { value: 'audit_log',        label: 'Audit log',        desc: 'Audit-log entries since the last run.' },
+  { value: 'social_analytics', label: 'Social analytics', desc: 'Beacon published-post performance (CSV) emailed on a schedule.' },
 ];
 
 const INTERVAL_PRESETS = [

@@ -13,7 +13,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { runReport } from '../lib/reports.js';
 import { assertQuota, QuotaError } from '../lib/plans.js';
 
-const VALID_KINDS = ['bucket_csv', 'audit_log'];
+const VALID_KINDS = ['bucket_csv', 'audit_log', 'social_analytics'];
 
 const newId = () => 'rep_' + randomBytes(12).toString('hex');
 const audit = (userId, action, target, meta = {}) =>

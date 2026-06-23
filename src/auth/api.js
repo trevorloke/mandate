@@ -135,6 +135,7 @@ export const api = {
   socialReschedule: (groupId, scheduledAt) => fetchJson(`/api/social/posts/${groupId}/reschedule`, { method: 'POST', body: { scheduledAt } }),
   socialRefreshMetrics: (groupId) => fetchJson(`/api/social/posts/${groupId}/metrics`, { method: 'POST' }),
   socialAnalytics:  () => fetchJson('/api/social/analytics'),
+  socialAnalyticsExportUrl: () => '/api/social/analytics/export',
   socialStatus:     () => fetchJson('/api/social/status'),
   socialBestTimes:  (platform) => fetchJson(`/api/social/best-times${platform ? `?platform=${platform}` : ''}`),
   socialTemplates:       () => fetchJson('/api/social/templates'),
