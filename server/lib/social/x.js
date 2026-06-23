@@ -3,6 +3,8 @@
 // Scopes: tweet.write to post, offline.access for refresh tokens.
 export const CHAR_LIMIT = 280;
 
+import { withRefresh, ensureFresh } from './oauth-fetch.js';
+
 const TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
 
 function basicAuth(app) {
@@ -56,6 +58,9 @@ async function refresh(creds, app) {
   };
 }
 
+// Proactive + reactive token refresh around a single X API request.
+const af = (account, run) => withRefresh(account, refresh, run);
+
 // Upload image bytes via the v1.1 media endpoint (works with OAuth2 user
 // context); returns a media_id_string to attach to a v2 tweet.
 async function uploadMediaX(token, m) {
@@ -87,9 +92,7 @@ export async function publish(account, post) {
   if ([...text].length > CHAR_LIMIT) throw new Error(`X posts are limited to ${CHAR_LIMIT} characters.`);
 
   // Refresh proactively if the token is near expiry.
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000) {
-    creds = await refresh(creds, account._app);
-  }
+  creds = await ensureFresh(account, refresh);
 
   // Upload images (max 4), refreshing the token once on 401.
   const media = (post.media || []).filter((m) => m.bytes).slice(0, 4);
@@ -129,34 +132,30 @@ export async function publish(account, post) {
 }
 
 export async function metrics(account, remoteId) {
-  let creds = account.credentials;
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
-  const r = await fetch(`https://api.twitter.com/2/tweets/${remoteId}?tweet.fields=public_metrics`, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || j?.title || `X metrics failed (${r.status}).`);
+  const { res, creds } = await af(account, (token) =>
+    fetch(`https://api.twitter.com/2/tweets/${remoteId}?tweet.fields=public_metrics`, { headers: { Authorization: `Bearer ${token}` } }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.detail || j?.title || `X metrics failed (${res.status}).`);
   const m = j.data?.public_metrics || {};
   return { metrics: { likes: m.like_count || 0, reposts: m.retweet_count || 0, replies: m.reply_count || 0, quotes: m.quote_count || 0, impressions: m.impression_count || 0 }, credentials: creds };
 }
 
 export async function verify(account) {
-  let creds = account.credentials;
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
-  const r = await fetch('https://api.twitter.com/2/users/me', { headers: { Authorization: `Bearer ${creds.accessToken}` } });
-  if (!r.ok) throw new Error(`X token is invalid (${r.status}) — reconnect.`);
+  const { res, creds } = await af(account, (token) =>
+    fetch('https://api.twitter.com/2/users/me', { headers: { Authorization: `Bearer ${token}` } }));
+  if (!res.ok) throw new Error(`X token is invalid (${res.status}) — reconnect.`);
   return { ok: true, credentials: creds };
 }
 
 // Pull recent @-mentions for the inbox.
 export async function fetchInbox(account, { limit = 40 } = {}) {
-  let creds = account.credentials;
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
   const uid = account.remoteId;
   if (!uid) throw new Error('Missing X user id.');
   const url = `https://api.twitter.com/2/users/${uid}/mentions?max_results=${Math.min(limit, 100)}`
     + `&expansions=author_id&tweet.fields=created_at&user.fields=username,name,profile_image_url`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${creds.accessToken}` } });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || j?.title || `X mentions failed (${r.status}).`);
+  const { res, creds } = await af(account, (token) => fetch(url, { headers: { Authorization: `Bearer ${token}` } }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.detail || j?.title || `X mentions failed (${res.status}).`);
   const users = {};
   for (const u of (j.includes?.users || [])) users[u.id] = u;
   const items = (j.data || []).map((t) => {
@@ -172,22 +171,19 @@ export async function fetchInbox(account, { limit = 40 } = {}) {
 }
 
 export async function reply(account, item, text) {
-  let creds = account.credentials;
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
-  const r = await fetch('https://api.twitter.com/2/tweets', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` },
+  const { res, creds } = await af(account, (token) => fetch('https://api.twitter.com/2/tweets', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ text: String(text || ''), reply: { in_reply_to_tweet_id: item.replyContext?.tweetId } }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.detail || j?.title || `X reply failed (${r.status}).`);
+  }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.detail || j?.title || `X reply failed (${res.status}).`);
   const id = j.data?.id;
   const user = creds.username;
   return { remoteId: id, url: user ? `https://x.com/${user}/status/${id}` : null, credentials: creds };
 }
 
 export async function publishThread(account, segments, opts = {}) {
-  let creds = account.credentials;
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
+  let creds = await ensureFresh(account, refresh);
   let prevId = null, firstId = null;
   for (let i = 0; i < segments.length; i++) {
     const text = String(segments[i] || '');
@@ -199,9 +195,11 @@ export async function publishThread(account, segments, opts = {}) {
       if (ids.length) payload.media = { media_ids: ids };
     }
     if (prevId) payload.reply = { in_reply_to_tweet_id: prevId };
-    const r = await fetch('https://api.twitter.com/2/tweets', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.accessToken}` }, body: JSON.stringify(payload) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.detail || j?.title || `X thread tweet ${i + 1} failed.`);
+    const { res, creds: c2 } = await af({ ...account, credentials: creds }, (token) =>
+      fetch('https://api.twitter.com/2/tweets', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) }));
+    creds = c2;
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j?.detail || j?.title || `X thread tweet ${i + 1} failed.`);
     prevId = j.data?.id; if (i === 0) firstId = prevId;
   }
   const user = creds.username;
@@ -209,10 +207,9 @@ export async function publishThread(account, segments, opts = {}) {
 }
 
 export async function audience(account) {
-  let creds = account.credentials;
-  if (creds.expiresAt && creds.expiresAt < Date.now() + 15_000 && account._app) creds = await refresh(creds, account._app);
-  const r = await fetch('https://api.twitter.com/2/users/me?user.fields=public_metrics', { headers: { Authorization: `Bearer ${creds.accessToken}` } });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('X profile fetch failed.');
+  const { res, creds } = await af(account, (token) =>
+    fetch('https://api.twitter.com/2/users/me?user.fields=public_metrics', { headers: { Authorization: `Bearer ${token}` } }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error('X profile fetch failed.');
   return { followers: j.data?.public_metrics?.followers_count || 0, credentials: creds };
 }
