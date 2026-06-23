@@ -12,7 +12,9 @@ import { syncAllFeeds } from './social/feeds.js';
 import { syncAllListening } from './social/listening.js';
 
 const WORKER_ID = 'sw_' + randomBytes(4).toString('hex');
-const TICK_MS = 15_000;
+// Publish cadence. Tunable via env (e.g. a faster tick for smoke tests, a slower
+// one to ease DB pressure on small instances); defaults to 15s.
+const TICK_MS = Number(process.env.MANDATE_SOCIAL_TICK_MS) || 15_000;
 const LEASE_MS = 60_000;
 const BATCH = 10;
 
