@@ -33,6 +33,12 @@ import { broadcast } from '../lib/realtime.js';
 const newId = (p) => p + randomBytes(12).toString('hex');
 const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
 
+// Load a workspace row + its parsed settings blob (postingSlots, brandVoice, …).
+async function getWsSettings(workspaceId) {
+  const ws = (await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
+  return { ws, settings: safeJson(ws?.settings) };
+}
+
 const app = new Hono();
 
 // ── OAuth callback (PUBLIC — provider redirect, verified by signed state).
@@ -107,14 +113,36 @@ app.get('/providers', async (c) => {
 
 // ── AI caption assist ──
 app.post('/assist', requireRole('editor'), async (c) => {
+  const me = c.get('user');
   const { draft = '', mode = 'improve', platform = '', charLimit = null } = await c.req.json().catch(() => ({}));
   if (!String(draft).trim() && mode !== 'generate') return c.json({ error: 'nothing to work with' }, 400);
   try {
-    const r = await generateCaption({ draft, mode, platform, charLimit });
+    const { settings } = await getWsSettings(me.workspaceId);
+    const r = await generateCaption({ draft, mode, platform, charLimit, brandVoice: settings.brandVoice || '' });
     return c.json({ ok: true, text: r.text });
   } catch (e) {
     return c.json({ error: e.message, code: e.code || null }, e.code === 'no_key' ? 503 : 400);
   }
+});
+
+// ── AI brand voice (per-workspace guidelines fed into every generation) ──
+app.get('/brand-voice', async (c) => {
+  const me = c.get('user');
+  const { settings } = await getWsSettings(me.workspaceId);
+  return c.json({ brandVoice: settings.brandVoice || '' });
+});
+
+app.put('/brand-voice', requireRole('admin'), async (c) => {
+  const me = c.get('user');
+  const { brandVoice = '' } = await c.req.json().catch(() => ({}));
+  const { ws, settings } = await getWsSettings(me.workspaceId);
+  if (!ws) return c.json({ error: 'workspace not found' }, 404);
+  const clean = String(brandVoice || '').slice(0, 2000);
+  await db.update(workspaces)
+    .set({ settings: JSON.stringify({ ...settings, brandVoice: clean }), updatedAt: new Date() })
+    .where(eq(workspaces.id, me.workspaceId));
+  await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.brand_voice.save', target: me.workspaceId });
+  return c.json({ ok: true, brandVoice: clean });
 });
 
 // ── developer apps (client id/secret per platform; secret encrypted) ──
@@ -707,9 +735,10 @@ app.post('/inbox/:id/suggest-reply', requireRole('editor'), async (c) => {
   if (!item) return c.json({ error: 'not found' }, 404);
   try {
     const charLimit = getProvider(item.platform)?.charLimit || null;
+    const { settings } = await getWsSettings(me.workspaceId);
     const { text } = await suggestReply({
       text: item.text || '', authorHandle: item.authorHandle, platform: item.platform,
-      type: item.type, tone, charLimit,
+      type: item.type, tone, charLimit, brandVoice: settings.brandVoice || '',
     });
     return c.json({ ok: true, text });
   } catch (e) {

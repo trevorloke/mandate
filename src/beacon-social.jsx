@@ -121,6 +121,7 @@ export function BConnections() {
   }
 
   return (
+    <>
     <div className="bs-conn">
       <div className="bs-conn__col">
         <h3 className="bs-h">Connected accounts</h3>
@@ -192,6 +193,50 @@ export function BConnections() {
           </div>
         )}
       </div>
+    </div>
+    <BBrandVoice />
+    </>
+  );
+}
+
+// Per-workspace AI brand voice — guidelines fed into every AI caption + reply.
+function BBrandVoice() {
+  const { user } = useAuth();
+  const canEdit = !!user && ['admin', 'super_admin'].includes(user.role);
+  const [text, setText] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [aiAvailable, setAiAvailable] = useState(false);
+
+  useEffect(() => {
+    api.socialBrandVoice().then((r) => { setText(r.brandVoice || ''); }).catch(() => {}).finally(() => setLoaded(true));
+    api.socialProviders().then((r) => setAiAvailable(!!r.aiAvailable)).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try { const r = await api.socialSetBrandVoice(text); setText(r.brandVoice || ''); setMsg({ kind: 'ok', text: 'Saved — AI drafts and replies will use this.' }); }
+    catch (e) { setMsg({ kind: 'err', text: e.message || 'Save failed' }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bs-brandvoice">
+      <h3 className="bs-h">✨ AI brand voice</h3>
+      <p className="bs-muted">
+        Guidelines applied to every AI caption and reply — tone, key messages, and words to avoid.
+        {aiAvailable ? '' : ' Set ANTHROPIC_API_KEY on the server to enable AI drafting.'}
+      </p>
+      <textarea
+        className="bs-compose-text" rows={6} disabled={!canEdit || busy}
+        placeholder={'e.g. Warm, optimistic, plain-spoken. Champion working families and affordable housing. Never attack individuals; avoid jargon and ALL-CAPS.'}
+        value={text} onChange={(e) => setText(e.target.value)}
+      />
+      {msg && <div className={'bs-msg bs-msg--' + msg.kind}>{msg.text}</div>}
+      {canEdit
+        ? <div style={{ marginTop: 8 }}><button className="bs-btn" onClick={save} disabled={busy || !loaded}>{busy ? 'Saving…' : 'Save brand voice'}</button></div>
+        : <p className="bs-muted">Only admins can edit the brand voice.</p>}
     </div>
   );
 }

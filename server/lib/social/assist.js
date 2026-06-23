@@ -41,14 +41,19 @@ const MODE_INSTRUCTION = {
   generate: 'Write a compelling social post from this idea or topic.',
 };
 
-export async function generateCaption({ draft = '', mode = 'improve', platform = '', charLimit = null }) {
+// Optional per-workspace brand voice / guidelines appended to the system prompt
+// so every generation stays on-message without the user re-typing it each time.
+const voiceBlock = (brandVoice) => (brandVoice ? `\n\nBrand voice & guidelines you MUST follow:\n${String(brandVoice).slice(0, 2000)}` : '');
+
+export async function generateCaption({ draft = '', mode = 'improve', platform = '', charLimit = null, brandVoice = '' }) {
   requireKey();
   const instruction = MODE_INSTRUCTION[mode] || MODE_INSTRUCTION.improve;
   const limitNote = charLimit ? ` The result MUST be at most ${charLimit} characters.` : '';
   const platformNote = platform ? ` It will be posted on ${platform}.` : '';
   const system = 'You are a sharp social media copywriter for a political campaign tool. '
     + 'Return ONLY the post text — no preamble, no quotes, no commentary, no options. '
-    + 'Match the platform\'s conventions and keep a natural human voice.';
+    + 'Match the platform\'s conventions and keep a natural human voice.'
+    + voiceBlock(brandVoice);
   const user = `${instruction}${platformNote}${limitNote}\n\n${mode === 'generate' ? 'Idea/topic' : 'Post'}:\n${draft}`;
   return { text: await callClaude({ system, user }) };
 }
@@ -60,14 +65,15 @@ const REPLY_TONE = {
   grateful:    'appreciative and gracious',
   deescalate:  'calm, empathetic and de-escalating — acknowledge the concern without being defensive',
 };
-export async function suggestReply({ text = '', authorHandle = '', platform = '', type = 'mention', tone = 'friendly', charLimit = null }) {
+export async function suggestReply({ text = '', authorHandle = '', platform = '', type = 'mention', tone = 'friendly', charLimit = null, brandVoice = '' }) {
   requireKey();
   const toneNote = REPLY_TONE[tone] || REPLY_TONE.friendly;
   const limitNote = charLimit ? ` Keep it under ${charLimit} characters.` : '';
   const system = 'You are a community manager replying on behalf of a political campaign. '
     + `Write a single ${toneNote} reply to the message below. `
     + 'Return ONLY the reply text — no preamble, no quotes, no options, no hashtags unless natural. '
-    + `Be specific and human; never sound like a bot.${limitNote}`;
+    + `Be specific and human; never sound like a bot.${limitNote}`
+    + voiceBlock(brandVoice);
   const platformNote = platform ? ` (on ${platform})` : '';
   const user = `Someone (${authorHandle || 'a user'}) sent this ${type}${platformNote}:\n"""${text || '(no text)'}"""\n\nWrite the reply.`;
   return { text: await callClaude({ system, user, maxTokens: 512 }) };

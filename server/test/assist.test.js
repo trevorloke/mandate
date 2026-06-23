@@ -35,8 +35,15 @@ test('suggestReply asks the model in the chosen tone and returns the draft', asy
 // ── Route wiring ──
 const SID = 'sess_ai';
 await db.insert(schema.workspaces).values({ id: 'ws_ai', name: 'W' });
-await db.insert(schema.users).values({ id: 'u_ai', email: 'ai@t.com', passwordHash: 'x', name: 'AI', role: 'editor', workspaceId: 'ws_ai' });
-await db.insert(schema.sessions).values({ id: SID, userId: 'u_ai', expiresAt: new Date(Date.now() + 3600e3) });
+await db.insert(schema.users).values([
+  { id: 'u_ai', email: 'ai@t.com', passwordHash: 'x', name: 'AI', role: 'editor', workspaceId: 'ws_ai' },
+  { id: 'u_adm', email: 'adm@t.com', passwordHash: 'x', name: 'Adm', role: 'super_admin', workspaceId: 'ws_ai' },
+]);
+const AID = 'sess_adm';
+await db.insert(schema.sessions).values([
+  { id: SID, userId: 'u_ai', expiresAt: new Date(Date.now() + 3600e3) },
+  { id: AID, userId: 'u_adm', expiresAt: new Date(Date.now() + 3600e3) },
+]);
 await db.insert(schema.socialAccounts).values({
   id: 'sa_ai', workspaceId: 'ws_ai', platform: 'bluesky', handle: '@b', status: 'connected',
   credentials: encryptJson({ service: 'https://pds', did: 'd', handle: 'b', accessJwt: 'a', refreshJwt: 'r' }),
@@ -75,4 +82,40 @@ test('suggest-reply 404s for an unknown item', async () => {
     const r = await rq('/inbox/nope/suggest-reply', {});
     assert.equal(r.status, 404);
   } finally { delete process.env.ANTHROPIC_API_KEY; }
+});
+
+// ── Brand voice ──
+const reqAs = (sid, method, path, body) => socialApp.request(path, {
+  method, headers: { Cookie: `mdt_session=${sid}`, 'Content-Type': 'application/json' },
+  body: body != null ? JSON.stringify(body) : undefined,
+});
+
+test('suggestReply embeds the brand voice in the system prompt', async () => {
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  let cap = null;
+  const restore = mockFetch((u, o) => { cap = JSON.parse(o.body); return claudeResp('hi'); });
+  try {
+    await assist.suggestReply({ text: 'hello', brandVoice: 'Be punchy and kind.' });
+    assert.match(cap.system, /Brand voice & guidelines/);
+    assert.match(cap.system, /Be punchy and kind\./);
+  } finally { restore(); delete process.env.ANTHROPIC_API_KEY; }
+});
+
+test('brand voice: admin sets it, editor reads it, and it feeds suggest-reply', async () => {
+  // Editor cannot set the brand voice.
+  assert.equal((await reqAs(SID, 'PUT', '/brand-voice', { brandVoice: 'x' })).status, 403);
+  // Admin sets it.
+  assert.equal((await reqAs(AID, 'PUT', '/brand-voice', { brandVoice: 'Warm, plain-spoken. Never use ALL CAPS.' })).status, 200);
+  // Editor can read it back.
+  const got = await (await reqAs(SID, 'GET', '/brand-voice')).json();
+  assert.match(got.brandVoice, /plain-spoken/);
+  // It now flows into an AI reply draft.
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  let cap = null;
+  const restore = mockFetch((u, o) => { cap = JSON.parse(o.body); return claudeResp('drafted'); });
+  try {
+    assert.equal((await rq('/inbox/in_ai/suggest-reply', { tone: 'friendly' })).status, 200);
+    assert.match(cap.system, /Brand voice & guidelines/);
+    assert.match(cap.system, /plain-spoken/);
+  } finally { restore(); delete process.env.ANTHROPIC_API_KEY; }
 });

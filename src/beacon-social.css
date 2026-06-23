@@ -344,3 +344,6 @@
 
 /* Inbox AI reply drafting */
 .bs-in-reply__ai { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+
+/* AI brand voice editor (Connections) */
+.bs-brandvoice { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule, #c9c3aa); max-width: 760px; }
