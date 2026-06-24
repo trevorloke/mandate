@@ -16,6 +16,7 @@ import { Opposition2 } from './opp';
 import { Site2 } from './site';
 import { Events2 } from './events';
 import { Command } from './command';
+import { Tide } from './tide';
 import { Academy } from './academy';
 import Admin from './admin/Admin';
 import OnboardingWizard from './admin/OnboardingWizard';
@@ -44,6 +45,7 @@ const PAGE_MAP2 = {
   events:     () => <Events2 />,
   academy:    () => <Academy />,
   command:    () => <Command />,
+  tide:       () => <Tide />,
   admin:      () => <Admin />,
 };
 

@@ -508,3 +508,59 @@ export const socialAudience = sqliteTable('social_audience', {
   day:         text('day').notNull(),
   capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// ── Tide (Attention Chart) — what the world is paying attention to, who drives
+// it, how they feel, and why — read off a consented panel that gives demographic
+// ground truth. Topics are the tracked subjects; readings are per-refresh
+// attention snapshots; panelists are the opted-in members behind the demographics.
+export const tideTopics = sqliteTable('tide_topics', {
+  id:            text('id').primaryKey(),
+  workspaceId:   text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name:          text('name').notNull(),
+  slug:          text('slug').notNull(),
+  keywordsJson:  text('keywords_json').notNull().default('[]'),   // string[] — match terms
+  status:        text('status').notNull().default('active'),      // active | paused
+  refreshHours:  integer('refresh_hours').notNull().default(4),   // cadence (brief: 4h)
+  lastReadingAt: integer('last_reading_at', { mode: 'timestamp' }),
+  createdById:   text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:     integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:     integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// Consented panel members — the asset. Demographics are self-reported ground
+// truth, not inferred. linked_accounts / interests power driver attribution.
+export const tidePanelists = sqliteTable('tide_panelists', {
+  id:                  text('id').primaryKey(),
+  workspaceId:         text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  externalRef:         text('external_ref'),                      // opaque person handle
+  consentAt:          integer('consent_at', { mode: 'timestamp' }),
+  ageBand:             text('age_band'),                          // '18-24' | '25-34' | ...
+  gender:              text('gender'),                            // 'female' | 'male' | 'nonbinary' | 'unknown'
+  region:              text('region'),                            // 'urban' | 'suburban' | 'rural' or a place
+  demographicsJson:    text('demographics_json').notNull().default('{}'), // extra profiling answers
+  interestsJson:       text('interests_json').notNull().default('[]'),    // topic affinities (string[])
+  linkedAccountsJson:  text('linked_accounts_json').notNull().default('[]'),
+  profileCompleteness: real('profile_completeness').notNull().default(0), // 0..1 (progressive profiling)
+  weight:              real('weight').notNull().default(1),       // post-stratification weight
+  status:              text('status').notNull().default('active'),
+  createdAt:          integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:          integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// A reading is one attention snapshot for a topic at a point in time.
+export const tideReadings = sqliteTable('tide_readings', {
+  id:               text('id').primaryKey(),
+  workspaceId:      text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  topicId:          text('topic_id').notNull().references(() => tideTopics.id, { onDelete: 'cascade' }),
+  capturedAt:      integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  volume:           integer('volume').notNull().default(0),       // attention volume index
+  momentum:         real('momentum').notNull().default(0),        // fractional change vs previous reading
+  sentimentJson:    text('sentiment_json').notNull().default('{}'), // { pos, neu, neg } fractions
+  demographicsJson: text('demographics_json').notNull().default('{}'), // breakdown by cut, with share + sentiment
+  driversJson:      text('drivers_json').notNull().default('[]'), // top drivers (communities/accounts)
+  sourcesJson:      text('sources_json').notNull().default('[]'), // which source layers contributed
+  why:              text('why'),                                  // narrative attribution
+  confidence:       real('confidence').notNull().default(0),      // 0..1 — directional, not census-grade
+  panelN:           integer('panel_n').notNull().default(0),      // panelists behind the cut
+  createdAt:        integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

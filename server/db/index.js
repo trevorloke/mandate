@@ -570,6 +570,64 @@ function bootstrapTables() {
   alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
   alterIfMissing('social_links', 'utm', 'TEXT');
 
+  // Tide (Attention Chart): tracked topics, consented panel, attention readings.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS tide_topics (
+      id              TEXT PRIMARY KEY,
+      workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name            TEXT NOT NULL,
+      slug            TEXT NOT NULL,
+      keywords_json   TEXT NOT NULL DEFAULT '[]',
+      status          TEXT NOT NULL DEFAULT 'active',
+      refresh_hours   INTEGER NOT NULL DEFAULT 4,
+      last_reading_at INTEGER,
+      created_by_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at      INTEGER DEFAULT (unixepoch()),
+      updated_at      INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_tide_topics_ws ON tide_topics(workspace_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tide_topics_due ON tide_topics(status, last_reading_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tide_topics_slug ON tide_topics(workspace_id, slug);
+
+    CREATE TABLE IF NOT EXISTS tide_panelists (
+      id                   TEXT PRIMARY KEY,
+      workspace_id         TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      external_ref         TEXT,
+      consent_at           INTEGER,
+      age_band             TEXT,
+      gender               TEXT,
+      region               TEXT,
+      demographics_json    TEXT NOT NULL DEFAULT '{}',
+      interests_json       TEXT NOT NULL DEFAULT '[]',
+      linked_accounts_json TEXT NOT NULL DEFAULT '[]',
+      profile_completeness REAL NOT NULL DEFAULT 0,
+      weight               REAL NOT NULL DEFAULT 1,
+      status               TEXT NOT NULL DEFAULT 'active',
+      created_at           INTEGER DEFAULT (unixepoch()),
+      updated_at           INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_tide_panelists_ws ON tide_panelists(workspace_id, status);
+
+    CREATE TABLE IF NOT EXISTS tide_readings (
+      id                TEXT PRIMARY KEY,
+      workspace_id      TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      topic_id          TEXT NOT NULL REFERENCES tide_topics(id) ON DELETE CASCADE,
+      captured_at       INTEGER DEFAULT (unixepoch()),
+      volume            INTEGER NOT NULL DEFAULT 0,
+      momentum          REAL NOT NULL DEFAULT 0,
+      sentiment_json    TEXT NOT NULL DEFAULT '{}',
+      demographics_json TEXT NOT NULL DEFAULT '{}',
+      drivers_json      TEXT NOT NULL DEFAULT '[]',
+      sources_json      TEXT NOT NULL DEFAULT '[]',
+      why               TEXT,
+      confidence        REAL NOT NULL DEFAULT 0,
+      panel_n           INTEGER NOT NULL DEFAULT 0,
+      created_at        INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_tide_readings_topic ON tide_readings(topic_id, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tide_readings_ws ON tide_readings(workspace_id, captured_at DESC);
+  `);
+
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.
   // Order by SQLite's implicit rowid (insertion order) — created_at is per-second

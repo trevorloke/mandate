@@ -9,7 +9,7 @@
 //   await assertQuota(workspaceId, 'records');     // throws QuotaError if at limit
 //   if (!hasFeature(plan, 'passkeys')) throw new Error('upgrade required');
 import { db } from '../db/index.js';
-import { workspaces, moduleData, users, dashboardWidgets, scheduledReports, oauthProviders } from '../db/schema.js';
+import { workspaces, moduleData, users, dashboardWidgets, scheduledReports, oauthProviders, tideTopics } from '../db/schema.js';
 import { and, eq, isNull, count } from 'drizzle-orm';
 
 export const PLANS = {
@@ -22,6 +22,7 @@ export const PLANS = {
       scheduledReports:  1,
       dashboardWidgets:  5,
       oauthProviders:    0,
+      tideTopics:        3,
     },
     features: {
       passkeys:    false,
@@ -39,6 +40,7 @@ export const PLANS = {
       scheduledReports:  25,
       dashboardWidgets:  50,
       oauthProviders:    3,
+      tideTopics:        25,
     },
     features: {
       passkeys:    true,
@@ -56,6 +58,7 @@ export const PLANS = {
       scheduledReports:  Infinity,
       dashboardWidgets:  Infinity,
       oauthProviders:    Infinity,
+      tideTopics:        Infinity,
     },
     features: {
       passkeys:    true,
@@ -124,6 +127,10 @@ async function currentUsage(workspaceId, quota) {
     }
     case 'oauthProviders': {
       const r = await db.select({ c: count() }).from(oauthProviders).where(eq(oauthProviders.workspaceId, workspaceId));
+      return r[0]?.c ?? 0;
+    }
+    case 'tideTopics': {
+      const r = await db.select({ c: count() }).from(tideTopics).where(eq(tideTopics.workspaceId, workspaceId));
       return r[0]?.c ?? 0;
     }
     default: return 0;

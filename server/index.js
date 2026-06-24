@@ -41,7 +41,9 @@ import dashboardRoutes from './routes/dashboard.js';
 import businessMetricsRoutes from './routes/metrics-business.js';
 import socialRoutes from './routes/social.js';
 import linksRoutes from './routes/links.js';
+import tideRoutes from './routes/tide.js';
 import { startMetricsWorker } from './lib/metrics-compute.js';
+import { startTideWorker } from './lib/tide-worker.js';
 
 ensureTables();
 startWebhookWorker();
@@ -49,6 +51,7 @@ startRetentionWorker();
 startReportsWorker();
 startSocialWorker();
 startMetricsWorker();
+startTideWorker();
 
 const app = new Hono();
 
@@ -111,6 +114,7 @@ app.route('/api/reports', reportsRoutes);
 app.route('/api/auth/passkey', passkeyRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/social', socialRoutes);
+app.route('/api/tide', tideRoutes);
 app.route('/l', linksRoutes);
 
 // Static SPA serving (production deploys). When `dist/` exists OR

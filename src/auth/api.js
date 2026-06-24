@@ -273,4 +273,17 @@ export const api = {
   deleteReport:  (id) => fetchJson(`/api/reports/${id}`, { method: 'DELETE' }),
   runReportNow:  (id) => fetchJson(`/api/reports/${id}/run-now`, { method: 'POST' }),
   // Export uses a direct download (returns CSV/JSON file), not JSON parsing
+
+  // Tide (Attention Chart)
+  tideStatus:      () => fetchJson('/api/tide/status'),
+  tideSources:     () => fetchJson('/api/tide/sources'),
+  tideTopics:      () => fetchJson('/api/tide/topics'),
+  tideTopic:       (id) => fetchJson(`/api/tide/topics/${id}`),
+  tideCreateTopic: (body) => fetchJson('/api/tide/topics', { method: 'POST', body }),
+  tideUpdateTopic: (id, body) => fetchJson(`/api/tide/topics/${id}`, { method: 'PUT', body }),
+  tideDeleteTopic: (id) => fetchJson(`/api/tide/topics/${id}`, { method: 'DELETE' }),
+  tideRefresh:     (id) => fetchJson(`/api/tide/topics/${id}/refresh`, { method: 'POST' }),
+  tidePanel:       () => fetchJson('/api/tide/panel'),
+  tideAddPanelist: (body) => fetchJson('/api/tide/panel', { method: 'POST', body }),
+  tideSeed:        () => fetchJson('/api/tide/seed', { method: 'POST' }),
 };
