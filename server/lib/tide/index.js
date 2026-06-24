@@ -4,6 +4,7 @@
 // matter of dropping in an adapter and flipping `live`.
 import * as seed from './seed-source.js';
 import * as googleTrends from './google-trends.js';
+import * as news from './news.js';
 import { panelBreakdown } from './panel.js';
 import { distribution } from './sentiment.js';
 import { summarize } from './why.js';
@@ -13,10 +14,10 @@ import { round2 } from './rng.js';
 // `live` is read dynamically so an env-gated source flips on without a restart.
 export const SOURCES = {
   google_trends: { id: googleTrends.id, label: googleTrends.label, layer: googleTrends.layer, adapter: googleTrends, isEnabled: googleTrends.isEnabled },
+  news: { id: news.id, label: news.label, layer: news.layer, adapter: news, isEnabled: news.isEnabled },
   seed: { id: seed.meta.id, label: seed.meta.label, layer: seed.meta.layer, adapter: seed, isEnabled: () => true },
-  // Extension points behind the same contract:
-  // news:          { id:'news',       label:'Licensed news',   layer:'licensed', ... },
-  // socialFirehose:{ id:'x_firehose', label:'Social firehose', layer:'public',   ... },
+  // Extension point behind the same contract:
+  // socialFirehose:{ id:'x_firehose', label:'Social firehose', layer:'public', ... },
 };
 
 export const getSource = (id) => SOURCES[id] || null;
