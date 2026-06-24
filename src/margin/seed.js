@@ -225,6 +225,44 @@ export const stvFixture = {
   params: { undecidedMethod: 'proportional', asOf: ASOF, seed: 12345, iterations: 1000 },
 };
 
+// ── Electoral college fixture: winner-take-all states → 100 electors ──────────
+// Two main parties; eight states with electors summing to 100, majority 51.
+// Three states are genuine swings so tipping (swing-state) analysis bites.
+const ecState = (id, electors, base, eligible, turnout) => ({
+  unit_id: id, region: id, electors,
+  eligible_voters: eligible, eligible_unregistered: Math.round(eligible * 0.06),
+  turnout_history: turnout, incumbent_party: base.A >= base.B ? 'A' : 'B', partisan_baseline: base,
+});
+export const electoralCollegeFixture = {
+  synthetic: true,
+  name: 'Sample electoral college',
+  mode: 'seat',
+  system: { family: 'electoral-college', totalSeats: 100, majoritySeats: 51 },
+  yourParty: 'A',
+  threshold: 51,
+  parties: [
+    { id: 'A', name: 'Your ticket', color: '#111111' },
+    { id: 'B', name: 'Opposing ticket', color: '#c79a00' },
+  ],
+  units: [
+    ecState('Safe North', 20, { A: 0.58, B: 0.42 }, 5000000, 0.64),
+    ecState('Safe South', 18, { A: 0.40, B: 0.60 }, 4600000, 0.60),
+    ecState('Lakeside', 16, { A: 0.50, B: 0.50 }, 4200000, 0.66), // swing
+    ecState('Riverbend', 14, { A: 0.49, B: 0.51 }, 3800000, 0.63), // swing
+    ecState('Heartland', 12, { A: 0.46, B: 0.54 }, 3000000, 0.61),
+    ecState('Gulf Coast', 10, { A: 0.51, B: 0.49 }, 2600000, 0.59), // swing
+    ecState('Highlands', 6, { A: 0.55, B: 0.45 }, 1500000, 0.58),
+    ecState('Capital', 4, { A: 0.62, B: 0.38 }, 1100000, 0.67),
+  ],
+  polls: [
+    { poll_id: 'natl-ec', field_date: '2025-05-26', sample_size: 2500, pollster_rating: 0.75, scope: 'national', shares: { A: 0.50, B: 0.50 }, house_effect: 0 },
+    { poll_id: 'lakeside', field_date: '2025-05-24', sample_size: 900, pollster_rating: 0.7, scope: 'regional', region: 'Lakeside', shares: { A: 0.50, B: 0.50 }, house_effect: 0 },
+  ],
+  raise: { available_to_spend: 5000000, cost_per_contact: 14 },
+  ledger: { spending_cap: 90000000, spent_to_date: 85000000, cap_remaining: 5000000 },
+  params: { undecidedMethod: 'proportional', asOf: ASOF, seed: 12345, iterations: 1000 },
+};
+
 // A held-out "actual" past result for the backtest screen (§9). Synthetic.
 export const seatBacktestActual = { yourSeats: 6 };       // came up one short of the 7 threshold
 export const singleBacktestActual = { yourShare: 0.33, win: true };
@@ -236,4 +274,5 @@ export const FIXTURES = {
   mmp: { key: 'mmp', label: 'Mixed-member', fixture: mmpFixture },
   atlarge: { key: 'atlarge', label: 'At-large council', fixture: atLargeFixture },
   stv: { key: 'stv', label: 'STV district', fixture: stvFixture },
+  ec: { key: 'ec', label: 'Electoral college', fixture: electoralCollegeFixture },
 };

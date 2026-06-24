@@ -7,8 +7,8 @@ import {
   pluralityResolve, runoffResolve, irvResolve, resolveSystem, SYSTEMS,
   blockVoteElect, stvElect, supermajorityResolve,
 } from '../../src/margin/systems.js';
-import { buildPointEstimates, runSimulation, summarize } from '../../src/margin/engine.js';
-import { prFixture, mmpFixture, singleFixture, atLargeFixture, stvFixture } from '../../src/margin/seed.js';
+import { buildPointEstimates, runSimulation, summarize, tippingPoints } from '../../src/margin/engine.js';
+import { prFixture, mmpFixture, singleFixture, atLargeFixture, stvFixture, electoralCollegeFixture } from '../../src/margin/seed.js';
 
 // ── Allocation: known textbook results ──
 test("D'Hondt matches the canonical worked example", () => {
@@ -151,6 +151,22 @@ test('parallel (MMM): district tier + non-compensatory list tier sum', () => {
     const total = r.seats.A + r.seats.B + r.seats.C;
     assert.equal(total, 12 + 12, 'district seats (12) + list seats (12)');
   }
+});
+
+test('electoral college: states deliver electors winner-take-all; tipping = swing states', () => {
+  const point = buildPointEstimates(electoralCollegeFixture);
+  const res = runSimulation(electoralCollegeFixture, point, { iterations: 800 });
+  for (const r of res.slice(0, 40)) {
+    const total = r.seats.A + r.seats.B;
+    assert.equal(total, 100, 'all 100 electors allocated');
+  }
+  const s = summarize(res, { ...electoralCollegeFixture, _point: point });
+  assert.ok(s.pMajority > 0 && s.pMajority < 1, 'a real contest, not a lock');
+  assert.equal(s.threshold, 51);
+  const tips = tippingPoints(res, { ...electoralCollegeFixture, _point: point });
+  assert.ok(tips.length > 0, 'tipping (decisive) states found');
+  const top = tips.slice(0, 4).map((t) => t.unit_id);
+  assert.ok(top.some((u) => ['Lakeside', 'Riverbend', 'Gulf Coast'].includes(u)), 'a swing state is decisive');
 });
 
 test('ranked-choice swaps a plurality loss into a win when transfers favour you', () => {

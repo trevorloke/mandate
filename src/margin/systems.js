@@ -25,6 +25,7 @@ export const SYSTEMS = {
   'supermajority': { id: 'supermajority', label: 'Supermajority threshold', output: 'single', district: false, blurb: 'A set bar (e.g. 60%) must be cleared, or the measure fails.' },
   // seat-allocating
   'fptp-seats': { id: 'fptp-seats', label: 'Single-member districts (FPTP)', output: 'seat', district: true, blurb: 'Each district elects one member by plurality.' },
+  'electoral-college': { id: 'electoral-college', label: 'Electoral college', output: 'seat', district: true, weighted: true, blurb: 'Winner-take-all electors per state; a majority of electors wins (US-style).' },
   'block-vote': { id: 'block-vote', label: 'At-large block vote', output: 'seat', district: false, multiMember: true, blurb: 'One at-large body; the top vote-getters fill every seat. Common in BC municipal councils.' },
   'stv': { id: 'stv', label: 'Single transferable vote', output: 'seat', district: false, multiMember: true, blurb: 'Multi-member, ranked ballots, Droop quota with surplus + elimination transfers.' },
   'party-list-pr': { id: 'party-list-pr', label: 'Party-list proportional', output: 'seat', district: false, blurb: 'Seats split in proportion to the vote, by a chosen formula.' },
@@ -248,7 +249,9 @@ export function resolveSeats(districtWins, popVotes, sys, parties) {
   const zero = () => Object.fromEntries(groups.map((x) => [x, 0]));
   const rollup = (perId) => { const s = zero(); for (const id of Object.keys(perId)) s[g(id)] = (s[g(id)] || 0) + perId[id]; return s; };
 
-  if (sys.family === 'fptp-seats') return rollup(districtWins);
+  // FPTP rolls up one seat per district; electoral college rolls up the electors
+  // the engine already weighted into districtWins.
+  if (sys.family === 'fptp-seats' || sys.family === 'electoral-college') return rollup(districtWins);
 
   if (sys.family === 'block-vote') {
     const won = blockVoteElect(popVotes, sys.districtMagnitude || sys.totalSeats);

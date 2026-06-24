@@ -266,7 +266,8 @@ export function runSimulation(config, point, overrides = {}) {
         if (votes[p.id] > bestV) { bestV = votes[p.id]; bestC = p.id; }
       }
       unitWinners[U.unit_id] = bestC;
-      districtWins[bestC] += 1;
+      // Electoral college: a state delivers all its electors to its winner.
+      districtWins[bestC] += sys.family === 'electoral-college' ? (U.raw.electors || 1) : 1;
       sharesOut[U.unit_id] = shares;
       votesOut[U.unit_id] = votes;
     }
@@ -363,9 +364,12 @@ function intervalsOf(sortedAsc) {
 // ── §6.4 Tipping-point analysis (seat mode) ──
 export function tippingPoints(results, config) {
   const sys = resolveSystem(config);
-  if (sys.family !== 'fptp-seats') return []; // cleanest where each district is one seat
+  if (sys.family !== 'fptp-seats' && sys.family !== 'electoral-college') return [];
   const yourParty = config.yourParty;
   const threshold = sys.majoritySeats;
+  // Electoral college accumulates electors per state, not one seat per district.
+  const weightOf = {};
+  for (const u of config.units) weightOf[u.unit_id] = sys.family === 'electoral-college' ? (u.electors || 1) : 1;
   const tally = {};
   let decidedSims = 0;
   for (const r of results) {
@@ -380,7 +384,7 @@ export function tippingPoints(results, config) {
     // intent and the canonical 538-style definition.)
     won.sort((a, b) => marginIn(r, b, config) - marginIn(r, a, config));
     let cum = 0, tip = null;
-    for (const u of won) { cum += 1; if (cum >= threshold) { tip = u; break; } }
+    for (const u of won) { cum += weightOf[u] || 1; if (cum >= threshold) { tip = u; break; } }
     if (tip) tally[tip] = (tally[tip] || 0) + 1;
   }
   return Object.keys(tally)
@@ -550,7 +554,8 @@ export function forecast(config) {
   const point = buildPointEstimates(config);
   const results = runSimulation(config, point);
   const summary = summarize(results, { ...config, _point: point });
-  const tips = resolveSystem(config).family === 'fptp-seats' ? tippingPoints(results, { ...config, _point: point }) : [];
+  const tcfam = resolveSystem(config).family;
+  const tips = (tcfam === 'fptp-seats' || tcfam === 'electoral-college') ? tippingPoints(results, { ...config, _point: point }) : [];
   return { point, summary, tipping: tips, seed: point.params.seed, iterations: point.params.iterations };
 }
 
