@@ -141,3 +141,8 @@
 .mg-field2 { display: flex; gap: 12px; }
 .mg-field2 .mg-field { flex: 1; }
 .mg-field optgroup { font-style: normal; font-weight: 700; }
+
+/* Screen header with export */
+.mg-screenhd { display: flex; justify-content: space-between; align-items: center; }
+.mg-export { background: var(--ink); color: var(--yel); border: 0; padding: 7px 14px; font-weight: 700; font-size: 13px; cursor: pointer; }
+.mg-export:hover { background: #000; }

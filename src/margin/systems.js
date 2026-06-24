@@ -22,6 +22,7 @@ export const SYSTEMS = {
   'plurality': { id: 'plurality', label: 'Plurality (first past the post)', output: 'single', district: false, blurb: 'Most votes wins. One round.' },
   'majority-runoff': { id: 'majority-runoff', label: 'Two-round runoff', output: 'single', district: false, blurb: 'Majority required; top two go to a runoff.' },
   'ranked-choice': { id: 'ranked-choice', label: 'Ranked choice (instant runoff)', output: 'single', district: false, blurb: 'Eliminate last, transfer preferences, until a majority.' },
+  'supermajority': { id: 'supermajority', label: 'Supermajority threshold', output: 'single', district: false, blurb: 'A set bar (e.g. 60%) must be cleared, or the measure fails.' },
   // seat-allocating
   'fptp-seats': { id: 'fptp-seats', label: 'Single-member districts (FPTP)', output: 'seat', district: true, blurb: 'Each district elects one member by plurality.' },
   'block-vote': { id: 'block-vote', label: 'At-large block vote', output: 'seat', district: false, multiMember: true, blurb: 'One at-large body; the top vote-getters fill every seat. Common in BC municipal councils.' },
@@ -49,7 +50,7 @@ export function resolveSystem(config) {
   const totalSeats = s.totalSeats || (config.units ? config.units.length : 0);
   return {
     family, output: def.output, district: def.district, multiMember: !!def.multiMember,
-    winThreshold: s.winThreshold ?? 0.5,                 // for runoff / supermajority
+    winThreshold: s.winThreshold ?? (family === 'supermajority' ? 0.6 : 0.5), // runoff / supermajority bar
     allocation: s.allocation || 'dhondt',
     electoralThreshold: s.electoralThreshold ?? 0,        // min vote share to win seats
     totalSeats,
@@ -176,10 +177,21 @@ export function irvResolve(shares, sys) {
   return { winner: sorted[0], margin: (tally[sorted[0]] - (tally[sorted[1]] || 0)) / total, round: 0 };
 }
 
+// Supermajority: the leader must clear winThreshold or the measure fails (no
+// winner). Used for referenda / amendments and high-bar elections.
+export function supermajorityResolve(shares, sys) {
+  const total = sum(vals(shares)) || 1;
+  const sorted = Object.keys(shares).sort((a, b) => shares[b] - shares[a]);
+  const lead = sorted[0];
+  const passed = shares[lead] / total >= (sys.winThreshold ?? 0.6);
+  return { winner: passed ? lead : null, margin: (shares[lead] - (shares[sorted[1]] || 0)) / total, round: 1, passed };
+}
+
 // Resolve a single-winner contest by family.
 export function resolveSingle(shares, sys) {
   if (sys.family === 'majority-runoff') return runoffResolve(shares, sys);
   if (sys.family === 'ranked-choice') return irvResolve(shares, sys);
+  if (sys.family === 'supermajority') return supermajorityResolve(shares, sys);
   return pluralityResolve(shares);
 }
 

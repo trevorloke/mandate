@@ -12,6 +12,7 @@ import {
 } from './margin/engine';
 import { SYSTEMS, ALLOCATION_METHODS, resolveSystem } from './margin/systems';
 import { FIXTURES, seatBacktestActual, singleBacktestActual } from './margin/seed';
+import { forecastCsv, downloadCsv } from './margin/export';
 
 const VOL_SIGMA = { low: 0.02, medium: 0.03, high: 0.045 };
 const INVEST_CONTACTS = 1500;
@@ -118,8 +119,8 @@ function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
           </select>
         </label>
         <div className="mg-sysblurb">{def.blurb}</div>
-        {sys.family === 'majority-runoff' && (
-          <label className="mg-field">Majority needed to avoid a runoff
+        {(sys.family === 'majority-runoff' || sys.family === 'supermajority') && (
+          <label className="mg-field">{sys.family === 'supermajority' ? 'Threshold to pass' : 'Majority needed to avoid a runoff'}
             <input type="number" step="0.01" value={sys.winThreshold} onChange={(e) => setSys('winThreshold', +e.target.value || 0.5)} />
           </label>
         )}
@@ -198,7 +199,10 @@ function ForecastScreen({ model }) {
   const { config, summary, tips, point, levers } = model;
   return (
     <div className="mg-screen">
-      <h2 className="mg-h2">Forecast</h2>
+      <div className="mg-screenhd">
+        <h2 className="mg-h2">Forecast</h2>
+        <button className="mg-export" onClick={() => downloadCsv('margin-forecast.csv', forecastCsv(model))}>Export CSV</button>
+      </div>
       {config.mode === 'single' ? (
         <div className="mg-forecast">
           <div className="mg-gaugewrap"><Gauge p={summary.pWin} /><div className="mg-odds">{aboutInTen(summary.pWin)}</div></div>

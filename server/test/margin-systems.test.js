@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   highestAverages, largestRemainder, allocateSeats,
   pluralityResolve, runoffResolve, irvResolve, resolveSystem, SYSTEMS,
-  blockVoteElect, stvElect,
+  blockVoteElect, stvElect, supermajorityResolve,
 } from '../../src/margin/systems.js';
 import { buildPointEstimates, runSimulation, summarize } from '../../src/margin/engine.js';
 import { prFixture, mmpFixture, singleFixture, atLargeFixture, stvFixture } from '../../src/margin/seed.js';
@@ -93,6 +93,21 @@ test('MMP: total seats per sim >= district seats and tops up toward proportional
     assert.ok(total >= 12, 'at least the 12 district seats are filled');
     assert.ok(total >= mmpFixture.system.totalSeats - 1, 'list tier tops up to ~24 (overhang allowed)');
   }
+});
+
+test('supermajority: clears the bar or the measure fails', () => {
+  assert.equal(supermajorityResolve({ A: 0.62, B: 0.38 }, { winThreshold: 0.6 }).passed, true);
+  const fail = supermajorityResolve({ A: 0.55, B: 0.45 }, { winThreshold: 0.6 });
+  assert.equal(fail.passed, false);
+  assert.equal(fail.winner, null, 'no winner when the bar is not cleared');
+  assert.equal(resolveSystem({ system: { family: 'supermajority' } }).winThreshold, 0.6, 'defaults to 60%');
+});
+
+test('supermajority end-to-end: a 33% plurality almost never clears 60%', () => {
+  const sm = { ...singleFixture, system: { family: 'supermajority', winThreshold: 0.6 } };
+  const point = buildPointEstimates(sm);
+  const s = summarize(runSimulation(sm, point, { iterations: 400 }), { ...sm, _point: point });
+  assert.ok(s.pWin < 0.05, 'leader near 33% rarely reaches a 60% bar');
 });
 
 test('block vote: the top M contenders fill the seats', () => {

@@ -9,6 +9,7 @@ import {
   tippingPoints, opponentScenarios, sensitivity, optimizeMoves, winNumberAndGap, backtest,
 } from '../../src/margin/engine.js';
 import { singleFixture, seatFixture, seatBacktestActual } from '../../src/margin/seed.js';
+import { forecastCsv } from '../../src/margin/export.js';
 
 const std = (xs) => { const m = xs.reduce((s, x) => s + x, 0) / xs.length; return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / xs.length); };
 const seatPoint = () => buildPointEstimates(seatFixture);
@@ -129,6 +130,19 @@ test('backtest reports calibration against a held-out result', () => {
   assert.equal(bt.actualSeats, 6);
   assert.equal(typeof bt.within80, 'boolean');
   assert.ok(bt.predicted.p2_5 <= bt.predicted.p97_5);
+});
+
+test('forecastCsv emits headline + per-unit rows with intervals', () => {
+  const point = buildPointEstimates(seatFixture);
+  const summary = summarize(runSimulation(seatFixture, point, { iterations: 300 }), { ...seatFixture, _point: point });
+  const csv = forecastCsv({ config: seatFixture, summary, levers: { seed: 12345, iterations: 300 } });
+  const lines = csv.split('\n');
+  assert.match(lines[0], /^metric,value,low_80,high_80/);
+  assert.ok(lines.some((l) => l.startsWith('majority_probability_pct')));
+  assert.ok(lines.some((l) => l.startsWith('seats,')));
+  // 12 per-unit rows present.
+  assert.equal(seatFixture.units.filter((u) => csv.includes(`\n${u.unit_id},`)).length, 12);
+  assert.ok(csv.includes('synthetic sample data'));
 });
 
 test('performance: 1000 iters across ~96 units in under ~1.5s', () => {
