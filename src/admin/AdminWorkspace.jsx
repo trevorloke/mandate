@@ -15,6 +15,7 @@ const ALL_MODULES = [
   { k: 'academy',    label: 'Academy',    desc: 'Courses · faculty · reading' },
   { k: 'command',    label: 'Command',    desc: 'War-room chat · channels' },
   { k: 'tide',       label: 'Tide',       desc: 'Attention chart · panel · sentiment · why' },
+  { k: 'margin',     label: 'Margin',     desc: 'Forecast · simulation · path to victory' },
 ];
 
 export default function AdminWorkspace() {

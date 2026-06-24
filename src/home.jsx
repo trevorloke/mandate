@@ -24,7 +24,7 @@ const MOD_LABELS = {
   ground:'Ground', beacon:'Beacon', raise:'Raise', ledger:'Ledger',
   coalition:'Coalition', civic:'Civic', opposition:'Opposition',
   site:'Site', events:'Events', academy:'Academy', command:'Command',
-  tide:'Tide',
+  tide:'Tide', margin:'Margin',
 };
 
 function timeOfDay() {
