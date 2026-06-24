@@ -1,8 +1,9 @@
 // Margin — election forecasting + path to victory. Know the number, find the
 // path. Black and yellow, No Name plain, sentence case, honest intervals. All
 // computation is client-side off the pure engine; nothing is fetched.
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import './margin.css';
+import { api } from './auth/api';
 import { pctInt, aboutInTen, num, counted, seatRange, share1, pts } from './margin/format';
 import { Gauge, SeatHistogram, MarginDensity, Tornado, GapBar } from './margin/charts';
 import {
@@ -84,7 +85,7 @@ function ConfidenceDot({ c }) {
 }
 
 // ── Setup screen ──
-function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
+function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture, useWorkspace, setUseWorkspace, wsReady, wsErr }) {
   const sys = levers.system;
   const setSys = (k, v) => setLever('system', { ...sys, [k]: v });
   const def = SYSTEMS[sys.family] || SYSTEMS.plurality;
@@ -95,16 +96,30 @@ function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
   return (
     <div className="mg-screen">
       <h2 className="mg-h2">Setup</h2>
-      <p className="mg-dek">Margin works for any electoral system — popular-vote and seat models alike. Pick a sample dataset, choose the system, and tune its parameters. Production wires the live Ground, Civic, Raise, Ledger, and Beacon modules <SampleBadge /></p>
+      <p className="mg-dek">Margin works for any electoral system — popular-vote and seat models alike. Forecast off your live workspace contest, or a sample dataset, then choose the system and tune its parameters.</p>
 
-      <h3 className="mg-h3">Sample dataset</h3>
+      <h3 className="mg-h3">Data source</h3>
       <div className="mg-modes">
-        {Object.values(FIXTURES).map((f) => (
-          <button key={f.key} className={`mg-mode ${fixtureKey === f.key ? 'is-on' : ''}`} onClick={() => setFixtureKey(f.key)}>
-            <div className="mg-mode__t">{f.label}</div><div className="mg-mode__d">{f.fixture.parties.length} {f.fixture.mode === 'single' ? 'candidates' : 'parties'} · {f.fixture.units.length} {f.fixture.units.length === 1 ? 'unit' : 'units'}</div>
-          </button>
-        ))}
+        <button className={`mg-mode ${!useWorkspace ? 'is-on' : ''}`} onClick={() => setUseWorkspace(false)}>
+          <div className="mg-mode__t">Sample dataset <SampleBadge /></div><div className="mg-mode__d">Bundled synthetic fixtures</div>
+        </button>
+        <button className={`mg-mode ${useWorkspace ? 'is-on' : ''}`} onClick={() => setUseWorkspace(true)}>
+          <div className="mg-mode__t">Workspace data</div><div className="mg-mode__d">Your margin.contest / district / poll records</div>
+        </button>
       </div>
+      {useWorkspace && !wsReady && <p className="mg-dek">{wsErr || 'Loading workspace contest…'}</p>}
+      {useWorkspace && wsReady && <p className="mg-dek">Forecasting off <b>{fixture.name}</b> — {fixture.units.length} districts, {(fixture.polls || []).length} polls from your workspace.</p>}
+
+      {!useWorkspace && <>
+        <h3 className="mg-h3">Sample dataset</h3>
+        <div className="mg-modes">
+          {Object.values(FIXTURES).map((f) => (
+            <button key={f.key} className={`mg-mode ${fixtureKey === f.key ? 'is-on' : ''}`} onClick={() => setFixtureKey(f.key)}>
+              <div className="mg-mode__t">{f.label}</div><div className="mg-mode__d">{f.fixture.parties.length} {f.fixture.mode === 'single' ? 'candidates' : 'parties'} · {f.fixture.units.length} {f.fixture.units.length === 1 ? 'unit' : 'units'}</div>
+            </button>
+          ))}
+        </div>
+      </>}
 
       <div className="mg-card">
         <h3 className="mg-h3">Electoral system</h3>
@@ -467,14 +482,27 @@ const TABS = [['setup', 'Setup'], ['forecast', 'Forecast'], ['stress', 'Stress t
 
 function Margin() {
   const [fixtureKey, setFixtureKey] = useState('seat');
-  const fixture = FIXTURES[fixtureKey].fixture;
   const [leversByKey, setLeversByKey] = useState(() => Object.fromEntries(Object.values(FIXTURES).map((f) => [f.key, defaultLevers(f.fixture)])));
-  const levers = leversByKey[fixtureKey];
-  const setLever = (k, v) => setLeversByKey((s) => ({ ...s, [fixtureKey]: { ...s[fixtureKey], [k]: v } }));
+  // Live workspace contest (Phase 4) vs the bundled sample fixtures.
+  const [useWorkspace, setUseWorkspace] = useState(false);
+  const [wsCfg, setWsCfg] = useState(null);
+  const [wsErr, setWsErr] = useState(null);
+  useEffect(() => {
+    if (!useWorkspace || wsCfg) return;
+    api.marginContest().then((r) => {
+      if (r.config) { setWsCfg(r.config); setLeversByKey((s) => (s.__ws__ ? s : { ...s, __ws__: defaultLevers(r.config) })); }
+      else setWsErr(r.reason || 'No workspace contest configured.');
+    }).catch((e) => setWsErr(e.message));
+  }, [useWorkspace, wsCfg]);
+
+  const activeKey = useWorkspace && wsCfg ? '__ws__' : fixtureKey;
+  const fixture = useWorkspace && wsCfg ? wsCfg : FIXTURES[fixtureKey].fixture;
+  const levers = leversByKey[activeKey] || defaultLevers(fixture);
+  const setLever = (k, v) => setLeversByKey((s) => ({ ...s, [activeKey]: { ...(s[activeKey] || defaultLevers(fixture)), [k]: v } }));
   const [tab, setTab] = useState('forecast');
   const [scenarios, setScenarios] = useState([]);
 
-  const leverKey = JSON.stringify({ fixtureKey, ...levers });
+  const leverKey = JSON.stringify({ activeKey, ...levers });
   const model = useMemo(() => {
     const { config, overrides } = deriveModel(fixture, levers);
     const point = buildPointEstimates(config);
@@ -507,7 +535,7 @@ function Margin() {
         {TABS.map(([k, t]) => <button key={k} className={`mg-tab ${tab === k ? 'is-on' : ''}`} onClick={() => setTab(k)}>{t}</button>)}
       </nav>
 
-      {tab === 'setup' && <SetupScreen fixtureKey={fixtureKey} setFixtureKey={setFixtureKey} levers={levers} setLever={setLever} fixture={fixture} />}
+      {tab === 'setup' && <SetupScreen fixtureKey={fixtureKey} setFixtureKey={setFixtureKey} levers={levers} setLever={setLever} fixture={fixture} useWorkspace={useWorkspace} setUseWorkspace={setUseWorkspace} wsReady={!!wsCfg} wsErr={wsErr} />}
       {tab === 'forecast' && <ForecastScreen model={model} />}
       {tab === 'stress' && <StressScreen model={model} />}
       {tab === 'path' && <PathScreen model={model} />}

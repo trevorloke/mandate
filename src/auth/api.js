@@ -296,6 +296,9 @@ export const api = {
   entityDelete:    (id) => fetchJson(`/api/entities/${id}`, { method: 'DELETE' }),
   entityRebuild:   () => fetchJson('/api/entities/rebuild', { method: 'POST' }),
   entityByRecord:  (m, k, r) => fetchJson(`/api/entities/by-record/${m}/${k}/${encodeURIComponent(r)}`),
+
+  // Margin — live workspace contest (Phase 4)
+  marginContest:   () => fetchJson('/api/margin/contest'),
   // Gamified opt-in journey + value-back mirror
   tidePanelSteps:  () => fetchJson('/api/tide/panel/steps'),
   tidePanelStart:  () => fetchJson('/api/tide/panel/start', { method: 'POST' }),
