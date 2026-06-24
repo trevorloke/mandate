@@ -261,6 +261,14 @@ function PanelTab({ panel, canEdit, onChanged }) {
         <div className="tide-stat"><div className="tide-stat__num">{pct(panel.avgCompleteness)}</div><div className="tide-stat__lbl">avg profile completeness</div></div>
       </div>
       <p className="tide-note">Demographics are self-reported ground truth — not inferred from public signals. Confidence on every cut is disclosed; readings are directional, not census-grade.</p>
+      {panel.representativeness && (
+        <div className="tide-rep">
+          <div className="tide-rep__stat"><b>{panel.representativeness.effectiveN.toLocaleString()}</b><span>effective sample (of {panel.size.toLocaleString()})</span></div>
+          <div className="tide-rep__stat"><b>{panel.representativeness.designEffect}×</b><span>design effect</span></div>
+          <div className="tide-rep__stat"><b>{panel.representativeness.drift}</b><span>raw skew vs targets</span></div>
+          <div className="tide-rep__note">Cuts are post-stratified (raked) toward population targets, so a surge "among 25–34 women" reflects the population, not who happened to join. Heavier correction lowers the effective sample — and the confidence with it.</div>
+        </div>
+      )}
       <div className="tide-breakdown__cols">
         <Dist title="Age" obj={panel.age} />
         <Dist title="Gender" obj={panel.gender} />

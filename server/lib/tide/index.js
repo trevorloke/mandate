@@ -92,6 +92,7 @@ export async function buildReading({ topic, panelists, prev, at, sources = enabl
     sources: used.map((s) => ({ id: s.id, layer: s.layer })),
     confidence: panel.confidence,
     panelN: panel.panelN,
+    effectiveN: panel.effectiveN,
   };
   reading.why = await summarize(reading, topic);
   return reading;

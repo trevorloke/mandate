@@ -74,11 +74,13 @@ export function panelBreakdown(panelists, topic, { at } = {}) {
   const allLabels = [];
   let engagedN = 0;
   let completenessSum = 0;
+  let sumW = 0, sumW2 = 0; // for the effective (Kish) sample size
 
   for (const p of panelists) {
     const { engaged, weight } = engagement(p, topic, bucket);
     if (!engaged) continue;
     engagedN += 1;
+    sumW += (p.weight || 1); sumW2 += (p.weight || 1) ** 2;
     completenessSum += (p.profileCompleteness ?? p.profile_completeness ?? 0);
     const label = polarity(p, topic, bucket);
     allLabels.push(label);
@@ -90,15 +92,18 @@ export function panelBreakdown(panelists, topic, { at } = {}) {
   const finalized = finalizeCuts(cuts);
   const sentiment = distribution(allLabels);
   const avgCompleteness = engagedN ? completenessSum / engagedN : 0;
-  // Confidence: grows with panel depth, scaled by how complete those profiles
-  // are. Saturating curve — a few hundred engaged panelists ≈ solidly directional.
-  const depth = engagedN / (engagedN + 25);
+  // Effective sample size (Kish): post-stratification weighting trades bias for
+  // variance, so confidence keys off effective N, not raw count — heavy
+  // correction honestly lowers confidence.
+  const effectiveN = sumW2 > 0 ? (sumW * sumW) / sumW2 : engagedN;
+  const depth = effectiveN / (effectiveN + 25);
   const confidence = round2(clamp01(depth * (0.55 + 0.45 * avgCompleteness)));
 
   return {
     cuts: finalized,
     sentiment,
     panelN: engagedN,
+    effectiveN: Math.round(effectiveN),
     confidence,
     top: { age: topKey(finalized.age), gender: topKey(finalized.gender), region: topKey(finalized.region) },
     mood: moodLabel(sentiment),

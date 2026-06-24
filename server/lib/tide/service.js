@@ -9,6 +9,8 @@ import { buildReading } from './index.js';
 import { panelComposition } from './panel.js';
 import { applyStep, nextStep } from './profiling.js';
 import { buildMirror } from './mirror.js';
+import { rakeWeights, defaultTargets } from './weighting.js';
+import { round2 } from './rng.js';
 
 const newId = (p) => p + randomBytes(9).toString('hex');
 const parse = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
@@ -39,6 +41,14 @@ export async function activePanelists(workspaceId) {
   return rows.map((p) => ({ ...p, interests: parse(p.interestsJson, []) }));
 }
 
+// Active panel with post-stratification (raked) weights applied — what readings
+// and breakdowns should run off, so opt-in skew is corrected toward population.
+export async function weightedActivePanelists(workspaceId, targets = defaultTargets()) {
+  const panelists = await activePanelists(workspaceId);
+  const { weights } = rakeWeights(panelists, targets);
+  return panelists.map((p) => ({ ...p, weight: weights.get(p.id) ?? p.weight ?? 1 }));
+}
+
 export async function latestReadingFor(topicId) {
   const r = (await db.select().from(tideReadings)
     .where(eq(tideReadings.topicId, topicId))
@@ -53,7 +63,7 @@ export async function generateReading(workspaceId, topicId, { at = Date.now() } 
   if (!row) throw new Error('Topic not found');
 
   const topic = shapeTopic(row);
-  const [panelists, prev] = await Promise.all([activePanelists(workspaceId), latestReadingFor(topicId)]);
+  const [panelists, prev] = await Promise.all([weightedActivePanelists(workspaceId), latestReadingFor(topicId)]);
   const reading = await buildReading({ topic, panelists, prev, at });
 
   const id = newId('tr_');
@@ -107,7 +117,23 @@ export async function topicHistory(workspaceId, topicId, limit = 30) {
 
 export async function panelSummary(workspaceId) {
   const panelists = await activePanelists(workspaceId);
-  return panelComposition(panelists);
+  const comp = panelComposition(panelists);
+  const targets = defaultTargets();
+  const { weights, effectiveN, designEffect, drift } = rakeWeights(panelists, targets);
+  // Weighted (raked) shares per dimension — what the panel looks like after
+  // correcting toward population targets.
+  const wShares = (key) => {
+    const o = {}; let tot = 0;
+    for (const p of panelists) { const w = weights.get(p.id) || 1; const k = (p[key] ?? 'unknown'); o[k] = (o[k] || 0) + w; tot += w; }
+    for (const k of Object.keys(o)) o[k] = round2(o[k] / (tot || 1));
+    return o;
+  };
+  return {
+    ...comp,
+    weighted: { age: wShares('ageBand'), gender: wShares('gender'), region: wShares('region') },
+    targets,
+    representativeness: { effectiveN: Math.round(effectiveN), designEffect: round2(designEffect), drift },
+  };
 }
 
 // ── Panelist journey (gamified opt-in + progressive profiling) ──────────────
