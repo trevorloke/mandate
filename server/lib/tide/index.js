@@ -3,33 +3,38 @@
 // a real source (Google Trends, a licensed news firehose, a social surface) is a
 // matter of dropping in an adapter and flipping `live`.
 import * as seed from './seed-source.js';
+import * as googleTrends from './google-trends.js';
 import { panelBreakdown } from './panel.js';
 import { distribution } from './sentiment.js';
 import { summarize } from './why.js';
 import { round2 } from './rng.js';
 
 // Layers in order of defensibility (brief): panel > licensed > public > modelled.
+// `live` is read dynamically so an env-gated source flips on without a restart.
 export const SOURCES = {
-  seed: { ...seed.meta, adapter: seed },
-  // Extension points — not wired in the foundational slice:
-  // googleTrends: { id:'google_trends', label:'Google Trends', layer:'licensed', live:false, adapter: ... },
-  // news:         { id:'news',          label:'Licensed news',  layer:'licensed', live:false, adapter: ... },
-  // socialFirehose:{id:'x_firehose',    label:'Social firehose', layer:'public',  live:false, adapter: ... },
+  google_trends: { id: googleTrends.id, label: googleTrends.label, layer: googleTrends.layer, adapter: googleTrends, isEnabled: googleTrends.isEnabled },
+  seed: { id: seed.meta.id, label: seed.meta.label, layer: seed.meta.layer, adapter: seed, isEnabled: () => true },
+  // Extension points behind the same contract:
+  // news:          { id:'news',       label:'Licensed news',   layer:'licensed', ... },
+  // socialFirehose:{ id:'x_firehose', label:'Social firehose', layer:'public',   ... },
 };
 
 export const getSource = (id) => SOURCES[id] || null;
+const isLive = (s) => (s.id === 'seed' ? false : !!s.isEnabled?.());
 
 // Public catalogue for the Sources tab (no adapters). The panel is listed first
 // as the ground-truth layer even though it is not a collect() source.
 export function sourceCatalog() {
   const panel = { id: 'panel', label: 'Consented panel', layer: 'panel', live: true, note: 'Demographic ground truth — self-reported, consented.' };
-  const rest = Object.values(SOURCES).map((s) => ({ id: s.id, label: s.label, layer: s.layer, live: s.live }));
+  const rest = Object.values(SOURCES).map((s) => ({ id: s.id, label: s.label, layer: s.layer, live: isLive(s) }));
   return [panel, ...rest];
 }
 
-// Sources enabled for collection in this build (seed only).
+// Sources collected for a reading: any live (env-enabled) real sources, else the
+// seeded source as an offline floor.
 export function enabledSources() {
-  return [SOURCES.seed];
+  const live = Object.values(SOURCES).filter((s) => s.id !== 'seed' && s.isEnabled?.());
+  return live.length ? live : [SOURCES.seed];
 }
 
 // Combine multiple source signals into one public-signal view.
@@ -56,7 +61,17 @@ function mergeSignals(signals) {
 //   prev:       previous reading (for momentum) or null
 //   at:         capture time (ms or Date)
 export async function buildReading({ topic, panelists, prev, at, sources = enabledSources() }) {
-  const signals = sources.map((s) => s.adapter.collect({ topic, at }));
+  // Collect every source concurrently; a source that throws (e.g. a live feed is
+  // unreachable) is dropped rather than failing the whole reading.
+  const settled = await Promise.allSettled(sources.map((s) => Promise.resolve(s.adapter.collect({ topic, at }))));
+  let used = sources.filter((_, i) => settled[i].status === 'fulfilled' && settled[i].value);
+  let signals = settled.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+  // If every live source failed, fall back to the seeded floor so a topic still
+  // gets a reading instead of a gap.
+  if (!signals.length && !sources.includes(SOURCES.seed)) {
+    signals = [SOURCES.seed.adapter.collect({ topic, at })];
+    used = [SOURCES.seed];
+  }
   const merged = mergeSignals(signals);
   const panel = panelBreakdown(panelists, topic, { at });
 
@@ -73,7 +88,7 @@ export async function buildReading({ topic, panelists, prev, at, sources = enabl
     sentiment,
     demographics: { cuts: panel.cuts, top: panel.top },
     drivers: merged.drivers,
-    sources: sources.map((s) => ({ id: s.id, layer: s.layer })),
+    sources: used.map((s) => ({ id: s.id, layer: s.layer })),
     confidence: panel.confidence,
     panelN: panel.panelN,
   };

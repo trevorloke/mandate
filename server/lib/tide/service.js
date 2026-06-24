@@ -127,8 +127,8 @@ export async function recordStep(workspaceId, id, stepId, value) {
   const result = applyStep(panelist, stepId, value);
   if (result.error) return { error: result.error, status: 400 };
   await db.update(tidePanelists).set({ ...result.updates, updatedAt: new Date() }).where(eq(tidePanelists.id, id));
-  const { updates, ...rest } = result; // don't leak raw column patch
-  return rest;
+  delete result.updates; // don't leak the raw column patch to callers
+  return result;
 }
 
 // The full engine-shaped topic set, used by the mirror.
