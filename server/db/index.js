@@ -570,6 +570,22 @@ function bootstrapTables() {
   alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
   alterIfMissing('social_links', 'utm', 'TEXT');
 
+  // Saved Margin scenarios (scenario lab persistence).
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS margin_scenarios (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      win           REAL NOT NULL DEFAULT 0,
+      detail        TEXT,
+      mode_label    TEXT,
+      levers_json   TEXT NOT NULL DEFAULT '{}',
+      created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_margin_scenarios_ws ON margin_scenarios(workspace_id, created_at DESC);
+  `);
+
   // Cross-module entities + their per-module links.
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS entities (

@@ -58,3 +58,33 @@ test('the route serves the seeded contest', async () => {
   assert.equal(body.counts.districts, MARGIN_DISTRICTS.length);
   assert.equal(body.config.units.length, MARGIN_DISTRICTS.length);
 });
+
+test('scenarios persist: save, list, delete (RBAC-gated)', async () => {
+  const { db, schema } = await setupDb();
+  const marginApp = (await import('../routes/margin.js')).default;
+  const WS = 'ws_sc';
+  await db.insert(schema.workspaces).values({ id: WS, name: 'W', tz: 'PT', plan: 'enterprise' });
+  await db.insert(schema.users).values([
+    { id: 'u_ed2', email: 'e2@c.com', passwordHash: 'x', name: 'E', role: 'editor', workspaceId: WS },
+    { id: 'u_vw2', email: 'v2@c.com', passwordHash: 'x', name: 'V', role: 'viewer', workspaceId: WS },
+  ]);
+  await db.insert(schema.sessions).values([
+    { id: 'sess_ed2', userId: 'u_ed2', expiresAt: new Date(Date.now() + 3600e3) },
+    { id: 'sess_vw2', userId: 'u_vw2', expiresAt: new Date(Date.now() + 3600e3) },
+  ]);
+  const rq = (m, p, b, sid) => marginApp.request(p, { method: m, headers: { Cookie: `mdt_session=${sid}`, 'Content-Type': 'application/json' }, body: b != null ? JSON.stringify(b) : undefined });
+
+  // viewer cannot save
+  assert.equal((await rq('POST', '/scenarios', { name: 'X' }, 'sess_vw2')).status, 403);
+  const saved = await rq('POST', '/scenarios', { name: 'Full GOTV push', win: 0.61, detail: 'seats 45 to 51', modeLabel: 'majority probability', levers: { gotvLift: 0.12 } }, 'sess_ed2');
+  assert.equal(saved.status, 201);
+  const { id } = await saved.json();
+
+  const list = await (await rq('GET', '/scenarios', null, 'sess_vw2')).json();
+  assert.equal(list.scenarios.length, 1);
+  assert.equal(list.scenarios[0].name, 'Full GOTV push');
+  assert.equal(list.scenarios[0].levers.gotvLift, 0.12, 'levers round-trip for restore');
+
+  assert.equal((await rq('DELETE', `/scenarios/${id}`, null, 'sess_ed2')).status, 200);
+  assert.equal((await (await rq('GET', '/scenarios', null, 'sess_ed2')).json()).scenarios.length, 0);
+});

@@ -298,7 +298,10 @@ export const api = {
   entityByRecord:  (m, k, r) => fetchJson(`/api/entities/by-record/${m}/${k}/${encodeURIComponent(r)}`),
 
   // Margin — live workspace contest (Phase 4)
-  marginContest:   () => fetchJson('/api/margin/contest'),
+  marginContest:        () => fetchJson('/api/margin/contest'),
+  marginScenarios:      () => fetchJson('/api/margin/scenarios'),
+  marginSaveScenario:   (body) => fetchJson('/api/margin/scenarios', { method: 'POST', body }),
+  marginDeleteScenario: (id) => fetchJson(`/api/margin/scenarios/${id}`, { method: 'DELETE' }),
   // Gamified opt-in journey + value-back mirror
   tidePanelSteps:  () => fetchJson('/api/tide/panel/steps'),
   tidePanelStart:  () => fetchJson('/api/tide/panel/start', { method: 'POST' }),

@@ -146,3 +146,7 @@
 .mg-screenhd { display: flex; justify-content: space-between; align-items: center; }
 .mg-export { background: var(--ink); color: var(--yel); border: 0; padding: 7px 14px; font-weight: 700; font-size: 13px; cursor: pointer; }
 .mg-export:hover { background: #000; }
+
+/* Saved scenario actions */
+.mg-livecard__acts { display: flex; gap: 8px; margin-top: 8px; }
+.mg-livecard__acts .mg-mini { background: none; border: 0; text-decoration: underline; font-size: 11px; color: var(--ink); cursor: pointer; padding: 0; }

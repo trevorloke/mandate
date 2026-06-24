@@ -361,7 +361,7 @@ function PathScreen({ model }) {
 function Lever({ label, children, value }) {
   return <div className="mg-lever"><div className="mg-lever__hd"><span>{label}</span><span className="mg-lever__v">{value}</span></div>{children}</div>;
 }
-function LabScreen({ model, levers, setLever, scenarios, saveScenario, clearScenarios }) {
+function LabScreen({ model, levers, setLever, scenarios, saveScenario, deleteScenario, loadScenario }) {
   const { config, summary } = model;
   const fixture = model.fixture;
   const costPer = (fixture.raise?.cost_per_contact || 10) * INVEST_CONTACTS;
@@ -417,15 +417,18 @@ function LabScreen({ model, levers, setLever, scenarios, saveScenario, clearScen
           <div className="mg-livecard__l">{config.mode === 'single' ? 'win probability' : 'majority probability'}</div>
           <div className="mg-livecard__seats">{config.mode === 'seat' ? `seats ${seatRange(summary.seats.p10, summary.seats.p90)} (80%)` : `share ${share1(summary.share.p10)} to ${share1(summary.share.p90)}`}</div>
         </div>
-        {scenarios.map((s, i) => (
-          <div key={i} className="mg-livecard mg-livecard--saved">
-            <div className="mg-livecard__lbl">{s.label}</div>
+        {scenarios.map((s) => (
+          <div key={s.id} className="mg-livecard mg-livecard--saved">
+            <div className="mg-livecard__lbl">{s.name}</div>
             <div className="mg-livecard__v">{pctInt(s.win)}</div>
             <div className="mg-livecard__l">{s.modeLabel}</div>
             <div className="mg-livecard__seats">{s.detail}</div>
+            <div className="mg-livecard__acts">
+              {s.levers && <button className="mg-mini" onClick={() => loadScenario(s.levers)}>load</button>}
+              <button className="mg-mini" onClick={() => deleteScenario(s.id)}>delete</button>
+            </div>
           </div>
         ))}
-        {scenarios.length > 0 && <button className="mg-mini mg-clear" onClick={clearScenarios}>clear saved</button>}
       </div>
     </div>
   );
@@ -501,6 +504,8 @@ function Margin() {
   const setLever = (k, v) => setLeversByKey((s) => ({ ...s, [activeKey]: { ...(s[activeKey] || defaultLevers(fixture)), [k]: v } }));
   const [tab, setTab] = useState('forecast');
   const [scenarios, setScenarios] = useState([]);
+  const refreshScenarios = () => api.marginScenarios().then((r) => setScenarios(r.scenarios || [])).catch(() => {});
+  useEffect(() => { refreshScenarios(); }, []);
 
   const leverKey = JSON.stringify({ activeKey, ...levers });
   const model = useMemo(() => {
@@ -513,13 +518,16 @@ function Margin() {
     return { config, overrides, point, results, summary, tips, levers, fixture, key: leverKey };
   }, [leverKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const saveScenario = () => {
+  const saveScenario = async () => {
     const s = model.summary;
     const win = model.config.mode === 'single' ? s.pWin : s.pMajority;
     const detail = model.config.mode === 'seat' ? `seats ${seatRange(s.seats.p10, s.seats.p90)}` : `share ${share1(s.share.p10)} to ${share1(s.share.p90)}`;
-    const label = `${fixture.mode === 'seat' ? 'Seat' : 'Single'} · env ${levers.envShiftPts >= 0 ? '+' : ''}${levers.envShiftPts}, gotv ${pctInt(levers.gotvLift)}`;
-    setScenarios((arr) => [...arr, { label, win, detail, modeLabel: model.config.mode === 'single' ? 'win probability' : 'majority probability' }].slice(-3));
+    const name = `${fixture.mode === 'seat' ? 'Seat' : 'Single'} · env ${levers.envShiftPts >= 0 ? '+' : ''}${levers.envShiftPts}, gotv ${pctInt(levers.gotvLift)}`;
+    const modeLabel = model.config.mode === 'single' ? 'win probability' : 'majority probability';
+    try { await api.marginSaveScenario({ name, win, detail, modeLabel, levers }); await refreshScenarios(); } catch { /* surfaced inline */ }
   };
+  const deleteScenario = async (id) => { try { await api.marginDeleteScenario(id); await refreshScenarios(); } catch { /* noop */ } };
+  const loadScenario = (lv) => { if (lv) setLeversByKey((st) => ({ ...st, [activeKey]: { ...defaultLevers(fixture), ...lv } })); };
 
   return (
     <main className="margin" data-screen-label="Margin">
@@ -539,7 +547,7 @@ function Margin() {
       {tab === 'forecast' && <ForecastScreen model={model} />}
       {tab === 'stress' && <StressScreen model={model} />}
       {tab === 'path' && <PathScreen model={model} />}
-      {tab === 'lab' && <LabScreen model={model} levers={levers} setLever={setLever} scenarios={scenarios} saveScenario={saveScenario} clearScenarios={() => setScenarios([])} />}
+      {tab === 'lab' && <LabScreen model={model} levers={levers} setLever={setLever} scenarios={scenarios} saveScenario={saveScenario} deleteScenario={deleteScenario} loadScenario={loadScenario} />}
       {tab === 'assume' && <AssumptionsScreen model={model} />}
     </main>
   );

@@ -509,6 +509,19 @@ export const socialAudience = sqliteTable('social_audience', {
   capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+// Saved Margin forecast scenarios (the scenario lab's save & compare).
+export const marginScenarios = sqliteTable('margin_scenarios', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name:        text('name').notNull(),
+  win:         real('win').notNull().default(0),       // win/majority probability snapshot
+  detail:      text('detail'),                          // e.g. "seats 41 to 49"
+  modeLabel:   text('mode_label'),
+  leversJson:  text('levers_json').notNull().default('{}'),
+  createdById: text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
 // ── Cross-module entities — the database that transcends modules. A person,
 // org, or place is ONE canonical record; every module links to it, so a change
 // to the entity is felt everywhere and a single profile shows every touchpoint.
