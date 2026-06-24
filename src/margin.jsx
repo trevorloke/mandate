@@ -10,34 +10,46 @@ import {
   opponentScenarios, sensitivity, optimizeMoves, winNumberAndGap, backtest,
   shareShiftToLogOdds,
 } from './margin/engine';
-import { singleFixture, seatFixture, seatBacktestActual, singleBacktestActual } from './margin/seed';
+import { SYSTEMS, ALLOCATION_METHODS, resolveSystem } from './margin/systems';
+import { FIXTURES, seatBacktestActual, singleBacktestActual } from './margin/seed';
 
 const VOL_SIGMA = { low: 0.02, medium: 0.03, high: 0.045 };
 const INVEST_CONTACTS = 1500;
 
-const defaultLevers = (fixture) => ({
-  envShiftPts: 0,
-  gotvLift: 0,
-  undToYou: null,
-  oppStrengthPts: 0,
-  volatility: 'medium',
-  undecidedMethod: fixture.params.undecidedMethod || 'proportional',
-  threshold: fixture.threshold || null,
-  winningThreshold: fixture.winningThreshold || null,
-  iterations: 1000,
-  seed: fixture.params.seed || 12345,
-  investUnits: [],
-});
+const defaultLevers = (fixture) => {
+  const s = resolveSystem(fixture);
+  return {
+    envShiftPts: 0,
+    gotvLift: 0,
+    undToYou: null,
+    oppStrengthPts: 0,
+    volatility: 'medium',
+    undecidedMethod: fixture.params.undecidedMethod || 'proportional',
+    winningThreshold: fixture.winningThreshold || null,
+    iterations: 1000,
+    seed: fixture.params.seed || 12345,
+    investUnits: [],
+    // Editable electoral-system spec — what makes Margin universal.
+    system: {
+      family: s.family, allocation: s.allocation, electoralThreshold: s.electoralThreshold,
+      totalSeats: s.totalSeats, districtSeats: s.districtSeats, listSeats: s.listSeats,
+      winThreshold: s.winThreshold, majoritySeats: s.majoritySeats,
+    },
+  };
+};
 
 // Build the working config + simulation overrides from the levers (pure).
 function deriveModel(fixture, levers) {
   const sigma_nat = VOL_SIGMA[levers.volatility];
+  const output = (SYSTEMS[levers.system.family] || SYSTEMS.plurality).output;
   const config = {
     ...fixture,
+    system: { ...levers.system },
+    mode: output,
     params: { ...fixture.params, seed: levers.seed, iterations: levers.iterations, sigma_nat, undecidedMethod: levers.undecidedMethod },
   };
-  if (fixture.mode === 'seat' && levers.threshold) config.threshold = levers.threshold;
-  if (fixture.mode === 'single' && levers.winningThreshold) config.winningThreshold = levers.winningThreshold;
+  if (output === 'seat' && levers.system.majoritySeats) config.threshold = levers.system.majoritySeats;
+  if (output === 'single' && levers.winningThreshold) config.winningThreshold = levers.winningThreshold;
 
   const opps = fixture.parties.filter((p) => p.id !== fixture.yourParty);
   const oppShiftLogOdds = {};
@@ -70,17 +82,69 @@ function ConfidenceDot({ c }) {
 
 // ── Setup screen ──
 function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
+  const sys = levers.system;
+  const setSys = (k, v) => setLever('system', { ...sys, [k]: v });
+  const def = SYSTEMS[sys.family] || SYSTEMS.plurality;
+  const isPR = def.output === 'seat' && sys.family !== 'fptp-seats';
+
   return (
     <div className="mg-screen">
       <h2 className="mg-h2">Setup</h2>
-      <p className="mg-dek">Pick a mode and load data. This demo ships with synthetic BC sample fixtures so it runs immediately — production wires the live Ground, Civic, Raise, Ledger, and Beacon modules <SampleBadge /></p>
+      <p className="mg-dek">Margin works for any electoral system — popular-vote and seat models alike. Pick a sample dataset, choose the system, and tune its parameters. Production wires the live Ground, Civic, Raise, Ledger, and Beacon modules <SampleBadge /></p>
 
+      <h3 className="mg-h3">Sample dataset</h3>
       <div className="mg-modes">
-        {[['single', 'Single contest', 'One race, plurality wins'], ['seat', 'Seat projection', 'Many districts roll up to a seat total']].map(([k, t, d]) => (
-          <button key={k} className={`mg-mode ${fixtureKey === k ? 'is-on' : ''}`} onClick={() => setFixtureKey(k)}>
-            <div className="mg-mode__t">{t}</div><div className="mg-mode__d">{d}</div>
+        {Object.values(FIXTURES).map((f) => (
+          <button key={f.key} className={`mg-mode ${fixtureKey === f.key ? 'is-on' : ''}`} onClick={() => setFixtureKey(f.key)}>
+            <div className="mg-mode__t">{f.label}</div><div className="mg-mode__d">{f.fixture.parties.length} {f.fixture.mode === 'single' ? 'candidates' : 'parties'} · {f.fixture.units.length} {f.fixture.units.length === 1 ? 'unit' : 'units'}</div>
           </button>
         ))}
+      </div>
+
+      <div className="mg-card">
+        <h3 className="mg-h3">Electoral system</h3>
+        <label className="mg-field">System
+          <select value={sys.family} onChange={(e) => setSys('family', e.target.value)}>
+            <optgroup label="Single winner (popular vote)">
+              {Object.values(SYSTEMS).filter((s) => s.output === 'single').map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </optgroup>
+            <optgroup label="Seats">
+              {Object.values(SYSTEMS).filter((s) => s.output === 'seat').map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </optgroup>
+          </select>
+        </label>
+        <div className="mg-sysblurb">{def.blurb}</div>
+        {sys.family === 'majority-runoff' && (
+          <label className="mg-field">Majority needed to avoid a runoff
+            <input type="number" step="0.01" value={sys.winThreshold} onChange={(e) => setSys('winThreshold', +e.target.value || 0.5)} />
+          </label>
+        )}
+        {isPR && (
+          <>
+            <label className="mg-field">Allocation method
+              <select value={sys.allocation} onChange={(e) => setSys('allocation', e.target.value)}>
+                {Object.entries(ALLOCATION_METHODS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
+            <label className="mg-field">Electoral threshold
+              <input type="number" step="0.01" value={sys.electoralThreshold} onChange={(e) => setSys('electoralThreshold', +e.target.value || 0)} />
+            </label>
+            <label className="mg-field">Total seats
+              <input type="number" value={sys.totalSeats} onChange={(e) => setSys('totalSeats', +e.target.value || 0)} />
+            </label>
+          </>
+        )}
+        {sys.family === 'mmp' && (
+          <div className="mg-field2">
+            <label className="mg-field">District seats<input type="number" value={sys.districtSeats} onChange={(e) => setSys('districtSeats', +e.target.value || 0)} /></label>
+            <label className="mg-field">List seats<input type="number" value={sys.listSeats} onChange={(e) => setSys('listSeats', +e.target.value || 0)} /></label>
+          </div>
+        )}
+        {def.output === 'seat' && (
+          <label className="mg-field">Seats for a majority
+            <input type="number" value={sys.majoritySeats} onChange={(e) => setSys('majoritySeats', +e.target.value || 1)} />
+          </label>
+        )}
       </div>
 
       <div className="mg-grid2">
@@ -114,11 +178,6 @@ function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
               <option value="proportional">proportional</option><option value="incumbent">incumbent rule</option><option value="partisan">partisan lean</option>
             </select>
           </label>
-          {fixture.mode === 'seat' && (
-            <label className="mg-field">Majority threshold
-              <input type="number" value={levers.threshold || ''} onChange={(e) => setLever('threshold', +e.target.value || null)} />
-            </label>
-          )}
         </div>
       </div>
     </div>
@@ -178,7 +237,7 @@ function ForecastScreen({ model }) {
       {config.mode === 'seat' && tips?.length > 0 && (
         <div className="mg-tipsmini">Tipping seats: {tips.slice(0, 4).map((t) => <span key={t.unit_id} className="mg-chip">{t.unit_id} {pctInt(t.freq)}</span>)}</div>
       )}
-      <div className="mg-meta">Seed {num(levers.seed)} · {num(levers.iterations)} iterations · {point.units.length} {point.units.length === 1 ? 'unit' : 'units'} · sample data, reproducible</div>
+      <div className="mg-meta">{(SYSTEMS[config.system?.family] || {}).label} · seed {num(levers.seed)} · {num(levers.iterations)} iterations · {point.units.length} {point.units.length === 1 ? 'unit' : 'units'} · sample data, reproducible</div>
     </div>
   );
 }
@@ -395,8 +454,8 @@ const TABS = [['setup', 'Setup'], ['forecast', 'Forecast'], ['stress', 'Stress t
 
 function Margin() {
   const [fixtureKey, setFixtureKey] = useState('seat');
-  const fixture = fixtureKey === 'seat' ? seatFixture : singleFixture;
-  const [leversByKey, setLeversByKey] = useState({ seat: defaultLevers(seatFixture), single: defaultLevers(singleFixture) });
+  const fixture = FIXTURES[fixtureKey].fixture;
+  const [leversByKey, setLeversByKey] = useState(() => Object.fromEntries(Object.values(FIXTURES).map((f) => [f.key, defaultLevers(f.fixture)])));
   const levers = leversByKey[fixtureKey];
   const setLever = (k, v) => setLeversByKey((s) => ({ ...s, [fixtureKey]: { ...s[fixtureKey], [k]: v } }));
   const [tab, setTab] = useState('forecast');
@@ -428,7 +487,7 @@ function Margin() {
           <div className="mg-plate">Margin · know the number, find the path</div>
           <h1 className="mg-title">Margin</h1>
         </div>
-        <div className="mg-mast__r">forecasting and path to victory · <SampleBadge /></div>
+        <div className="mg-mast__r">forecasting and path to victory · any electoral system · <SampleBadge /></div>
       </header>
 
       <nav className="mg-tabs">

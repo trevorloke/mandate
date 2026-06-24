@@ -135,3 +135,9 @@
   .mg-grid2, .mg-lab { grid-template-columns: 1fr; }
   .mg-headline, .mg-probs, .mg-oppgrid { flex-direction: column; }
 }
+
+/* Electoral-system controls */
+.mg-sysblurb { font-size: 12px; color: var(--grey); margin: 2px 0 10px; border-left: 3px solid var(--yel); padding-left: 8px; }
+.mg-field2 { display: flex; gap: 12px; }
+.mg-field2 .mg-field { flex: 1; }
+.mg-field optgroup { font-style: normal; font-weight: 700; }

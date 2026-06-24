@@ -11,6 +11,7 @@ export const singleFixture = {
   synthetic: true,
   name: 'Sample mayoral race',
   mode: 'single',
+  system: { family: 'plurality' },
   yourParty: 'A',
   winningThreshold: null, // auto from candidate count (5-way plurality)
   parties: [
@@ -61,6 +62,7 @@ export const seatFixture = {
   synthetic: true,
   name: 'Sample provincial slice',
   mode: 'seat',
+  system: { family: 'fptp-seats' },
   yourParty: 'A',
   threshold: 7,
   parties: [
@@ -95,8 +97,60 @@ export const seatFixture = {
   params: { undecidedMethod: 'proportional', asOf: ASOF, seed: 12345, iterations: 1000 },
 };
 
+// ── Party-list PR fixture: a popular-vote → proportional-seats election ───────
+// Five parties, six regions feeding one national popular vote, 100 seats by
+// D'Hondt with a 5% electoral threshold (E sits just under it). Demonstrates the
+// popular-vote model + proportional allocation — no districts.
+const prRegion = (id, base, eligible, turnout) => ({
+  unit_id: id, region: id,
+  eligible_voters: eligible, eligible_unregistered: Math.round(eligible * 0.07),
+  turnout_history: turnout, incumbent_party: null, partisan_baseline: base,
+});
+export const prFixture = {
+  synthetic: true,
+  name: 'Sample proportional election',
+  mode: 'seat',
+  system: { family: 'party-list-pr', allocation: 'dhondt', electoralThreshold: 0.05, totalSeats: 100, majoritySeats: 51 },
+  yourParty: 'A',
+  threshold: 51,
+  parties: [
+    { id: 'A', name: 'Your party', color: '#111111' },
+    { id: 'B', name: 'Rivals', color: '#c79a00' },
+    { id: 'C', name: 'Greens', color: '#3a7d44' },
+    { id: 'D', name: 'Liberals', color: '#9c8a3e' },
+    { id: 'E', name: 'Fringe', color: '#b8b2a2' },
+  ],
+  units: [
+    prRegion('north', { A: 0.34, B: 0.30, C: 0.14, D: 0.16, E: 0.06 }, 220000, 0.62),
+    prRegion('south', { A: 0.31, B: 0.33, C: 0.13, D: 0.18, E: 0.05 }, 260000, 0.60),
+    prRegion('east', { A: 0.36, B: 0.28, C: 0.16, D: 0.15, E: 0.05 }, 190000, 0.58),
+    prRegion('west', { A: 0.29, B: 0.31, C: 0.18, D: 0.18, E: 0.04 }, 240000, 0.61),
+    prRegion('central', { A: 0.33, B: 0.30, C: 0.15, D: 0.17, E: 0.05 }, 280000, 0.63),
+    prRegion('coast', { A: 0.35, B: 0.27, C: 0.17, D: 0.16, E: 0.05 }, 175000, 0.59),
+  ],
+  polls: [
+    { poll_id: 'natl', field_date: '2025-05-24', sample_size: 2000, pollster_rating: 0.75, scope: 'national', shares: { A: 0.33, B: 0.30, C: 0.15, D: 0.17, E: 0.05 }, house_effect: 0 },
+  ],
+  raise: { available_to_spend: 400000, cost_per_contact: 10 },
+  ledger: { spending_cap: 3000000, spent_to_date: 2600000, cap_remaining: 400000 },
+  params: { undecidedMethod: 'proportional', asOf: ASOF, seed: 12345, iterations: 1000 },
+};
+
+// ── MMP fixture: the 12 districts above, topped up from lists to 24 total ─────
+export const mmpFixture = {
+  ...seatFixture,
+  name: 'Sample mixed-member election',
+  system: { family: 'mmp', allocation: 'sainte-lague', electoralThreshold: 0.03, totalSeats: 24, districtSeats: 12, listSeats: 12, majoritySeats: 13 },
+  threshold: 13,
+};
+
 // A held-out "actual" past result for the backtest screen (§9). Synthetic.
 export const seatBacktestActual = { yourSeats: 6 };       // came up one short of the 7 threshold
 export const singleBacktestActual = { yourShare: 0.33, win: true };
 
-export const FIXTURES = { single: singleFixture, seat: seatFixture };
+export const FIXTURES = {
+  single: { key: 'single', label: 'Plurality race', fixture: singleFixture },
+  seat: { key: 'seat', label: 'FPTP seats', fixture: seatFixture },
+  pr: { key: 'pr', label: 'Proportional', fixture: prFixture },
+  mmp: { key: 'mmp', label: 'Mixed-member', fixture: mmpFixture },
+};

@@ -9,6 +9,11 @@
 // absurdly narrow, overconfident seat distributions. runSimulation() draws
 // e_nat once per iteration; the margin.test.js suite asserts the resulting seat
 // variance is realistically wide.
+//
+// The electoral system (plurality / runoff / ranked-choice / FPTP seats /
+// party-list PR / MMP / popular-PR) is resolved per simulation via ./systems.js,
+// so Margin is system-agnostic and universal, not BC/FPTP-only.
+import { resolveSystem, resolveSingle, resolveSeats, normalize } from './systems.js';
 
 // ── Seeded RNG (mulberry32) + Box-Muller normals ───────────────────────────
 export function mulberry32(seed) {
@@ -216,6 +221,7 @@ export function runSimulation(config, point, overrides = {}) {
   const yourParty = config.yourParty;
   const rng = mulberry32((overrides.seed ?? params.seed) >>> 0);
   const regions = [...new Set(point.units.map((u) => u.region))];
+  const sys = resolveSystem(config);
 
   // Levers (scenario lab) — applied deterministically each iteration.
   const envShift = overrides.envShiftLogOdds || 0;          // toward your party
@@ -229,7 +235,7 @@ export function runSimulation(config, point, overrides = {}) {
     const eNat = {}; for (const p of parties) eNat[p.id] = normal(rng, 0, params.sigma_nat);
     const eReg = {}; for (const r of regions) { eReg[r] = {}; for (const p of parties) eReg[r][p.id] = normal(rng, 0, params.sigma_reg); }
 
-    const seats = {}; for (const p of parties) seats[p.id] = 0;
+    const districtWins = {}; for (const p of parties) districtWins[p.id] = 0;
     const unitWinners = {}; const sharesOut = {}; const votesOut = {};
 
     for (const U of point.units) {
@@ -260,20 +266,26 @@ export function runSimulation(config, point, overrides = {}) {
         if (votes[p.id] > bestV) { bestV = votes[p.id]; bestC = p.id; }
       }
       unitWinners[U.unit_id] = bestC;
-      seats[bestC] += 1;
+      districtWins[bestC] += 1;
       sharesOut[U.unit_id] = shares;
       votesOut[U.unit_id] = votes;
     }
 
-    const outcome = { seats, unitWinners, shares: sharesOut, votes: votesOut };
-    if (config.mode === 'single') {
-      const u0 = point.units[0];
-      const sh = sharesOut[u0.unit_id];
-      const yours = sh[yourParty];
-      const runnerUp = Math.max(...parties.filter((p) => p.id !== yourParty).map((p) => sh[p.id]));
-      outcome.yourShare = yours;
-      outcome.yourMargin = yours - runnerUp;
-      outcome.win = yours >= Math.max(...parties.map((p) => sh[p.id]));
+    // Aggregate popular vote across every unit (the popular-vote model + PR).
+    const popVotes = {}; for (const p of parties) popVotes[p.id] = 0;
+    for (const u of point.units) for (const p of parties) popVotes[p.id] += votesOut[u.unit_id][p.id];
+
+    const outcome = { unitWinners, shares: sharesOut, votes: votesOut, district: sys.district };
+    if (sys.output === 'single') {
+      const popShare = normalize(popVotes);
+      const r = resolveSingle(popShare, sys);
+      outcome.yourShare = popShare[yourParty];
+      outcome.winner = r.winner;
+      outcome.win = r.winner === yourParty;
+      outcome.yourMargin = r.winner === yourParty ? r.margin : -r.margin;
+      outcome.round = r.round;
+    } else {
+      outcome.seats = resolveSeats(districtWins, popVotes, sys);
     }
     results.push(outcome);
   }
@@ -285,8 +297,9 @@ export function summarize(results, config) {
   const parties = config.parties;
   const yourParty = config.yourParty;
   const N = results.length || 1;
+  const sys = resolveSystem(config);
 
-  if (config.mode === 'single') {
+  if (sys.output === 'single') {
     const shares = results.map((r) => r.yourShare).sort((a, b) => a - b);
     const margins = results.map((r) => r.yourMargin).sort((a, b) => a - b);
     const pWin = results.filter((r) => r.win).length / N;
@@ -300,7 +313,7 @@ export function summarize(results, config) {
   }
 
   // Seat mode
-  const threshold = config.threshold;
+  const threshold = sys.majoritySeats;
   const yourSeats = results.map((r) => r.seats[yourParty]).sort((a, b) => a - b);
   const pMajority = results.filter((r) => r.seats[yourParty] >= threshold).length / N;
   let largest = 0, plurShort = 0;
@@ -347,8 +360,10 @@ function intervalsOf(sortedAsc) {
 
 // ── §6.4 Tipping-point analysis (seat mode) ──
 export function tippingPoints(results, config) {
+  const sys = resolveSystem(config);
+  if (!sys.district) return []; // tipping points are a district concept (FPTP/MMP)
   const yourParty = config.yourParty;
-  const threshold = config.threshold;
+  const threshold = sys.majoritySeats;
   const tally = {};
   let decidedSims = 0;
   for (const r of results) {
@@ -384,7 +399,7 @@ export function winNumberAndGap(config, point) {
   for (const U of point.units) {
     const u = U.raw;
     const projTurnout = (u.turnout_history || 0) * (u.eligible_voters || 0);
-    const thr = config.mode === 'single' ? (config.winningThreshold || winThresholdFor(config.parties.length)) : 0.5;
+    const thr = resolveSystem(config).output === 'single' ? (config.winningThreshold || winThresholdFor(config.parties.length)) : 0.5;
     const winNumber = projTurnout * thr * (1 + cushion);
     const g = u.ground || {};
     const currentSupport = (g.confirmed_supporters || 0) + 0.5 * (g.leaners || 0);
@@ -414,13 +429,14 @@ const OPP_SCENARIOS = [
 ];
 export function opponentScenarios(config, point, N = 600) {
   const opps = config.parties.filter((p) => p.id !== config.yourParty);
+  const single = resolveSystem(config).output === 'single';
   return OPP_SCENARIOS.map((sc) => {
     const oppShift = {};
     for (const o of opps) oppShift[o.id] = shareShiftToLogOdds(sc.shift);
     const overrides = { iterations: N, oppShiftLogOdds: oppShift, params: { ...point.params, sigma_nat: point.params.sigma_nat * sc.volMul } };
     const res = runSimulation(config, point, overrides);
     const s = summarize(res, { ...config, _point: point });
-    return { id: sc.id, label: sc.label, pWin: config.mode === 'single' ? s.pWin : s.pMajority };
+    return { id: sc.id, label: sc.label, pWin: single ? s.pWin : s.pMajority };
   });
 }
 function shareShiftToLogOdds(shareShift) { return shareShift / 0.22; } // ≈ derivative of logit near typical shares
@@ -454,7 +470,7 @@ function allOpp(config, shareShift) {
 function winProbOf(config, point, overrides, N) {
   const res = runSimulation(config, point, { ...overrides, iterations: N });
   const s = summarize(res, { ...config, _point: point });
-  return config.mode === 'single' ? s.pWin : s.pMajority;
+  return resolveSystem(config).output === 'single' ? s.pWin : s.pMajority;
 }
 
 // ── §8.3 Optimizer — ranked, costed, cap-bounded moves ──
@@ -462,14 +478,15 @@ export function optimizeMoves(config, point, opts = {}) {
   const N = opts.iterations || 500;
   const capRemaining = config.ledger?.cap_remaining ?? Infinity;
   const costPerContact = config.raise?.cost_per_contact || 12;
+  const sys = resolveSystem(config);
   const baseP = winProbOf(config, point, {}, N);
-  const tips = config.mode === 'seat' ? tippingPoints(runSimulation(config, point, { iterations: N }), { ...config, _point: point }) : [];
+  const tips = sys.district ? tippingPoints(runSimulation(config, point, { iterations: N }), { ...config, _point: point }) : [];
   const tipFreq = Object.fromEntries(tips.map((t) => [t.unit_id, t.freq]));
 
-  // Candidate units: tipping units (seat) or the single contest.
-  const candidates = config.mode === 'seat'
-    ? (tips.length ? tips.slice(0, 8).map((t) => t.unit_id) : point.units.slice(0, 8).map((u) => u.unit_id))
-    : point.units.map((u) => u.unit_id);
+  // Candidate units: tipping units (district systems) else every unit.
+  const candidates = sys.district && tips.length
+    ? tips.slice(0, 8).map((t) => t.unit_id)
+    : point.units.slice(0, 8).map((u) => u.unit_id);
 
   const moves = [];
   for (const unit_id of candidates) {
@@ -482,7 +499,7 @@ export function optimizeMoves(config, point, opts = {}) {
         : { unitBoostLogOdds: { [unit_id]: move.logodds } };
       const p = winProbOf(config, point, overrides, N);
       let gain = p - baseP;
-      if (config.mode === 'seat') gain *= (0.5 + (tipFreq[unit_id] || 0)); // weight by tipping frequency
+      if (sys.district) gain *= (0.5 + (tipFreq[unit_id] || 0)); // weight by tipping frequency
       const cost = move.contacts * costPerContact;
       moves.push({ unit_id, kind: move.kind, contacts: move.contacts, winProbGain: Math.max(0, gain), cost, perDollar: Math.max(0, gain) / cost });
     }
@@ -507,10 +524,11 @@ export function backtest(config, actual, N = 1000) {
   const point = buildPointEstimates(config);
   const res = runSimulation(config, point, { iterations: N });
   const s = summarize(res, { ...config, _point: point });
-  if (config.mode === 'seat') {
+  const sys = resolveSystem(config);
+  if (sys.output === 'seat') {
     const within80 = actual.yourSeats >= s.seats.p10 && actual.yourSeats <= s.seats.p90;
     const within95 = actual.yourSeats >= s.seats.p2_5 && actual.yourSeats <= s.seats.p97_5;
-    return { mode: 'seat', predicted: s.seats, predictedPMajority: s.pMajority, actualSeats: actual.yourSeats, actualMajority: actual.yourSeats >= config.threshold, within80, within95 };
+    return { mode: 'seat', predicted: s.seats, predictedPMajority: s.pMajority, actualSeats: actual.yourSeats, actualMajority: actual.yourSeats >= sys.majoritySeats, within80, within95 };
   }
   const within80 = actual.yourShare >= s.share.p10 && actual.yourShare <= s.share.p90;
   return { mode: 'single', predicted: s.share, predictedPWin: s.pWin, actualShare: actual.yourShare, actualWin: !!actual.win, within80 };
@@ -530,7 +548,7 @@ export function forecast(config) {
   const point = buildPointEstimates(config);
   const results = runSimulation(config, point);
   const summary = summarize(results, { ...config, _point: point });
-  const tips = config.mode === 'seat' ? tippingPoints(results, { ...config, _point: point }) : [];
+  const tips = resolveSystem(config).district ? tippingPoints(results, { ...config, _point: point }) : [];
   return { point, summary, tipping: tips, seed: point.params.seed, iterations: point.params.iterations };
 }
 
