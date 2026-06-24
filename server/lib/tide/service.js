@@ -2,15 +2,19 @@
 // seed flow. Pure aggregation lives in ./index.js; this module loads inputs,
 // persists readings, and exposes summaries.
 import { randomBytes } from 'crypto';
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { tideTopics, tidePanelists, tideReadings } from '../../db/schema.js';
+import { tideTopics, tidePanelists, tideReadings, users, notifications } from '../../db/schema.js';
 import { buildReading } from './index.js';
 import { panelComposition } from './panel.js';
 import { applyStep, nextStep } from './profiling.js';
 import { buildMirror } from './mirror.js';
 import { rakeWeights, defaultTargets } from './weighting.js';
+import { readingsCsv } from './report.js';
 import { round2 } from './rng.js';
+
+// A topic crosses into "spiking" when |momentum| jumps past this threshold.
+const MOMENTUM_ALERT = Number(process.env.MANDATE_TIDE_MOMENTUM_ALERT) || 0.25;
 
 const newId = (p) => p + randomBytes(9).toString('hex');
 const parse = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
@@ -81,7 +85,39 @@ export async function generateReading(workspaceId, topicId, { at = Date.now() } 
     panelN: reading.panelN,
   });
   await db.update(tideTopics).set({ lastReadingAt: capturedAt, updatedAt: new Date() }).where(eq(tideTopics.id, topicId));
-  return { id, topicId, capturedAt, ...reading };
+
+  // Momentum alert: notify when a topic newly crosses the spike threshold (prev
+  // was calm, now moving) — not on every refresh while it stays elevated.
+  const crossed = Math.abs(reading.momentum) >= MOMENTUM_ALERT && (!prev || Math.abs(prev.momentum || 0) < MOMENTUM_ALERT);
+  if (crossed) await notifyMomentum(workspaceId, row.name, reading);
+
+  return { id, topicId, capturedAt, alerted: crossed, ...reading };
+}
+
+// Best-effort in-app alert to a workspace's editors+ when attention spikes.
+async function notifyMomentum(workspaceId, topicName, reading) {
+  try {
+    const recipients = await db.select().from(users)
+      .where(and(eq(users.workspaceId, workspaceId), inArray(users.role, ['editor', 'admin', 'super_admin'])));
+    const dir = reading.momentum > 0 ? 'rising' : 'cooling';
+    const title = `Attention ${dir} on ${topicName}`;
+    const body = `${dir === 'rising' ? '+' : ''}${Math.round(reading.momentum * 100)}% this window · volume ${Math.round(reading.volume).toLocaleString()} · ${Math.round(reading.confidence * 100)}% confidence`;
+    for (const u of recipients) {
+      await db.insert(notifications).values({ id: newId('n_'), userId: u.id, kind: 'tide.momentum', title, body, link: '/' });
+    }
+  } catch { /* notifications are best-effort */ }
+}
+
+// CSV of every reading across the workspace's topics (newest first).
+export async function exportCsv(workspaceId) {
+  const topics = await db.select().from(tideTopics).where(eq(tideTopics.workspaceId, workspaceId));
+  const rows = [];
+  for (const t of topics) {
+    const rs = (await db.select().from(tideReadings)
+      .where(eq(tideReadings.topicId, t.id)).orderBy(desc(tideReadings.capturedAt))).map(parseReading);
+    for (const r of rs) rows.push({ topic: t.name, ...r });
+  }
+  return readingsCsv(rows);
 }
 
 // Topics with their latest reading folded in — powers the Waves list.
@@ -90,12 +126,14 @@ export async function listTopics(workspaceId) {
     .where(eq(tideTopics.workspaceId, workspaceId)).orderBy(desc(tideTopics.updatedAt));
   const out = [];
   for (const t of topics) {
+    const latest = await latestReadingFor(t.id);
     out.push({
       id: t.id, name: t.name, slug: t.slug, status: t.status,
       keywords: parse(t.keywordsJson, []),
       refreshHours: t.refreshHours,
       lastReadingAt: t.lastReadingAt,
-      latest: await latestReadingFor(t.id),
+      latest,
+      spiking: !!latest && Math.abs(latest.momentum || 0) >= MOMENTUM_ALERT,
     });
   }
   return out;

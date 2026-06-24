@@ -22,7 +22,7 @@ import { sourceCatalog } from '../lib/tide/index.js';
 import { STEPS, publicStep } from '../lib/tide/profiling.js';
 import {
   slugify, listTopics, topicHistory, generateReading,
-  panelSummary, seedSampleData, recordStep, mirrorFor, journeyState,
+  panelSummary, seedSampleData, recordStep, mirrorFor, journeyState, exportCsv,
 } from '../lib/tide/service.js';
 import { getTideWorkerStatus } from '../lib/tide-worker.js';
 
@@ -52,6 +52,13 @@ app.get('/status', requireRole('viewer'), async (c) => {
 });
 
 app.get('/sources', requireRole('viewer'), (c) => c.json({ sources: sourceCatalog() }));
+
+// CSV export of every reading (newest first).
+app.get('/export', requireRole('viewer'), async (c) => {
+  const me = c.get('user');
+  const csv = await exportCsv(me.workspaceId);
+  return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="tide-readings.csv"' } });
+});
 
 // ── Topics ──────────────────────────────────────────────────────────────────
 app.get('/topics', requireRole('viewer'), async (c) => {

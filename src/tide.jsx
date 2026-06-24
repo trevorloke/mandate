@@ -193,9 +193,9 @@ function WavesTab({ topics, canEdit, onChanged, selected, setSelected }) {
         {topics.map((t) => {
           const l = t.latest;
           return (
-            <button key={t.id} className={`tide-wave ${selected === t.id ? 'is-sel' : ''}`} onClick={() => setSelected(t.id)}>
+            <button key={t.id} className={`tide-wave ${selected === t.id ? 'is-sel' : ''} ${t.spiking ? 'is-spiking' : ''}`} onClick={() => setSelected(t.id)}>
               <div className="tide-wave__top">
-                <span className="tide-wave__name">{t.name}</span>
+                <span className="tide-wave__name">{t.spiking && <span className="tide-spike" title="momentum spike">⚡</span>}{t.name}</span>
                 {l && <Momentum m={l.momentum} />}
               </div>
               {l ? (
@@ -362,7 +362,10 @@ function Tide() {
           <h1 className="tide__title">Tide</h1>
           <p className="tide__dek">What the world is paying attention to, who's driving it, how they feel, and why — read off a consented panel.</p>
         </div>
-        {status?.worker && <div className="tide__worker" title="Refresh worker">{status.worker.running ? '● live' : '○ idle'} · 4h refresh</div>}
+        <div className="tide__masthead-r">
+          {status?.worker && <div className="tide__worker" title="Refresh worker">{status.worker.running ? '● live' : '○ idle'} · 4h refresh</div>}
+          {topics.length > 0 && <a className="tide-export" href={api.tideExportUrl()} download>Export CSV</a>}
+        </div>
       </header>
 
       <div className="tide__ribbon">

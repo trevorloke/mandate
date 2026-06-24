@@ -197,3 +197,10 @@
 .tide-rep__stat b { font-family: var(--font-mono, monospace); font-size: 20px; color: var(--m); line-height: 1; }
 .tide-rep__stat span { font-size: 11px; color: #6a645a; margin-top: 3px; }
 .tide-rep__note { flex: 1; min-width: 240px; font-size: 12px; color: #5a544a; line-height: 1.45; }
+
+/* Momentum spike + export */
+.tide__masthead-r { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.tide-export { font-size: 12px; color: var(--m); border: 1px solid var(--m); border-radius: 5px; padding: 4px 10px; text-decoration: none; }
+.tide-export:hover { background: var(--tint); }
+.tide-spike { margin-right: 4px; }
+.tide-wave.is-spiking { border-color: #b8860b; box-shadow: inset 3px 0 0 #e9c200; }
