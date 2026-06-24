@@ -509,6 +509,37 @@ export const socialAudience = sqliteTable('social_audience', {
   capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+// ── Cross-module entities — the database that transcends modules. A person,
+// org, or place is ONE canonical record; every module links to it, so a change
+// to the entity is felt everywhere and a single profile shows every touchpoint.
+export const entities = sqliteTable('entities', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  type:        text('type').notNull().default('person'),   // person | org | place
+  name:        text('name').notNull(),
+  email:       text('email'),
+  phone:       text('phone'),
+  tagsJson:    text('tags_json').notNull().default('[]'),
+  dataJson:    text('data_json').notNull().default('{}'),  // flexible shared attributes
+  matchKey:    text('match_key'),                          // normalized email|name for dedupe
+  deletedAt:   integer('deleted_at', { mode: 'timestamp' }),
+  createdById: text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// A link is one module touchpoint of an entity (voter in Ground, donor in Raise…).
+export const entityLinks = sqliteTable('entity_links', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  entityId:    text('entity_id').notNull().references(() => entities.id, { onDelete: 'cascade' }),
+  module:      text('module').notNull(),
+  kind:        text('kind').notNull(),
+  recordId:    text('record_id').notNull(),               // moduleData id (or custom-table id)
+  role:        text('role'),                              // e.g. 'donor', 'voter', 'host'
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
 // ── Tide (Attention Chart) — what the world is paying attention to, who drives
 // it, how they feel, and why — read off a consented panel that gives demographic
 // ground truth. Topics are the tracked subjects; readings are per-refresh

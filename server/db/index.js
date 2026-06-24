@@ -570,6 +570,41 @@ function bootstrapTables() {
   alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
   alterIfMissing('social_links', 'utm', 'TEXT');
 
+  // Cross-module entities + their per-module links.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS entities (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      type          TEXT NOT NULL DEFAULT 'person',
+      name          TEXT NOT NULL,
+      email         TEXT,
+      phone         TEXT,
+      tags_json     TEXT NOT NULL DEFAULT '[]',
+      data_json     TEXT NOT NULL DEFAULT '{}',
+      match_key     TEXT,
+      deleted_at    INTEGER,
+      created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    INTEGER DEFAULT (unixepoch()),
+      updated_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_entities_ws ON entities(workspace_id, deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_entities_match ON entities(workspace_id, match_key);
+
+    CREATE TABLE IF NOT EXISTS entity_links (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      entity_id    TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      module       TEXT NOT NULL,
+      kind         TEXT NOT NULL,
+      record_id    TEXT NOT NULL,
+      role         TEXT,
+      created_at   INTEGER DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_links_unique ON entity_links(entity_id, record_id);
+    CREATE INDEX IF NOT EXISTS idx_entity_links_entity ON entity_links(entity_id);
+    CREATE INDEX IF NOT EXISTS idx_entity_links_record ON entity_links(workspace_id, module, kind, record_id);
+  `);
+
   // Tide (Attention Chart): tracked topics, consented panel, attention readings.
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS tide_topics (
