@@ -542,6 +542,9 @@ export const tidePanelists = sqliteTable('tide_panelists', {
   linkedAccountsJson:  text('linked_accounts_json').notNull().default('[]'),
   profileCompleteness: real('profile_completeness').notNull().default(0), // 0..1 (progressive profiling)
   weight:              real('weight').notNull().default(1),       // post-stratification weight
+  points:              integer('points').notNull().default(0),    // gamification — accrues per profiling step
+  badgesJson:          text('badges_json').notNull().default('[]'),
+  lastStepAt:         integer('last_step_at', { mode: 'timestamp' }),
   status:              text('status').notNull().default('active'),
   createdAt:          integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt:          integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

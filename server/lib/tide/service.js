@@ -7,6 +7,8 @@ import { db } from '../../db/index.js';
 import { tideTopics, tidePanelists, tideReadings } from '../../db/schema.js';
 import { buildReading } from './index.js';
 import { panelComposition } from './panel.js';
+import { applyStep, nextStep } from './profiling.js';
+import { buildMirror } from './mirror.js';
 
 const newId = (p) => p + randomBytes(9).toString('hex');
 const parse = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
@@ -106,6 +108,56 @@ export async function topicHistory(workspaceId, topicId, limit = 30) {
 export async function panelSummary(workspaceId) {
   const panelists = await activePanelists(workspaceId);
   return panelComposition(panelists);
+}
+
+// ── Panelist journey (gamified opt-in + progressive profiling) ──────────────
+const shapePanelist = (p) => ({ ...p, interests: parse(p.interestsJson, []) });
+
+export async function getPanelist(workspaceId, id) {
+  const row = (await db.select().from(tidePanelists)
+    .where(and(eq(tidePanelists.id, id), eq(tidePanelists.workspaceId, workspaceId))).limit(1))[0];
+  return row ? shapePanelist(row) : null;
+}
+
+// Apply one profiling step and persist. Returns the gamification result
+// (reward, level, new badges, next step) or { error }.
+export async function recordStep(workspaceId, id, stepId, value) {
+  const panelist = await getPanelist(workspaceId, id);
+  if (!panelist) return { error: 'not found', status: 404 };
+  const result = applyStep(panelist, stepId, value);
+  if (result.error) return { error: result.error, status: 400 };
+  await db.update(tidePanelists).set({ ...result.updates, updatedAt: new Date() }).where(eq(tidePanelists.id, id));
+  const { updates, ...rest } = result; // don't leak raw column patch
+  return rest;
+}
+
+// The full engine-shaped topic set, used by the mirror.
+export async function engineTopics(workspaceId) {
+  const rows = await db.select().from(tideTopics)
+    .where(and(eq(tideTopics.workspaceId, workspaceId), eq(tideTopics.status, 'active')));
+  return rows.map(shapeTopic);
+}
+
+// Value-back mirror for a panelist: where they sit, what they're early/late to,
+// how their take compares to people like them.
+export async function mirrorFor(workspaceId, id) {
+  const panelist = await getPanelist(workspaceId, id);
+  if (!panelist) return null;
+  const [topics, panel] = await Promise.all([engineTopics(workspaceId), activePanelists(workspaceId)]);
+  return buildMirror({ panelist, topics, panel });
+}
+
+// Next step for a panelist's journey (null when complete).
+export async function journeyState(workspaceId, id) {
+  const panelist = await getPanelist(workspaceId, id);
+  if (!panelist) return null;
+  return {
+    id: panelist.id,
+    completeness: panelist.profileCompleteness,
+    points: panelist.points || 0,
+    badges: parse(panelist.badgesJson, []),
+    next: nextStep(panelist),
+  };
 }
 
 // Topics due for a refresh: never read, or older than their cadence.

@@ -286,4 +286,10 @@ export const api = {
   tidePanel:       () => fetchJson('/api/tide/panel'),
   tideAddPanelist: (body) => fetchJson('/api/tide/panel', { method: 'POST', body }),
   tideSeed:        () => fetchJson('/api/tide/seed', { method: 'POST' }),
+  // Gamified opt-in journey + value-back mirror
+  tidePanelSteps:  () => fetchJson('/api/tide/panel/steps'),
+  tidePanelStart:  () => fetchJson('/api/tide/panel/start', { method: 'POST' }),
+  tidePanelStep:   (id, body) => fetchJson(`/api/tide/panel/${id}/step`, { method: 'POST', body }),
+  tidePanelState:  (id) => fetchJson(`/api/tide/panel/${id}`),
+  tidePanelMirror: (id) => fetchJson(`/api/tide/panel/${id}/mirror`),
 };

@@ -6,6 +6,7 @@ import './tide.css';
 import { api } from './auth/api';
 import { useAuth } from './auth/AuthContext';
 import { useTide } from './use-tide';
+import { PanelJourney } from './tide-panel';
 
 const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 const net = (s) => (s?.pos || 0) - (s?.neg || 0);
@@ -283,6 +284,7 @@ function PanelTab({ panel, canEdit, onChanged }) {
           <button className="tide-btn" disabled={busy}>{busy ? 'Adding…' : 'Add panelist'}</button>
         </form>
       )}
+      <PanelJourney canEdit={canEdit} onChanged={onChanged} />
     </div>
   );
 }

@@ -17,7 +17,7 @@ function engagement(p, topic, bucket) {
   const noise = rng(`${p.id}|${topic.slug}|${bucket}|eng`);
   // Interested panelists almost always engage; others engage at a base rate.
   const score = clamp01(0.15 + 0.65 * match + 0.4 * noise - 0.15);
-  return { engaged: score > 0.35, weight: (p.weight || 1) * score, match };
+  return { engaged: score > 0.35, score, weight: (p.weight || 1) * score, match };
 }
 
 // Polarity of an engaged panelist: a blend of the window's mood and the
@@ -27,6 +27,16 @@ function polarity(p, topic, bucket) {
   const lean = rng(`${p.id}|${topic.slug}|lean`);
   const s = 0.55 * mood + 0.45 * lean;
   return s > 0.6 ? 'pos' : s < 0.4 ? 'neg' : 'neu';
+}
+
+// Public, time-based wrappers for one panelist — used by the value-back mirror to
+// compare a person against their cohort. Engagement is a 0..1 score; polarity is
+// the labelled lean. Both are deterministic in (panelist, topic, window).
+export function panelistEngagement(p, topic, at) {
+  return engagement(p, topic, timeBucket(at || Date.now(), topic.refreshHours || 4));
+}
+export function panelistPolarity(p, topic, at) {
+  return polarity(p, topic, timeBucket(at || Date.now(), topic.refreshHours || 4));
 }
 
 function addCut(cuts, dim, key, w, label) {

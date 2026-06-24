@@ -602,6 +602,9 @@ function bootstrapTables() {
       linked_accounts_json TEXT NOT NULL DEFAULT '[]',
       profile_completeness REAL NOT NULL DEFAULT 0,
       weight               REAL NOT NULL DEFAULT 1,
+      points               INTEGER NOT NULL DEFAULT 0,
+      badges_json          TEXT NOT NULL DEFAULT '[]',
+      last_step_at         INTEGER,
       status               TEXT NOT NULL DEFAULT 'active',
       created_at           INTEGER DEFAULT (unixepoch()),
       updated_at           INTEGER DEFAULT (unixepoch())
@@ -627,6 +630,10 @@ function bootstrapTables() {
     CREATE INDEX IF NOT EXISTS idx_tide_readings_topic ON tide_readings(topic_id, captured_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tide_readings_ws ON tide_readings(workspace_id, captured_at DESC);
   `);
+  // Gamification columns added to tide_panelists after it shipped.
+  alterIfMissing('tide_panelists', 'points', 'INTEGER NOT NULL DEFAULT 0');
+  alterIfMissing('tide_panelists', 'badges_json', "TEXT NOT NULL DEFAULT '[]'");
+  alterIfMissing('tide_panelists', 'last_step_at', 'INTEGER');
 
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.

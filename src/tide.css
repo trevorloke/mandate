@@ -131,3 +131,62 @@
   .tide__ribbon, .tide-detail__stats { grid-template-columns: repeat(2, 1fr); }
   .tide-breakdown__cols, .tide-detail__grid { grid-template-columns: 1fr; }
 }
+
+/* ── Panel journey (gamified opt-in) + mirror ── */
+.tj { margin-top: 22px; border-top: 1px dashed #d8d2c6; padding-top: 18px; }
+.tj__h { margin: 0 0 4px; font-size: 16px; }
+.tj__dek { color: #5a544a; font-size: 13px; max-width: 620px; margin: 0 0 14px; }
+.tj__body { max-width: 560px; }
+
+.tj-rail { background: var(--tint); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+.tj-rail__lvl { display: flex; justify-content: space-between; align-items: baseline; }
+.tj-rail__lvlname { font-weight: 700; color: var(--m); }
+.tj-rail__pts { font-family: var(--font-mono, monospace); font-size: 12px; color: #6a645a; }
+.tj-rail__bar { background: #e2dccf; border-radius: 4px; height: 8px; overflow: hidden; margin: 8px 0 4px; }
+.tj-rail__bar > span { display: block; height: 100%; background: var(--m); transition: width .3s; }
+.tj-rail__meta { font-size: 11px; color: #6a645a; }
+.tj-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tj-badge { font-size: 11px; background: #fff; border: 1px solid var(--m); color: var(--m); border-radius: 10px; padding: 2px 8px; text-transform: capitalize; }
+.tj-reward { color: #2e6b3e; font-weight: 600; font-size: 13px; margin-bottom: 10px; animation: tj-pop .3s ease; }
+@keyframes tj-pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.tj-step { background: #fff; border: 1px solid #e6e1d6; border-radius: 10px; padding: 18px; position: relative; }
+.tj-step__pts { position: absolute; top: 14px; right: 16px; font-family: var(--font-mono, monospace); font-size: 12px; color: #2e6b3e; }
+.tj-step__title { margin: 0 0 6px; font-size: 17px; }
+.tj-step__body { color: #5a544a; font-size: 13px; margin: 0 0 12px; }
+.tj-opts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.tj-opt { background: #fff; border: 1px solid #d6d0c4; border-radius: 18px; padding: 7px 14px; font-size: 13px; cursor: pointer; text-transform: capitalize; }
+.tj-opt:hover { border-color: var(--m); }
+.tj-opt.is-on { background: var(--m); color: #fff; border-color: var(--m); }
+.tj-skip { background: none; border: 0; color: #6a645a; font-size: 12px; text-decoration: underline; cursor: pointer; }
+
+.tj-mirror { background: #fff; border: 1px solid var(--m); border-radius: 10px; padding: 18px; }
+.tj-mirror__hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.tj-mirror__eyebrow { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .15em; color: var(--m); }
+.tj-mirror__lvl { font-weight: 700; font-size: 16px; margin-top: 2px; }
+.tj-mirror__cohort { font-size: 12px; color: #6a645a; white-space: nowrap; }
+.tj-mirror__summary { font-size: 14px; line-height: 1.55; background: var(--tint); border-radius: 8px; padding: 12px 14px; margin: 12px 0; }
+.tj-mirror__sig { font-size: 13px; margin-bottom: 12px; }
+.tj-mirror__rows { display: flex; flex-direction: column; gap: 8px; }
+.tj-mrow { display: grid; grid-template-columns: 130px 1fr 64px 96px 120px; align-items: center; gap: 8px; font-size: 12px; }
+.tj-mrow__name { font-weight: 600; }
+.tj-mrow__bars { display: flex; flex-direction: column; gap: 2px; }
+.tj-mrow__bar { background: #eee; border-radius: 3px; height: 6px; overflow: hidden; }
+.tj-mrow__bar > span { display: block; height: 100%; background: var(--m); }
+.tj-mrow__bar--ghost > span { background: #c9c2b4; }
+.tj-mrow__me { background: var(--m); }
+.tj-mrow__idx { font-family: var(--font-mono, monospace); color: #6a645a; }
+.tj-mrow__idx[data-up="true"] { color: #2e6b3e; }
+.tj-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border-radius: 10px; padding: 2px 7px; text-align: center; }
+.tj-tag--early { background: #e2f0e6; color: #2e6b3e; }
+.tj-tag--late { background: #f3e6e6; color: #8a1414; }
+.tj-tag--instep { background: #efeadf; color: #6a645a; }
+.tj-mrow__agree { font-size: 11px; }
+.tj-mrow__agree--against { color: #8a1414; }
+.tj-mrow__agree--with { color: #6a645a; }
+.tj-mirror__call { font-size: 13px; margin-top: 10px; color: #3a352c; }
+.tj-mirror .tide-btn { margin-top: 14px; }
+
+@media (max-width: 860px) {
+  .tj-mrow { grid-template-columns: 1fr; gap: 2px; }
+}

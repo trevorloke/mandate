@@ -19,9 +19,10 @@ import { tideTopics, tidePanelists, tideReadings, auditLog } from '../db/schema.
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { assertQuota, QuotaError } from '../lib/plans.js';
 import { sourceCatalog } from '../lib/tide/index.js';
+import { STEPS, publicStep } from '../lib/tide/profiling.js';
 import {
   slugify, listTopics, topicHistory, generateReading,
-  panelSummary, seedSampleData,
+  panelSummary, seedSampleData, recordStep, mirrorFor, journeyState,
 } from '../lib/tide/service.js';
 import { getTideWorkerStatus } from '../lib/tide-worker.js';
 
@@ -155,6 +156,43 @@ app.post('/panel', requireRole('editor'), async (c) => {
   });
   await audit(me.id, 'tide.panelist.add', id);
   return c.json({ id }, 201);
+});
+
+// ── Gamified opt-in journey + value-back mirror ──
+// Static path registered before /panel/:id so it isn't captured as an id.
+app.get('/panel/steps', requireRole('viewer'), (c) => c.json({ steps: STEPS.map(publicStep) }));
+
+// Start a fresh journey: create an empty (pre-consent) panelist to walk through.
+app.post('/panel/start', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const id = newId('tp_');
+  await db.insert(tidePanelists).values({
+    id, workspaceId: me.workspaceId, status: 'active', weight: 1, profileCompleteness: 0, points: 0,
+  });
+  const j = await journeyState(me.workspaceId, id);
+  return c.json(j, 201);
+});
+
+app.get('/panel/:id/mirror', requireRole('viewer'), async (c) => {
+  const me = c.get('user');
+  const mirror = await mirrorFor(me.workspaceId, c.req.param('id'));
+  if (!mirror) return c.json({ error: 'not found' }, 404);
+  return c.json({ mirror });
+});
+
+app.post('/panel/:id/step', requireRole('editor'), async (c) => {
+  const me = c.get('user');
+  const { step, value } = await c.req.json().catch(() => ({}));
+  const result = await recordStep(me.workspaceId, c.req.param('id'), step, value);
+  if (result.error) return c.json({ error: result.error }, result.status || 400);
+  return c.json(result);
+});
+
+app.get('/panel/:id', requireRole('viewer'), async (c) => {
+  const me = c.get('user');
+  const j = await journeyState(me.workspaceId, c.req.param('id'));
+  if (!j) return c.json({ error: 'not found' }, 404);
+  return c.json(j);
 });
 
 // ── Sample data ─────────────────────────────────────────────────────────────
