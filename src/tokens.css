@@ -57,6 +57,7 @@
   --m-field:      #1e3a5f;  --m-field-tint:      #e7ecf2;
   --m-tide:       #155e75;  --m-tide-tint:       #ddeef2;   /* deep cyan — attention, the tide */
   --m-margin:     #111111;  --m-margin-tint:     #fff4b8;   /* No Name black on yellow — the number */
+  --m-directory:  #4a3b6b;  --m-directory-tint:  #ece7f3;   /* violet — the connective tissue */
 
   /* Status — desaturated to feel editorial */
   --ok:      #2e6b3e;

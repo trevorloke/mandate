@@ -78,6 +78,9 @@ test('API: rebuild gated to editors; profile readable; reverse lookup works', as
   assert.equal((await rq('POST', '/rebuild', {}, VIEWER)).status, 403);
   const list = await (await rq('GET', '/?q=okafor')).json();
   assert.ok(list.entities.length >= 1);
+  const jane = list.entities.find((e) => e.name === 'Jane Okafor');
+  assert.ok(jane.modules.includes('ground') && jane.modules.includes('raise') && jane.modules.includes('events'), 'list carries module touchpoints');
+  assert.equal(jane.touchpointCount, 3);
   const id = list.entities[0].id;
   const prof = await (await rq('GET', `/${id}`)).json();
   assert.ok(prof.profile.touchpointCount >= 1);

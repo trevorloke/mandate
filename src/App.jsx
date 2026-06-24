@@ -18,6 +18,7 @@ import { Events2 } from './events';
 import { Command } from './command';
 import { Tide } from './tide';
 import { Margin } from './margin';
+import { Directory } from './directory';
 import { Academy } from './academy';
 import Admin from './admin/Admin';
 import OnboardingWizard from './admin/OnboardingWizard';
@@ -48,6 +49,7 @@ const PAGE_MAP2 = {
   command:    () => <Command />,
   tide:       () => <Tide />,
   margin:     () => <Margin />,
+  directory:  () => <Directory />,
   admin:      () => <Admin />,
 };
 

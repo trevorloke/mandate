@@ -287,6 +287,15 @@ export const api = {
   tideAddPanelist: (body) => fetchJson('/api/tide/panel', { method: 'POST', body }),
   tideSeed:        () => fetchJson('/api/tide/seed', { method: 'POST' }),
   tideExportUrl:   () => '/api/tide/export',
+
+  // Cross-module entities (the database that transcends modules)
+  entitiesList:    (q = '', type = '') => fetchJson(`/api/entities?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`),
+  entityProfile:   (id) => fetchJson(`/api/entities/${id}`),
+  entityCreate:    (body) => fetchJson('/api/entities', { method: 'POST', body }),
+  entityUpdate:    (id, body, sync = false) => fetchJson(`/api/entities/${id}${sync ? '?sync=1' : ''}`, { method: 'PUT', body }),
+  entityDelete:    (id) => fetchJson(`/api/entities/${id}`, { method: 'DELETE' }),
+  entityRebuild:   () => fetchJson('/api/entities/rebuild', { method: 'POST' }),
+  entityByRecord:  (m, k, r) => fetchJson(`/api/entities/by-record/${m}/${k}/${encodeURIComponent(r)}`),
   // Gamified opt-in journey + value-back mirror
   tidePanelSteps:  () => fetchJson('/api/tide/panel/steps'),
   tidePanelStart:  () => fetchJson('/api/tide/panel/start', { method: 'POST' }),

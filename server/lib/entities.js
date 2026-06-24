@@ -147,7 +147,16 @@ export async function listEntities(workspaceId, { q = '', type = '' } = {}) {
   let rows = await db.select().from(entities).where(and(eq(entities.workspaceId, workspaceId), isNull(entities.deletedAt)));
   if (type) rows = rows.filter((e) => e.type === type);
   if (q) { const nq = normName(q); rows = rows.filter((e) => normName(e.name).includes(nq) || (e.email || '').includes(q.toLowerCase())); }
-  return rows.map((e) => ({ ...e, tags: parse(e.tagsJson, []) }));
+  // Attach each entity's module touchpoint summary for the directory list.
+  const links = await db.select().from(entityLinks).where(eq(entityLinks.workspaceId, workspaceId));
+  const byEntity = new Map();
+  for (const l of links) { const s = byEntity.get(l.entityId) || { modules: new Set(), count: 0 }; s.modules.add(l.module); s.count += 1; byEntity.set(l.entityId, s); }
+  return rows
+    .map((e) => {
+      const s = byEntity.get(e.id) || { modules: new Set(), count: 0 };
+      return { ...e, tags: parse(e.tagsJson, []), modules: [...s.modules], touchpointCount: s.count };
+    })
+    .sort((a, b) => b.touchpointCount - a.touchpointCount || a.name.localeCompare(b.name));
 }
 
 export async function createEntity(workspaceId, body, createdById) {
