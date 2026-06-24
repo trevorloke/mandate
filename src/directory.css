@@ -62,3 +62,7 @@
 .dir-fact b { color: #6a645a; font-weight: 600; margin-right: 2px; }
 
 @media (max-width: 700px) { .dir-row__chips { display: none; } }
+
+/* In-module cross-reference banner */
+.dir-crossref { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; background: var(--m-directory-tint, #ece7f3); border-radius: 6px; padding: 7px 10px; margin: 0 0 12px; font-size: 12px; color: #4a3b6b; }
+.dir-crossref__lead { font-weight: 600; }

@@ -8,6 +8,7 @@ import { getSchema } from './schemas';
 import TypedForm from './TypedForm';
 import { toCSV, fromCSV, downloadFile, readFileAsText } from './csv';
 import CommentThread from './CommentThread';
+import { EntityCrossref } from '../directory';
 import SharePanel from './SharePanel';
 
 // Catalogue of (module, kind) buckets the user can populate.
@@ -740,6 +741,7 @@ function RecordForm({ module, kind, record, onCancel, onSubmit }) {
       <h3 className="adm__panel-title">
         {record.isNew ? 'Create' : 'Edit'} {schema?.label || `${module} · ${kind}`}
       </h3>
+      {!record.isNew && record.id && <EntityCrossref module={module} kind={kind} recordId={record.id} />}
       {err && <div className="adm__msg adm__msg--err" style={{ marginBottom: 12 }}>{err}</div>}
       <form onSubmit={submit}>
         {mode === 'fields' && schema ? (

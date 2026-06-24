@@ -15,6 +15,27 @@ function ModuleChip({ m }) {
   return <span className="dir-modchip" style={{ background: `var(--m-${m}, #6a645a)` }}>{cap(m)}</span>;
 }
 
+// Drop-in cross-reference for any module's record view: "also appears in …".
+// Renders nothing unless the record is linked to an entity that spans modules.
+export function EntityCrossref({ module, kind, recordId }) {
+  const [profile, setProfile] = useState(null);
+  useEffect(() => {
+    if (!recordId) return undefined;
+    let on = true;
+    api.entityByRecord(module, kind, recordId).then((r) => { if (on) setProfile(r.profile || null); }).catch(() => {});
+    return () => { on = false; };
+  }, [module, kind, recordId]);
+  if (!profile) return null;
+  const others = Object.keys(profile.modules).filter((m) => m !== module);
+  if (!others.length) return null;
+  return (
+    <div className="dir-crossref">
+      <span className="dir-crossref__lead">{profile.entity.name} also appears in</span>
+      {others.map((m) => <ModuleChip key={m} m={m} />)}
+    </div>
+  );
+}
+
 // A compact, generic view of a linked record's notable fields.
 function RecordFacts({ record }) {
   if (!record) return null;

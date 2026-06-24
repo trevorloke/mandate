@@ -122,5 +122,10 @@ export async function seedDemoData(onProgress = () => {}) {
     }
   }
 
-  return { total, buckets: summary };
+  // Resolve the freshly-seeded records into the cross-module entity directory so
+  // one person/org shows up across every module immediately (best-effort).
+  let entities = null;
+  try { entities = await api.entityRebuild(); } catch { /* directory stays empty */ }
+
+  return { total, buckets: summary, entities };
 }
