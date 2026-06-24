@@ -24,8 +24,11 @@ export const SYSTEMS = {
   'ranked-choice': { id: 'ranked-choice', label: 'Ranked choice (instant runoff)', output: 'single', district: false, blurb: 'Eliminate last, transfer preferences, until a majority.' },
   // seat-allocating
   'fptp-seats': { id: 'fptp-seats', label: 'Single-member districts (FPTP)', output: 'seat', district: true, blurb: 'Each district elects one member by plurality.' },
+  'block-vote': { id: 'block-vote', label: 'At-large block vote', output: 'seat', district: false, multiMember: true, blurb: 'One at-large body; the top vote-getters fill every seat. Common in BC municipal councils.' },
+  'stv': { id: 'stv', label: 'Single transferable vote', output: 'seat', district: false, multiMember: true, blurb: 'Multi-member, ranked ballots, Droop quota with surplus + elimination transfers.' },
   'party-list-pr': { id: 'party-list-pr', label: 'Party-list proportional', output: 'seat', district: false, blurb: 'Seats split in proportion to the vote, by a chosen formula.' },
-  'mmp': { id: 'mmp', label: 'Mixed-member proportional', output: 'seat', district: true, blurb: 'District seats topped up from lists toward proportionality.' },
+  'mmp': { id: 'mmp', label: 'Mixed-member proportional', output: 'seat', district: true, blurb: 'District seats topped up from lists toward proportionality (compensatory).' },
+  'parallel': { id: 'parallel', label: 'Parallel (mixed-member majoritarian)', output: 'seat', district: true, blurb: 'District seats plus a separate, non-compensatory proportional list tier.' },
   'popular-pr': { id: 'popular-pr', label: 'Popular vote to proportional seats', output: 'seat', district: false, blurb: 'A single popular vote allocated proportionally to seats.' },
 };
 
@@ -45,17 +48,27 @@ export function resolveSystem(config) {
   const def = SYSTEMS[family] || SYSTEMS.plurality;
   const totalSeats = s.totalSeats || (config.units ? config.units.length : 0);
   return {
-    family, output: def.output, district: def.district,
-    winThreshold: s.winThreshold ?? 0.5,                 // for runoff
+    family, output: def.output, district: def.district, multiMember: !!def.multiMember,
+    winThreshold: s.winThreshold ?? 0.5,                 // for runoff / supermajority
     allocation: s.allocation || 'dhondt',
     electoralThreshold: s.electoralThreshold ?? 0,        // min vote share to win seats
     totalSeats,
     districtSeats: s.districtSeats ?? (config.units ? config.units.length : 0),
     listSeats: s.listSeats ?? 0,
-    transfers: s.transfers || null,                       // {fromId:{toId:weight}}
+    districtMagnitude: s.districtMagnitude ?? totalSeats, // seats per at-large/STV district
+    transfers: s.transfers || null,                       // {fromId:{toId:weight}} preference flows
     majoritySeats: s.majoritySeats ?? config.threshold ?? (Math.floor(totalSeats / 2) + 1),
   };
 }
+
+// Group seats by slate when contenders are individual candidates (at-large/STV);
+// for party systems the group is just the party id.
+export const groupOf = (parties, id) => {
+  const p = (parties || []).find((x) => x.id === id);
+  return (p && p.slate) || id;
+};
+const groupsOf = (parties, fallbackKeys) =>
+  [...new Set(parties && parties.length ? parties.map((p) => p.slate || p.id) : fallbackKeys)];
 
 // ── Seat allocation ─────────────────────────────────────────────────────────
 // Apply an electoral threshold: parties below `thr` share win no seats.
@@ -170,18 +183,84 @@ export function resolveSingle(shares, sys) {
   return pluralityResolve(shares);
 }
 
+// At-large block vote / SNTV: the top `magnitude` contenders by vote each win a
+// seat. (Block vote and SNTV differ in how voters cast ballots; once we model
+// the resulting per-contender shares, both reduce to "top M win".)
+export function blockVoteElect(votes, magnitude) {
+  return Object.keys(votes).sort((a, b) => votes[b] - votes[a]).slice(0, magnitude);
+}
+
+// Single transferable vote: Droop quota, surplus transfers (fractional, by
+// preference flow), elimination of the lowest, until `magnitude` are elected.
+export function stvElect(votes, magnitude, transfers) {
+  const cands = Object.keys(votes);
+  const tally = { ...votes };
+  const total = sum(cands.map((c) => Math.max(0, votes[c])));
+  if (total <= 0 || magnitude <= 0) return [];
+  const quota = Math.floor(total / (magnitude + 1)) + 1;
+  const elected = []; const eliminated = [];
+  const active = () => cands.filter((c) => !elected.includes(c) && !eliminated.includes(c));
+
+  const distribute = (pot, from, remaining) => {
+    if (pot <= 0 || !remaining.length) return;
+    let wsum = 0; const w = {};
+    for (const r of remaining) { w[r] = Math.max(0, transfers?.[from]?.[r] ?? tally[r]); wsum += w[r]; }
+    for (const r of remaining) tally[r] += pot * (wsum > 0 ? w[r] / wsum : 1 / remaining.length);
+  };
+
+  let guard = cands.length * 2 + 5;
+  while (elected.length < magnitude && guard-- > 0) {
+    const act = active();
+    if (act.length + elected.length <= magnitude) { for (const c of act) elected.push(c); break; }
+    const over = act.filter((c) => tally[c] >= quota).sort((a, b) => tally[b] - tally[a]);
+    if (over.length) {
+      const c = over[0]; const surplus = tally[c] - quota;
+      tally[c] = quota; elected.push(c);
+      distribute(surplus, c, active());
+    } else {
+      const low = [...act].sort((a, b) => tally[a] - tally[b])[0];
+      const pot = tally[low]; tally[low] = 0; eliminated.push(low);
+      distribute(pot, low, active());
+    }
+  }
+  while (elected.length < magnitude) { const r = active().sort((a, b) => tally[b] - tally[a])[0]; if (!r) break; elected.push(r); }
+  return elected;
+}
+
 // Resolve a seat body from per-district winners + the aggregate popular vote.
-export function resolveSeats(districtWins, popVotes, sys) {
-  if (sys.family === 'fptp-seats') return { ...districtWins };
+// Always returns seats keyed by GROUP (slate or party id), so candidate-based
+// systems (at-large, STV) roll up to the contesting slate.
+export function resolveSeats(districtWins, popVotes, sys, parties) {
+  const groups = groupsOf(parties, Object.keys(popVotes));
+  const g = (id) => groupOf(parties, id);
+  const zero = () => Object.fromEntries(groups.map((x) => [x, 0]));
+  const rollup = (perId) => { const s = zero(); for (const id of Object.keys(perId)) s[g(id)] = (s[g(id)] || 0) + perId[id]; return s; };
+
+  if (sys.family === 'fptp-seats') return rollup(districtWins);
+
+  if (sys.family === 'block-vote') {
+    const won = blockVoteElect(popVotes, sys.districtMagnitude || sys.totalSeats);
+    const s = zero(); for (const id of won) s[g(id)] += 1; return s;
+  }
+  if (sys.family === 'stv') {
+    const won = stvElect(popVotes, sys.districtMagnitude || sys.totalSeats, sys.transfers);
+    const s = zero(); for (const id of won) s[g(id)] += 1; return s;
+  }
+  if (sys.family === 'parallel') {
+    // District tier (majoritarian) + an independent, non-compensatory PR list tier.
+    const list = allocateSeats(popVotes, sys.listSeats, sys.allocation, sys.electoralThreshold);
+    const s = rollup(districtWins);
+    const lg = rollup(list);
+    for (const x of groups) s[x] += lg[x];
+    return s;
+  }
   const entitlement = allocateSeats(popVotes, sys.totalSeats, sys.allocation, sys.electoralThreshold);
   if (sys.family === 'mmp') {
-    // Total seats per party = max(district wins, proportional entitlement) — list
-    // tier tops up toward proportionality; overhang is allowed.
-    const seats = {};
-    for (const p of Object.keys(popVotes)) seats[p] = Math.max(districtWins[p] || 0, entitlement[p] || 0);
-    return seats;
+    const dg = rollup(districtWins); const eg = rollup(entitlement);
+    const s = {}; for (const x of groups) s[x] = Math.max(dg[x] || 0, eg[x] || 0);
+    return s;
   }
-  return entitlement; // party-list-pr, popular-pr
+  return rollup(entitlement); // party-list-pr, popular-pr
 }
 
 export { normalize };

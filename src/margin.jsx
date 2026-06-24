@@ -42,9 +42,11 @@ const defaultLevers = (fixture) => {
 function deriveModel(fixture, levers) {
   const sigma_nat = VOL_SIGMA[levers.volatility];
   const output = (SYSTEMS[levers.system.family] || SYSTEMS.plurality).output;
+  const system = { ...levers.system };
+  if (system.family === 'block-vote' || system.family === 'stv') system.districtMagnitude = system.totalSeats;
   const config = {
     ...fixture,
-    system: { ...levers.system },
+    system,
     mode: output,
     params: { ...fixture.params, seed: levers.seed, iterations: levers.iterations, sigma_nat, undecidedMethod: levers.undecidedMethod },
   };
@@ -85,7 +87,9 @@ function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
   const sys = levers.system;
   const setSys = (k, v) => setLever('system', { ...sys, [k]: v });
   const def = SYSTEMS[sys.family] || SYSTEMS.plurality;
-  const isPR = def.output === 'seat' && sys.family !== 'fptp-seats';
+  const needsAllocation = ['party-list-pr', 'mmp', 'parallel', 'popular-pr'].includes(sys.family);
+  const isMultiMember = ['block-vote', 'stv'].includes(sys.family);
+  const isMixed = ['mmp', 'parallel'].includes(sys.family);
 
   return (
     <div className="mg-screen">
@@ -119,7 +123,7 @@ function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
             <input type="number" step="0.01" value={sys.winThreshold} onChange={(e) => setSys('winThreshold', +e.target.value || 0.5)} />
           </label>
         )}
-        {isPR && (
+        {needsAllocation && (
           <>
             <label className="mg-field">Allocation method
               <select value={sys.allocation} onChange={(e) => setSys('allocation', e.target.value)}>
@@ -134,7 +138,12 @@ function SetupScreen({ fixtureKey, setFixtureKey, levers, setLever, fixture }) {
             </label>
           </>
         )}
-        {sys.family === 'mmp' && (
+        {isMultiMember && (
+          <label className="mg-field">Seats to fill
+            <input type="number" value={sys.totalSeats} onChange={(e) => setSys('totalSeats', +e.target.value || 1)} />
+          </label>
+        )}
+        {isMixed && (
           <div className="mg-field2">
             <label className="mg-field">District seats<input type="number" value={sys.districtSeats} onChange={(e) => setSys('districtSeats', +e.target.value || 0)} /></label>
             <label className="mg-field">List seats<input type="number" value={sys.listSeats} onChange={(e) => setSys('listSeats', +e.target.value || 0)} /></label>

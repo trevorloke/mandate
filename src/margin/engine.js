@@ -285,7 +285,7 @@ export function runSimulation(config, point, overrides = {}) {
       outcome.yourMargin = r.winner === yourParty ? r.margin : -r.margin;
       outcome.round = r.round;
     } else {
-      outcome.seats = resolveSeats(districtWins, popVotes, sys);
+      outcome.seats = resolveSeats(districtWins, popVotes, sys, parties);
     }
     results.push(outcome);
   }
@@ -312,14 +312,16 @@ export function summarize(results, config) {
     };
   }
 
-  // Seat mode
+  // Seat mode — seats are keyed by GROUP (slate or party id) so candidate-based
+  // systems (at-large, STV) roll up to the contesting slate.
+  const groups = [...new Set(parties.map((p) => p.slate || p.id))];
   const threshold = sys.majoritySeats;
   const yourSeats = results.map((r) => r.seats[yourParty]).sort((a, b) => a - b);
   const pMajority = results.filter((r) => r.seats[yourParty] >= threshold).length / N;
   let largest = 0, plurShort = 0;
   for (const r of results) {
-    const maxSeats = Math.max(...parties.map((p) => r.seats[p.id]));
-    const isMax = r.seats[yourParty] === maxSeats && parties.filter((p) => r.seats[p.id] === maxSeats).length === 1;
+    const maxSeats = Math.max(...groups.map((grp) => r.seats[grp]));
+    const isMax = r.seats[yourParty] === maxSeats && groups.filter((grp) => r.seats[grp] === maxSeats).length === 1;
     if (isMax) { largest += 1; if (r.seats[yourParty] < threshold) plurShort += 1; }
   }
   // Histogram of your seat count
@@ -327,8 +329,8 @@ export function summarize(results, config) {
   for (const s of yourSeats) hist[s] = (hist[s] || 0) + 1;
   const histogram = Object.keys(hist).map(Number).sort((a, b) => a - b).map((seats) => ({ seats, count: hist[seats], freq: hist[seats] / N }));
 
-  // Per-unit win probability + mean margin + confidence
-  const perUnit = config.units.map((u) => {
+  // Per-unit win probability + mean margin + confidence — a district concept.
+  const perUnit = !sys.district ? [] : config.units.map((u) => {
     let wins = 0; const margins = [];
     for (const r of results) {
       if (r.unitWinners[u.unit_id] === yourParty) wins += 1;
@@ -361,7 +363,7 @@ function intervalsOf(sortedAsc) {
 // ── §6.4 Tipping-point analysis (seat mode) ──
 export function tippingPoints(results, config) {
   const sys = resolveSystem(config);
-  if (!sys.district) return []; // tipping points are a district concept (FPTP/MMP)
+  if (sys.family !== 'fptp-seats') return []; // cleanest where each district is one seat
   const yourParty = config.yourParty;
   const threshold = sys.majoritySeats;
   const tally = {};
@@ -548,7 +550,7 @@ export function forecast(config) {
   const point = buildPointEstimates(config);
   const results = runSimulation(config, point);
   const summary = summarize(results, { ...config, _point: point });
-  const tips = resolveSystem(config).district ? tippingPoints(results, { ...config, _point: point }) : [];
+  const tips = resolveSystem(config).family === 'fptp-seats' ? tippingPoints(results, { ...config, _point: point }) : [];
   return { point, summary, tipping: tips, seed: point.params.seed, iterations: point.params.iterations };
 }
 

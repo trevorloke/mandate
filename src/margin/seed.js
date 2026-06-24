@@ -144,6 +144,87 @@ export const mmpFixture = {
   threshold: 13,
 };
 
+// ── At-large block-vote fixture: a nonpartisan municipal council ──────────────
+// One at-large body, nine candidates for five seats; the top five win. Your
+// candidate (C1) needs one seat, so the "majority" bar is 1. (BC municipal.)
+export const atLargeFixture = {
+  synthetic: true,
+  name: 'Sample at-large council',
+  mode: 'seat',
+  system: { family: 'block-vote', totalSeats: 5, districtMagnitude: 5, majoritySeats: 1 },
+  yourParty: 'C1',
+  threshold: 1,
+  parties: [
+    { id: 'C1', name: 'Okonkwo', color: '#111111' },
+    { id: 'C2', name: 'Bianchi', color: '#c79a00' },
+    { id: 'C3', name: 'Haridto', color: '#3a7d44' },
+    { id: 'C4', name: 'Nguyen', color: '#9c8a3e' },
+    { id: 'C5', name: 'Park', color: '#6a645a' },
+    { id: 'C6', name: 'Ferreira', color: '#7a8a3e' },
+    { id: 'C7', name: 'Adeyemi', color: '#b8b2a2' },
+    { id: 'C8', name: 'Olsen', color: '#9c6a3e' },
+    { id: 'C9', name: 'Rourke', color: '#3e7a8a' },
+  ],
+  units: [{
+    unit_id: 'city', region: 'all', eligible_voters: 90000, eligible_unregistered: 8000, turnout_history: 0.42,
+    incumbent_party: 'C2',
+    partisan_baseline: { C1: 0.15, C2: 0.16, C3: 0.13, C4: 0.12, C5: 0.11, C6: 0.09, C7: 0.08, C8: 0.08, C9: 0.08 },
+    ground: { support_score_mean: 0.15, contact_rate: 0.18, id_contacts: 16000, confirmed_supporters: 2400, leaners: 1200, undecided_contacted: 2000 },
+  }],
+  polls: [
+    { poll_id: 'civic-1', field_date: '2025-05-19', sample_size: 600, pollster_rating: 0.6, scope: 'contest',
+      shares: { C1: 0.16, C2: 0.15, C3: 0.13, C4: 0.12, C5: 0.11, C6: 0.09, C7: 0.08, C8: 0.08, C9: 0.08 }, house_effect: 0 },
+  ],
+  raise: { available_to_spend: 40000, cost_per_contact: 7 },
+  ledger: { spending_cap: 120000, spent_to_date: 92000, cap_remaining: 28000 },
+  params: { undecidedMethod: 'proportional', asOf: ASOF, seed: 12345, iterations: 1000 },
+};
+
+// ── STV fixture: a single seven-seat district, three slates of three ──────────
+// Single transferable vote with within-slate preference flows, so a slate can
+// win several seats off quota + transfers. Your slate is A; majority is 4 of 7.
+const SLATE_CANDS = ['A', 'B', 'C'].flatMap((s) => [1, 2, 3].map((n) => ({ id: `${s}${n}`, slate: s })));
+function stvTransfers() {
+  // Each candidate transfers mostly to same-slate mates, a little to others.
+  const t = {};
+  for (const c of SLATE_CANDS) {
+    t[c.id] = {};
+    for (const o of SLATE_CANDS) { if (o.id === c.id) continue; t[c.id][o.id] = o.slate === c.slate ? 0.8 : 0.1; }
+  }
+  return t;
+}
+export const stvFixture = {
+  synthetic: true,
+  name: 'Sample STV district',
+  mode: 'seat',
+  system: { family: 'stv', totalSeats: 7, districtMagnitude: 7, majoritySeats: 4, transfers: stvTransfers() },
+  yourParty: 'A', // slate id
+  threshold: 4,
+  parties: [
+    { id: 'A1', name: 'A · Mbeki', slate: 'A', color: '#111111' },
+    { id: 'A2', name: 'A · Costa', slate: 'A', color: '#333333' },
+    { id: 'A3', name: 'A · Lim', slate: 'A', color: '#555555' },
+    { id: 'B1', name: 'B · Reyes', slate: 'B', color: '#c79a00' },
+    { id: 'B2', name: 'B · Novak', slate: 'B', color: '#d6ad22' },
+    { id: 'B3', name: 'B · Hassan', slate: 'B', color: '#e3c04a' },
+    { id: 'C1', name: 'C · Green', slate: 'C', color: '#3a7d44' },
+    { id: 'C2', name: 'C · Ade', slate: 'C', color: '#4f9159' },
+    { id: 'C3', name: 'C · Roy', slate: 'C', color: '#67a571' },
+  ],
+  units: [{
+    unit_id: 'district', region: 'all', eligible_voters: 140000, eligible_unregistered: 11000, turnout_history: 0.58,
+    incumbent_party: null,
+    partisan_baseline: { A1: 0.18, A2: 0.12, A3: 0.08, B1: 0.16, B2: 0.10, B3: 0.07, C1: 0.12, C2: 0.09, C3: 0.08 },
+  }],
+  polls: [
+    { poll_id: 'stv-1', field_date: '2025-05-21', sample_size: 1000, pollster_rating: 0.7, scope: 'contest',
+      shares: { A1: 0.19, A2: 0.12, A3: 0.07, B1: 0.16, B2: 0.10, B3: 0.07, C1: 0.12, C2: 0.09, C3: 0.08 }, house_effect: 0 },
+  ],
+  raise: { available_to_spend: 120000, cost_per_contact: 9 },
+  ledger: { spending_cap: 500000, spent_to_date: 410000, cap_remaining: 90000 },
+  params: { undecidedMethod: 'proportional', asOf: ASOF, seed: 12345, iterations: 1000 },
+};
+
 // A held-out "actual" past result for the backtest screen (§9). Synthetic.
 export const seatBacktestActual = { yourSeats: 6 };       // came up one short of the 7 threshold
 export const singleBacktestActual = { yourShare: 0.33, win: true };
@@ -153,4 +234,6 @@ export const FIXTURES = {
   seat: { key: 'seat', label: 'FPTP seats', fixture: seatFixture },
   pr: { key: 'pr', label: 'Proportional', fixture: prFixture },
   mmp: { key: 'mmp', label: 'Mixed-member', fixture: mmpFixture },
+  atlarge: { key: 'atlarge', label: 'At-large council', fixture: atLargeFixture },
+  stv: { key: 'stv', label: 'STV district', fixture: stvFixture },
 };

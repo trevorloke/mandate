@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import {
   highestAverages, largestRemainder, allocateSeats,
   pluralityResolve, runoffResolve, irvResolve, resolveSystem, SYSTEMS,
+  blockVoteElect, stvElect,
 } from '../../src/margin/systems.js';
 import { buildPointEstimates, runSimulation, summarize } from '../../src/margin/engine.js';
-import { prFixture, mmpFixture, singleFixture } from '../../src/margin/seed.js';
+import { prFixture, mmpFixture, singleFixture, atLargeFixture, stvFixture } from '../../src/margin/seed.js';
 
 // ── Allocation: known textbook results ──
 test("D'Hondt matches the canonical worked example", () => {
@@ -91,6 +92,49 @@ test('MMP: total seats per sim >= district seats and tops up toward proportional
     const total = r.seats.A + r.seats.B + r.seats.C;
     assert.ok(total >= 12, 'at least the 12 district seats are filled');
     assert.ok(total >= mmpFixture.system.totalSeats - 1, 'list tier tops up to ~24 (overhang allowed)');
+  }
+});
+
+test('block vote: the top M contenders fill the seats', () => {
+  const won = blockVoteElect({ a: 100, b: 90, c: 80, d: 70, e: 10 }, 3);
+  assert.deepEqual(won.sort(), ['a', 'b', 'c'].sort());
+});
+
+test('at-large fixture: exactly the magnitude of seats is filled each sim', () => {
+  const point = buildPointEstimates(atLargeFixture);
+  const res = runSimulation(atLargeFixture, point, { iterations: 300 });
+  for (const r of res.slice(0, 40)) {
+    const filled = Object.values(r.seats).reduce((a, b) => a + b, 0);
+    assert.equal(filled, 5, 'five council seats filled');
+    assert.ok(r.seats.C1 === 0 || r.seats.C1 === 1, 'your candidate wins 0 or 1 seat');
+  }
+  const s = summarize(res, { ...atLargeFixture, _point: point });
+  assert.ok(s.pMajority > 0 && s.pMajority <= 1, 'reports probability of winning a seat');
+});
+
+test('STV: Droop quota elects the magnitude; a strong slate wins multiple seats', () => {
+  // 6 votes split 50/30/20 over 3 candidates for 3 seats: quota = floor(100/4)+1.
+  const won = stvElect({ A1: 50, B1: 30, C1: 20 }, 3, null);
+  assert.equal(won.length, 3);
+  const point = buildPointEstimates(stvFixture);
+  const res = runSimulation(stvFixture, point, { iterations: 300 });
+  for (const r of res.slice(0, 40)) {
+    const filled = r.seats.A + r.seats.B + r.seats.C;
+    assert.equal(filled, 7, 'seven seats filled (rolled up by slate)');
+    assert.ok(r.seats.A >= 0 && r.seats.A <= 7);
+  }
+  const s = summarize(res, { ...stvFixture, _point: point });
+  assert.ok(s.seats.mean > 0, 'your slate wins seats on quota + transfers');
+  assert.deepEqual(s.perUnit, [], 'no per-district detail for a single STV district');
+});
+
+test('parallel (MMM): district tier + non-compensatory list tier sum', () => {
+  const par = { ...mmpFixture, name: 'x', system: { family: 'parallel', allocation: 'dhondt', listSeats: 12, totalSeats: 24, majoritySeats: 13 } };
+  const point = buildPointEstimates(par);
+  const res = runSimulation(par, point, { iterations: 200 });
+  for (const r of res.slice(0, 30)) {
+    const total = r.seats.A + r.seats.B + r.seats.C;
+    assert.equal(total, 12 + 12, 'district seats (12) + list seats (12)');
   }
 });
 
