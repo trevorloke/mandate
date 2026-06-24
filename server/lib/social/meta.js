@@ -19,6 +19,11 @@ async function refreshCreds(creds, app) {
 }
 const pageTokenOf = (creds) => (creds.pages || []).find((p) => p.id === creds.pageId)?.token;
 
+// Photo accessibility: Facebook stores human-authored alt text in
+// `alt_text_custom` (the auto-generated `alt_text` field is read-only). Emit it
+// only when the media carries alt text, clamped to the field's 1000-char cap.
+const altField = (m) => (m?.alt ? { alt_text_custom: String(m.alt).slice(0, 1000) } : {});
+
 export const oauth = {
   authorizeUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
   tokenUrl: `${GRAPH}/oauth/access_token`,
@@ -109,7 +114,7 @@ export async function publish(account, post) {
   } else if (photos.length === 1) {
     const r = await fetch(`${GRAPH}/${creds.pageId}/photos`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: photos[0].url, caption: message, access_token: page.token }),
+      body: JSON.stringify({ url: photos[0].url, caption: message, ...altField(photos[0]), access_token: page.token }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error?.message || `Facebook publish failed (${r.status}).`);
@@ -120,7 +125,7 @@ export async function publish(account, post) {
     for (const m of photos) {
       const r = await fetch(`${GRAPH}/${creds.pageId}/photos`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: m.url, published: false, access_token: page.token }),
+        body: JSON.stringify({ url: m.url, published: false, ...altField(m), access_token: page.token }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error?.message || `Facebook photo upload failed (${r.status}).`);

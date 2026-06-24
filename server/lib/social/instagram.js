@@ -19,6 +19,9 @@ async function refreshCreds(creds, app) {
   return { ...creds, userToken, expiresAt, pageToken: page?.token || creds.pageToken };
 }
 
+// Per-image accessibility alt text, emitted only when present (≤1000 chars).
+const altParam = (m) => (m?.alt ? { alt_text: String(m.alt).slice(0, 1000) } : {});
+
 async function igContainer(igUserId, token, params) {
   const r = await fetch(`${GRAPH}/${igUserId}/media`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -39,12 +42,14 @@ export async function publish(account, post) {
   const { igUserId, pageToken: token } = creds;
 
   // 1) Build a container — single image, or a CAROUSEL of child containers.
+  // alt_text (per-image, ≤1000 chars) was added to the publishing API in
+  // 2025-03; supported on images and carousel items (not reels/stories).
   let creationId;
   if (media.length === 1) {
-    creationId = await igContainer(igUserId, token, { image_url: media[0].url, caption });
+    creationId = await igContainer(igUserId, token, { image_url: media[0].url, caption, ...altParam(media[0]) });
   } else {
     const children = [];
-    for (const m of media) children.push(await igContainer(igUserId, token, { image_url: m.url, is_carousel_item: true }));
+    for (const m of media) children.push(await igContainer(igUserId, token, { image_url: m.url, is_carousel_item: true, ...altParam(m) }));
     creationId = await igContainer(igUserId, token, { media_type: 'CAROUSEL', caption, children });
   }
 
