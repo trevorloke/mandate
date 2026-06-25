@@ -89,13 +89,18 @@ export async function publish(account, post) {
 
   const media = (post.media || []).filter((m) => m.bytes).slice(0, 9);
   const assets = [];
-  for (const m of media) assets.push(await uploadImageLI(creds, m));
+  for (const m of media) assets.push({ urn: await uploadImageLI(creds, m), alt: m.alt || '' });
 
   const share = {
     shareCommentary: { text: String(post.body || '') },
     shareMediaCategory: assets.length ? 'IMAGE' : 'NONE',
   };
-  if (assets.length) share.media = assets.map((a) => ({ status: 'READY', media: a }));
+  // `description.text` is the accessibility alt text shown by LinkedIn screen
+  // readers; attach it per-image only when the author supplied one.
+  if (assets.length) share.media = assets.map((a) => ({
+    status: 'READY', media: a.urn,
+    ...(a.alt ? { description: { text: String(a.alt).slice(0, 1000) } } : {}),
+  }));
 
   const body = {
     author: creds.memberUrn,

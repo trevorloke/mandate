@@ -12,10 +12,11 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { and, eq, desc, inArray } from 'drizzle-orm';
 import { db, sqlite } from '../db/index.js';
-import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, socialKeywords, socialListening, users, workspaces, auditLog } from '../db/schema.js';
+import { socialAccounts, socialPosts, socialApps, socialInbox, socialTemplates, socialLinks, socialFeeds, socialKeywords, socialListening, users, workspaces, auditLog, notifications } from '../db/schema.js';
 import { syncFeed } from '../lib/social/feeds.js';
 import { syncListening } from '../lib/social/listening.js';
 import { getWorkspaceSlots, setWorkspaceSlots, nextQueueTime } from '../lib/social/slots.js';
+import { bestTimes, nextBestTime } from '../lib/social/besttime.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { encrypt, encryptJson } from '../lib/crypto.js';
 import { getProvider, providerCatalog } from '../lib/social/index.js';
@@ -38,6 +39,23 @@ const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {
 async function getWsSettings(workspaceId) {
   const ws = (await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
   return { ws, settings: safeJson(ws?.settings) };
+}
+
+// ── Approval notifications (best-effort) ──
+async function notifyApprovers(workspaceId, exceptUserId, title, body) {
+  try {
+    const approvers = await db.select().from(users)
+      .where(and(eq(users.workspaceId, workspaceId), inArray(users.role, ['admin', 'super_admin'])));
+    for (const u of approvers) {
+      if (u.id === exceptUserId) continue;
+      await db.insert(notifications).values({ id: newId('n_'), userId: u.id, kind: 'social.approval', title, body: body ? String(body).slice(0, 300) : null, link: '/' });
+    }
+  } catch { /* notifications are best-effort */ }
+}
+async function notifyUsers(userIds, kind, title, body) {
+  for (const uid of new Set([...userIds].filter(Boolean))) {
+    try { await db.insert(notifications).values({ id: newId('n_'), userId: uid, kind, title, body: body ? String(body).slice(0, 300) : null, link: '/' }); } catch { /* best-effort */ }
+  }
 }
 
 const app = new Hono();
@@ -294,13 +312,18 @@ app.get('/posts', async (c) => {
 
 app.post('/posts', requireRole('editor'), async (c) => {
   const me = c.get('user');
-  const { body = '', targets = [], scheduledAt: scheduledAtRaw = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null, queue = false } = await c.req.json().catch(() => ({}));
+  const { body = '', targets = [], scheduledAt: scheduledAtRaw = null, publishNow = false, media = [], saveDraft = false, submitForApproval = false, thread = null, queue = false, bestTime = false } = await c.req.json().catch(() => ({}));
   // Queue mode: server picks the next free posting slot for this workspace.
+  // Best-time mode: server picks the next high-engagement window from history.
   let scheduledAt = scheduledAtRaw;
   if (queue && !publishNow) {
     const q = await nextQueueTime(me.workspaceId, { sqlite });
     if (q.error) return c.json({ error: q.error }, 400);
     scheduledAt = q.time.toISOString();
+  } else if (bestTime && !publishNow) {
+    const b = await nextBestTime(me.workspaceId, {});
+    if (b.error) return c.json({ error: b.error }, 400);
+    scheduledAt = b.time.toISOString();
   }
   // A thread is an array of segment strings; the first segment is the head/body.
   const threadSegs = Array.isArray(thread) ? thread.map((s) => String(s || '').trim()).filter(Boolean) : null;
@@ -359,6 +382,7 @@ app.post('/posts', requireRole('editor'), async (c) => {
     }
   }
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: publishNow ? 'published' : status }); } catch {}
+  if (submitForApproval) await notifyApprovers(me.workspaceId, me.id, `${me.name || 'A teammate'} submitted a post for approval`, text);
 
   const fresh = await db.select().from(socialPosts).where(eq(socialPosts.groupId, groupId));
   return c.json({ ok: true, groupId, posts: fresh.map(pubPost), results });
@@ -411,6 +435,7 @@ app.post('/posts/:groupId/submit', requireRole('editor'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.submit', target: groupId });
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'pending' }); } catch {}
+  if (targetable.length) await notifyApprovers(me.workspaceId, me.id, `${me.name || 'A teammate'} submitted a post for approval`, targetable[0].body);
   return c.json({ ok: true, submitted: targetable.length });
 });
 
@@ -433,6 +458,7 @@ app.post('/posts/:groupId/approve', requireRole('admin'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.approve', target: groupId, meta: JSON.stringify({ count: pending.length }) });
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'approved' }); } catch {}
+  if (pending.length) await notifyUsers(pending.map((r) => r.createdById).filter((id) => id !== me.id), 'social.approved', 'Your post was approved', pending[0].body);
   return c.json({ ok: true, approved: pending.length, results: results.length ? results : null });
 });
 
@@ -449,6 +475,7 @@ app.post('/posts/:groupId/reject', requireRole('admin'), async (c) => {
   }
   await db.insert(auditLog).values({ id: newId('a_'), userId: me.id, action: 'social.post.reject', target: groupId });
   try { broadcast(me.workspaceId, 'social.post', { groupId, action: 'rejected' }); } catch {}
+  if (pending.length) await notifyUsers(pending.map((r) => r.createdById).filter((id) => id !== me.id), 'social.rejected', 'Your post was rejected', reason || 'No reason given');
   return c.json({ ok: true, rejected: pending.length });
 });
 
@@ -580,50 +607,11 @@ app.get('/status', async (c) => {
   });
 });
 
-// Map the workspace's tz abbreviation to an IANA zone for DST-aware bucketing.
-const TZ_IANA = {
-  PT: 'America/Los_Angeles', MT: 'America/Denver', CT: 'America/Chicago', ET: 'America/New_York',
-  AT: 'America/Halifax', NT: 'America/St_Johns', GMT: 'Etc/UTC', BST: 'Europe/London',
-  CET: 'Europe/Paris', EET: 'Europe/Helsinki', IST: 'Asia/Kolkata',
-};
-const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-function dayHourInTz(date, tzAbbr) {
-  const timeZone = TZ_IANA[tzAbbr] || 'Etc/UTC';
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(date);
-    const wd = parts.find((p) => p.type === 'weekday')?.value;
-    let hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
-    if (hour === 24) hour = 0;
-    return { day: WD[wd] ?? 0, hour: Number.isNaN(hour) ? 0 : hour };
-  } catch {
-    return { day: date.getUTCDay(), hour: date.getUTCHours() };
-  }
-}
-
 // Best-time-to-post suggestions from this workspace's own engagement history.
 app.get('/best-times', async (c) => {
   const me = c.get('user');
-  const platform = c.req.query('platform');
-  const ws = (await db.select().from(workspaces).where(eq(workspaces.id, me.workspaceId)).limit(1))[0];
-  const tz = ws?.tz || 'UTC';
-  const base = and(eq(socialPosts.workspaceId, me.workspaceId), eq(socialPosts.status, 'published'));
-  const where = platform ? and(base, eq(socialPosts.platform, platform)) : base;
-  const rows = await db.select().from(socialPosts).where(where);
-
-  const eng = (m) => (m.likes || 0) + (m.reposts || 0) + (m.replies || 0) + (m.comments || 0) + (m.shares || 0);
-  const buckets = new Map();
-  let samples = 0;
-  for (const p of rows) {
-    if (!p.publishedAt || !p.metricsJson) continue;
-    const m = safeParse(p.metricsJson); if (!m) continue;
-    const d = p.publishedAt instanceof Date ? p.publishedAt : new Date(p.publishedAt * 1000);
-    const { day, hour } = dayHourInTz(d, tz);
-    const key = `${day}-${hour}`;
-    const b = buckets.get(key) || { day, hour, sum: 0, n: 0 };
-    b.sum += eng(m); b.n++; buckets.set(key, b); samples++;
-  }
-  const grid = [...buckets.values()].map((b) => ({ day: b.day, hour: b.hour, avg: b.sum / b.n, n: b.n }));
-  const suggestions = grid.slice().sort((a, b) => b.avg - a.avg).slice(0, 5);
+  const platform = c.req.query('platform') || null;
+  const { suggestions, grid, samples, tz } = await bestTimes(me.workspaceId, platform);
   return c.json({ suggestions, grid, samples, tz });
 });
 

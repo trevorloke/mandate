@@ -273,4 +273,39 @@ export const api = {
   deleteReport:  (id) => fetchJson(`/api/reports/${id}`, { method: 'DELETE' }),
   runReportNow:  (id) => fetchJson(`/api/reports/${id}/run-now`, { method: 'POST' }),
   // Export uses a direct download (returns CSV/JSON file), not JSON parsing
+
+  // Tide (Attention Chart)
+  tideStatus:      () => fetchJson('/api/tide/status'),
+  tideSources:     () => fetchJson('/api/tide/sources'),
+  tideTopics:      () => fetchJson('/api/tide/topics'),
+  tideTopic:       (id) => fetchJson(`/api/tide/topics/${id}`),
+  tideCreateTopic: (body) => fetchJson('/api/tide/topics', { method: 'POST', body }),
+  tideUpdateTopic: (id, body) => fetchJson(`/api/tide/topics/${id}`, { method: 'PUT', body }),
+  tideDeleteTopic: (id) => fetchJson(`/api/tide/topics/${id}`, { method: 'DELETE' }),
+  tideRefresh:     (id) => fetchJson(`/api/tide/topics/${id}/refresh`, { method: 'POST' }),
+  tidePanel:       () => fetchJson('/api/tide/panel'),
+  tideAddPanelist: (body) => fetchJson('/api/tide/panel', { method: 'POST', body }),
+  tideSeed:        () => fetchJson('/api/tide/seed', { method: 'POST' }),
+  tideExportUrl:   () => '/api/tide/export',
+
+  // Cross-module entities (the database that transcends modules)
+  entitiesList:    (q = '', type = '') => fetchJson(`/api/entities?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`),
+  entityProfile:   (id) => fetchJson(`/api/entities/${id}`),
+  entityCreate:    (body) => fetchJson('/api/entities', { method: 'POST', body }),
+  entityUpdate:    (id, body, sync = false) => fetchJson(`/api/entities/${id}${sync ? '?sync=1' : ''}`, { method: 'PUT', body }),
+  entityDelete:    (id) => fetchJson(`/api/entities/${id}`, { method: 'DELETE' }),
+  entityRebuild:   () => fetchJson('/api/entities/rebuild', { method: 'POST' }),
+  entityByRecord:  (m, k, r) => fetchJson(`/api/entities/by-record/${m}/${k}/${encodeURIComponent(r)}`),
+
+  // Margin — live workspace contest (Phase 4)
+  marginContest:        () => fetchJson('/api/margin/contest'),
+  marginScenarios:      () => fetchJson('/api/margin/scenarios'),
+  marginSaveScenario:   (body) => fetchJson('/api/margin/scenarios', { method: 'POST', body }),
+  marginDeleteScenario: (id) => fetchJson(`/api/margin/scenarios/${id}`, { method: 'DELETE' }),
+  // Gamified opt-in journey + value-back mirror
+  tidePanelSteps:  () => fetchJson('/api/tide/panel/steps'),
+  tidePanelStart:  () => fetchJson('/api/tide/panel/start', { method: 'POST' }),
+  tidePanelStep:   (id, body) => fetchJson(`/api/tide/panel/${id}/step`, { method: 'POST', body }),
+  tidePanelState:  (id) => fetchJson(`/api/tide/panel/${id}`),
+  tidePanelMirror: (id) => fetchJson(`/api/tide/panel/${id}/mirror`),
 };

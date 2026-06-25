@@ -508,3 +508,106 @@ export const socialAudience = sqliteTable('social_audience', {
   day:         text('day').notNull(),
   capturedAt:  integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
+
+// Saved Margin forecast scenarios (the scenario lab's save & compare).
+export const marginScenarios = sqliteTable('margin_scenarios', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name:        text('name').notNull(),
+  win:         real('win').notNull().default(0),       // win/majority probability snapshot
+  detail:      text('detail'),                          // e.g. "seats 41 to 49"
+  modeLabel:   text('mode_label'),
+  leversJson:  text('levers_json').notNull().default('{}'),
+  createdById: text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// ── Cross-module entities — the database that transcends modules. A person,
+// org, or place is ONE canonical record; every module links to it, so a change
+// to the entity is felt everywhere and a single profile shows every touchpoint.
+export const entities = sqliteTable('entities', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  type:        text('type').notNull().default('person'),   // person | org | place
+  name:        text('name').notNull(),
+  email:       text('email'),
+  phone:       text('phone'),
+  tagsJson:    text('tags_json').notNull().default('[]'),
+  dataJson:    text('data_json').notNull().default('{}'),  // flexible shared attributes
+  matchKey:    text('match_key'),                          // normalized email|name for dedupe
+  deletedAt:   integer('deleted_at', { mode: 'timestamp' }),
+  createdById: text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:   integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// A link is one module touchpoint of an entity (voter in Ground, donor in Raise…).
+export const entityLinks = sqliteTable('entity_links', {
+  id:          text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  entityId:    text('entity_id').notNull().references(() => entities.id, { onDelete: 'cascade' }),
+  module:      text('module').notNull(),
+  kind:        text('kind').notNull(),
+  recordId:    text('record_id').notNull(),               // moduleData id (or custom-table id)
+  role:        text('role'),                              // e.g. 'donor', 'voter', 'host'
+  createdAt:   integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// ── Tide (Attention Chart) — what the world is paying attention to, who drives
+// it, how they feel, and why — read off a consented panel that gives demographic
+// ground truth. Topics are the tracked subjects; readings are per-refresh
+// attention snapshots; panelists are the opted-in members behind the demographics.
+export const tideTopics = sqliteTable('tide_topics', {
+  id:            text('id').primaryKey(),
+  workspaceId:   text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name:          text('name').notNull(),
+  slug:          text('slug').notNull(),
+  keywordsJson:  text('keywords_json').notNull().default('[]'),   // string[] — match terms
+  status:        text('status').notNull().default('active'),      // active | paused
+  refreshHours:  integer('refresh_hours').notNull().default(4),   // cadence (brief: 4h)
+  lastReadingAt: integer('last_reading_at', { mode: 'timestamp' }),
+  createdById:   text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:     integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:     integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// Consented panel members — the asset. Demographics are self-reported ground
+// truth, not inferred. linked_accounts / interests power driver attribution.
+export const tidePanelists = sqliteTable('tide_panelists', {
+  id:                  text('id').primaryKey(),
+  workspaceId:         text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  externalRef:         text('external_ref'),                      // opaque person handle
+  consentAt:          integer('consent_at', { mode: 'timestamp' }),
+  ageBand:             text('age_band'),                          // '18-24' | '25-34' | ...
+  gender:              text('gender'),                            // 'female' | 'male' | 'nonbinary' | 'unknown'
+  region:              text('region'),                            // 'urban' | 'suburban' | 'rural' or a place
+  demographicsJson:    text('demographics_json').notNull().default('{}'), // extra profiling answers
+  interestsJson:       text('interests_json').notNull().default('[]'),    // topic affinities (string[])
+  linkedAccountsJson:  text('linked_accounts_json').notNull().default('[]'),
+  profileCompleteness: real('profile_completeness').notNull().default(0), // 0..1 (progressive profiling)
+  weight:              real('weight').notNull().default(1),       // post-stratification weight
+  points:              integer('points').notNull().default(0),    // gamification — accrues per profiling step
+  badgesJson:          text('badges_json').notNull().default('[]'),
+  lastStepAt:         integer('last_step_at', { mode: 'timestamp' }),
+  status:              text('status').notNull().default('active'),
+  createdAt:          integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt:          integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+// A reading is one attention snapshot for a topic at a point in time.
+export const tideReadings = sqliteTable('tide_readings', {
+  id:               text('id').primaryKey(),
+  workspaceId:      text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  topicId:          text('topic_id').notNull().references(() => tideTopics.id, { onDelete: 'cascade' }),
+  capturedAt:      integer('captured_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  volume:           integer('volume').notNull().default(0),       // attention volume index
+  momentum:         real('momentum').notNull().default(0),        // fractional change vs previous reading
+  sentimentJson:    text('sentiment_json').notNull().default('{}'), // { pos, neu, neg } fractions
+  demographicsJson: text('demographics_json').notNull().default('{}'), // breakdown by cut, with share + sentiment
+  driversJson:      text('drivers_json').notNull().default('[]'), // top drivers (communities/accounts)
+  sourcesJson:      text('sources_json').notNull().default('[]'), // which source layers contributed
+  why:              text('why'),                                  // narrative attribution
+  confidence:       real('confidence').notNull().default(0),      // 0..1 — directional, not census-grade
+  panelN:           integer('panel_n').notNull().default(0),      // panelists behind the cut
+  createdAt:        integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});

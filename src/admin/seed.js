@@ -6,7 +6,7 @@ import { api } from '../auth/api';
 async function loadAllData() {
   const [
     ground, people, beacon1, beacon2, raise, raiseGlr,
-    ledger, coalition, civic, opp, site, events, academy, command, app,
+    ledger, coalition, civic, opp, site, events, academy, command, app, margin,
   ] = await Promise.all([
     import('../ground-data'),
     import('../people-data'),
@@ -23,8 +23,9 @@ async function loadAllData() {
     import('../academy-data'),
     import('../command-data'),
     import('../data'),
+    import('../margin-data'),
   ]);
-  return { ground, people, beacon1, beacon2, raise, raiseGlr, ledger, coalition, civic, opp, site, events, academy, command, app };
+  return { ground, people, beacon1, beacon2, raise, raiseGlr, ledger, coalition, civic, opp, site, events, academy, command, app, margin };
 }
 
 // Map each (module, kind) bucket to a function returning the records.
@@ -100,6 +101,11 @@ function buildBuckets(d) {
     // command
     { module: 'command', kind: 'channel', records: (d.command.CMD_GROUPS || []).flatMap(g => (g.items || []).map(i => ({ ...i, group: g.label }))) },
     { module: 'command', kind: 'message', records: [...(d.command.CMD_MESSAGES || []), ...((d.command.CMD_THREAD || []).map(t => ({ ...t, parentId: 'm1' })))] },
+
+    // margin — a live forecast contest assembled from workspace records (Phase 4)
+    { module: 'margin', kind: 'contest',  records: d.margin.MARGIN_CONTEST || [] },
+    { module: 'margin', kind: 'district', records: d.margin.MARGIN_DISTRICTS || [] },
+    { module: 'margin', kind: 'poll',     records: d.margin.MARGIN_POLLS || [] },
   ];
 }
 
@@ -122,5 +128,10 @@ export async function seedDemoData(onProgress = () => {}) {
     }
   }
 
-  return { total, buckets: summary };
+  // Resolve the freshly-seeded records into the cross-module entity directory so
+  // one person/org shows up across every module immediately (best-effort).
+  let entities = null;
+  try { entities = await api.entityRebuild(); } catch { /* directory stays empty */ }
+
+  return { total, buckets: summary, entities };
 }

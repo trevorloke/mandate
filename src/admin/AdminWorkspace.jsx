@@ -14,6 +14,9 @@ const ALL_MODULES = [
   { k: 'events',     label: 'Events',     desc: 'Schedule · venues · hosts · shifts' },
   { k: 'academy',    label: 'Academy',    desc: 'Courses · faculty · reading' },
   { k: 'command',    label: 'Command',    desc: 'War-room chat · channels' },
+  { k: 'tide',       label: 'Tide',       desc: 'Attention chart · panel · sentiment · why' },
+  { k: 'margin',     label: 'Margin',     desc: 'Forecast · simulation · path to victory' },
+  { k: 'directory',  label: 'Directory',  desc: 'Cross-module people, orgs, and places' },
 ];
 
 export default function AdminWorkspace() {

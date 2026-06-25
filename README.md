@@ -4,8 +4,27 @@ Campaign management platform — full-stack Vite + React frontend with a Hono + 
 
 ## What's inside
 
-**11 modules** for running a political campaign:
-Ground · Beacon · Raise · Ledger · Coalition · Civic · Opposition · Site · Events · Command · Academy
+**14 modules** for running a political campaign:
+Ground · Beacon · Raise · Ledger · Coalition · Civic · Opposition · Site · Events · Command · Academy · **Tide** · **Margin** · **Directory**
+
+- **Tide** — attention intelligence on a consented panel: what the world is paying
+  attention to, who drives it, how they feel, and why. Post-stratified (raked)
+  toward population targets with honest confidence; pluggable sources (seeded,
+  Google Trends, news RSS); gamified opt-in + value-back mirror; momentum alerts;
+  CSV export.
+- **Margin** — election forecasting + path to victory: ~1,000 reproducible Monte
+  Carlo simulations with a shared national swing (correlated, honest intervals),
+  tipping-point analysis, opponent stress tests, a tornado sensitivity, a
+  cap-bounded optimizer, a scenario lab, and backtesting. **Universal across
+  electoral systems** — plurality, two-round runoff, ranked choice, FPTP seats,
+  party-list PR (D'Hondt / Sainte-Laguë / largest remainder), MMP, parallel,
+  at-large block vote, STV, popular-vote PR, and the **electoral college** — all
+  configurable per contest.
+- **Directory** — the database that transcends modules: every person, org, and
+  place is one canonical entity that all modules link to. A 360° profile shows
+  every touchpoint at once (voter in Ground, donor in Raise, host in Events…),
+  editing propagates everywhere, and an "also appears in…" cross-reference
+  surfaces inside each module's record view.
 
 **Admin & platform:**
 - Multi-tenant workspaces with per-module enable/disable

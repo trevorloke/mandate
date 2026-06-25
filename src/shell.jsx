@@ -17,6 +17,9 @@ const MOD2 = [
   { k:'events',     n:'Events',     s:'Calendar & RSVP',  ac:'var(--m-events)',     tint:'var(--m-events-tint)',     tag:'E' },
   { k:'civic',      n:'Civic',      s:'Governing',        ac:'var(--m-civic)',      tint:'var(--m-civic-tint)',      tag:'V' },
   { k:'academy',    n:'Academy',    s:'Method & training',ac:'var(--m-academy)',    tint:'var(--m-academy-tint)',    tag:'A' },
+  { k:'tide',       n:'Tide',       s:'Attention chart',  ac:'var(--m-tide)',       tint:'var(--m-tide-tint)',       tag:'T' },
+  { k:'margin',     n:'Margin',     s:'Forecast & path',  ac:'var(--m-margin)',     tint:'var(--m-margin-tint)',     tag:'M' },
+  { k:'directory',  n:'Directory',  s:'People & orgs',    ac:'var(--m-directory)',  tint:'var(--m-directory-tint)',  tag:'D' },
 ];
 const modByKey = (k) => MOD2.find(m => m.k === k);
 

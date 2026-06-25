@@ -9,6 +9,21 @@
 const GRAPH = 'https://graph.facebook.com/v19.0';
 export const CHAR_LIMIT = 2200;
 
+import { exchangeLongLived, fetchPages, ensureMetaFresh, metaFetch } from './meta-token.js';
+
+// Extend the long-lived user token and re-derive Page tokens from it.
+async function refreshCreds(creds, app) {
+  const { userToken, expiresAt } = await exchangeLongLived(creds.userToken, app);
+  const pages = await fetchPages(userToken);
+  return { ...creds, userToken, expiresAt, pages: pages.length ? pages : creds.pages };
+}
+const pageTokenOf = (creds) => (creds.pages || []).find((p) => p.id === creds.pageId)?.token;
+
+// Photo accessibility: Facebook stores human-authored alt text in
+// `alt_text_custom` (the auto-generated `alt_text` field is read-only). Emit it
+// only when the media carries alt text, clamped to the field's 1000-char cap.
+const altField = (m) => (m?.alt ? { alt_text_custom: String(m.alt).slice(0, 1000) } : {});
+
 export const oauth = {
   authorizeUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
   tokenUrl: `${GRAPH}/oauth/access_token`,
@@ -30,13 +45,14 @@ export const oauth = {
 
   async identity({ tokens, app }) {
     let userToken = tokens.access_token;
+    let expiresAt = null;
     // Upgrade to a long-lived user token (~60 days).
     try {
       const ll = await fetch(`${GRAPH}/oauth/access_token?grant_type=fb_exchange_token`
         + `&client_id=${encodeURIComponent(app.clientId)}`
         + `&client_secret=${encodeURIComponent(app.clientSecret)}`
         + `&fb_exchange_token=${encodeURIComponent(userToken)}`).then((r) => r.json());
-      if (ll.access_token) userToken = ll.access_token;
+      if (ll.access_token) { userToken = ll.access_token; expiresAt = ll.expires_in ? Date.now() + ll.expires_in * 1000 : null; }
     } catch { /* keep short-lived token */ }
 
     const me = await fetch(`${GRAPH}/me?fields=id,name&access_token=${encodeURIComponent(userToken)}`).then((r) => r.json());
@@ -58,7 +74,8 @@ export const oauth = {
           displayName: p.ig.username || p.name,
           avatarUrl: p.ig.profile_picture_url || null,
           remoteId: p.ig.id,
-          credentials: { igUserId: p.ig.id, pageId: p.id, pageToken: p.token },
+          // Carry the user token so the IG account can self-refresh its Page token.
+          credentials: { igUserId: p.ig.id, pageId: p.id, pageToken: p.token, userToken, expiresAt },
         });
       }
     }
@@ -68,15 +85,16 @@ export const oauth = {
       handle: primary ? primary.name : (me.name || 'Facebook'),
       displayName: primary ? primary.name : (me.name || 'Facebook'),
       avatarUrl: null,
-      credentials: { userToken, pages: pages.map(({ ig, ...rest }) => rest), pageId: primary?.id || null },
+      credentials: { userToken, expiresAt, pages: pages.map((p) => ({ id: p.id, name: p.name, token: p.token })), pageId: primary?.id || null },
       extraAccounts,
     };
   },
 };
 
 export async function publish(account, post) {
-  const creds = account.credentials;
+  let creds = account.credentials;
   if (!creds?.pageId) throw new Error('No Facebook Page selected — reconnect and grant Page access.');
+  creds = await ensureMetaFresh(account, refreshCreds); // proactive token refresh
   const page = (creds.pages || []).find((p) => p.id === creds.pageId);
   if (!page?.token) throw new Error('Missing Page access token — reconnect the account.');
 
@@ -96,7 +114,7 @@ export async function publish(account, post) {
   } else if (photos.length === 1) {
     const r = await fetch(`${GRAPH}/${creds.pageId}/photos`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: photos[0].url, caption: message, access_token: page.token }),
+      body: JSON.stringify({ url: photos[0].url, caption: message, ...altField(photos[0]), access_token: page.token }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error?.message || `Facebook publish failed (${r.status}).`);
@@ -107,7 +125,7 @@ export async function publish(account, post) {
     for (const m of photos) {
       const r = await fetch(`${GRAPH}/${creds.pageId}/photos`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: m.url, published: false, access_token: page.token }),
+        body: JSON.stringify({ url: m.url, published: false, ...altField(m), access_token: page.token }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error?.message || `Facebook photo upload failed (${r.status}).`);
@@ -122,37 +140,30 @@ export async function publish(account, post) {
     id = j.id;
   }
 
-  return { remoteId: id, url: id ? `https://www.facebook.com/${id}` : null };
+  return { remoteId: id, url: id ? `https://www.facebook.com/${id}` : null, credentials: creds };
 }
 
 export async function metrics(account, remoteId) {
-  const creds = account.credentials;
-  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
-  const token = page?.token;
-  if (!token) throw new Error('Missing Page access token.');
-  const r = await fetch(`${GRAPH}/${remoteId}?fields=likes.summary(true),comments.summary(true),shares&access_token=${encodeURIComponent(token)}`);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.error?.message || `Facebook metrics failed (${r.status}).`);
-  return { metrics: { likes: j.likes?.summary?.total_count || 0, comments: j.comments?.summary?.total_count || 0, shares: j.shares?.count || 0 } };
+  if (!pageTokenOf(account.credentials)) throw new Error('Missing Page access token.');
+  const { res, json, creds } = await metaFetch(account, refreshCreds, (c) =>
+    fetch(`${GRAPH}/${remoteId}?fields=likes.summary(true),comments.summary(true),shares&access_token=${encodeURIComponent(pageTokenOf(c))}`));
+  if (!res.ok) throw new Error(json?.error?.message || `Facebook metrics failed (${res.status}).`);
+  return { metrics: { likes: json.likes?.summary?.total_count || 0, comments: json.comments?.summary?.total_count || 0, shares: json.shares?.count || 0 }, credentials: creds };
 }
 
 export async function verify(account) {
-  const creds = account.credentials;
-  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
-  const token = page?.token || creds.userToken;
-  const r = await fetch(`${GRAPH}/me?access_token=${encodeURIComponent(token)}`);
-  if (!r.ok) throw new Error(`Facebook token is invalid (${r.status}) — reconnect.`);
-  return { ok: true };
+  const { res, creds } = await metaFetch(account, refreshCreds, (c) =>
+    fetch(`${GRAPH}/me?access_token=${encodeURIComponent(pageTokenOf(c) || c.userToken)}`));
+  if (!res.ok) throw new Error(`Facebook token is invalid (${res.status}) — reconnect.`);
+  return { ok: true, credentials: creds };
 }
 
 // Pull comments on recent Page posts for the inbox.
 export async function fetchInbox(account, { postLimit = 10 } = {}) {
-  const creds = account.credentials;
-  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
-  const token = page?.token;
-  if (!token) throw new Error('Missing Page access token.');
-  const feed = await fetch(`${GRAPH}/${creds.pageId}/feed?fields=id,permalink_url,comments.limit(25){id,message,from,created_time,permalink_url}&limit=${postLimit}&access_token=${encodeURIComponent(token)}`)
-    .then((r) => r.json()).catch(() => ({}));
+  if (!pageTokenOf(account.credentials)) throw new Error('Missing Page access token.');
+  const { res, json: feed, creds } = await metaFetch(account, refreshCreds, (c) =>
+    fetch(`${GRAPH}/${c.pageId}/feed?fields=id,permalink_url,comments.limit(25){id,message,from,created_time,permalink_url}&limit=${postLimit}&access_token=${encodeURIComponent(pageTokenOf(c))}`));
+  if (!res.ok) throw new Error(feed?.error?.message || `Facebook inbox failed (${res.status}).`);
   const items = [];
   for (const post of (feed.data || [])) {
     for (const c of (post.comments?.data || [])) {
@@ -164,29 +175,24 @@ export async function fetchInbox(account, { postLimit = 10 } = {}) {
       });
     }
   }
-  return { items };
+  return { items, credentials: creds };
 }
 
 export async function reply(account, item, text) {
-  const creds = account.credentials;
-  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
-  const token = page?.token;
-  if (!token) throw new Error('Missing Page access token.');
-  const r = await fetch(`${GRAPH}/${item.replyContext?.commentId}/comments`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: String(text || ''), access_token: token }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.error?.message || `Facebook reply failed (${r.status}).`);
-  return { remoteId: j.id };
+  if (!pageTokenOf(account.credentials)) throw new Error('Missing Page access token.');
+  const { res, json, creds } = await metaFetch(account, refreshCreds, (c) =>
+    fetch(`${GRAPH}/${item.replyContext?.commentId}/comments`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: String(text || ''), access_token: pageTokenOf(c) }),
+    }));
+  if (!res.ok) throw new Error(json?.error?.message || `Facebook reply failed (${res.status}).`);
+  return { remoteId: json.id, credentials: creds };
 }
 
 export async function audience(account) {
-  const creds = account.credentials;
-  const page = (creds.pages || []).find((p) => p.id === creds.pageId);
-  if (!page?.token) throw new Error('Missing Page token.');
-  const r = await fetch(`${GRAPH}/${creds.pageId}?fields=fan_count&access_token=${encodeURIComponent(page.token)}`);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('Facebook page fetch failed.');
-  return { followers: j.fan_count || 0 };
+  if (!pageTokenOf(account.credentials)) throw new Error('Missing Page token.');
+  const { res, json, creds } = await metaFetch(account, refreshCreds, (c) =>
+    fetch(`${GRAPH}/${c.pageId}?fields=fan_count&access_token=${encodeURIComponent(pageTokenOf(c))}`));
+  if (!res.ok) throw new Error('Facebook page fetch failed.');
+  return { followers: json.fan_count || 0, credentials: creds };
 }

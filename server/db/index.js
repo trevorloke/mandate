@@ -570,6 +570,122 @@ function bootstrapTables() {
   alterIfMissing('social_inbox', 'assigned_at', 'INTEGER');
   alterIfMissing('social_links', 'utm', 'TEXT');
 
+  // Saved Margin scenarios (scenario lab persistence).
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS margin_scenarios (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      win           REAL NOT NULL DEFAULT 0,
+      detail        TEXT,
+      mode_label    TEXT,
+      levers_json   TEXT NOT NULL DEFAULT '{}',
+      created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_margin_scenarios_ws ON margin_scenarios(workspace_id, created_at DESC);
+  `);
+
+  // Cross-module entities + their per-module links.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS entities (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      type          TEXT NOT NULL DEFAULT 'person',
+      name          TEXT NOT NULL,
+      email         TEXT,
+      phone         TEXT,
+      tags_json     TEXT NOT NULL DEFAULT '[]',
+      data_json     TEXT NOT NULL DEFAULT '{}',
+      match_key     TEXT,
+      deleted_at    INTEGER,
+      created_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    INTEGER DEFAULT (unixepoch()),
+      updated_at    INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_entities_ws ON entities(workspace_id, deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_entities_match ON entities(workspace_id, match_key);
+
+    CREATE TABLE IF NOT EXISTS entity_links (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      entity_id    TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      module       TEXT NOT NULL,
+      kind         TEXT NOT NULL,
+      record_id    TEXT NOT NULL,
+      role         TEXT,
+      created_at   INTEGER DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_links_unique ON entity_links(entity_id, record_id);
+    CREATE INDEX IF NOT EXISTS idx_entity_links_entity ON entity_links(entity_id);
+    CREATE INDEX IF NOT EXISTS idx_entity_links_record ON entity_links(workspace_id, module, kind, record_id);
+  `);
+
+  // Tide (Attention Chart): tracked topics, consented panel, attention readings.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS tide_topics (
+      id              TEXT PRIMARY KEY,
+      workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name            TEXT NOT NULL,
+      slug            TEXT NOT NULL,
+      keywords_json   TEXT NOT NULL DEFAULT '[]',
+      status          TEXT NOT NULL DEFAULT 'active',
+      refresh_hours   INTEGER NOT NULL DEFAULT 4,
+      last_reading_at INTEGER,
+      created_by_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at      INTEGER DEFAULT (unixepoch()),
+      updated_at      INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_tide_topics_ws ON tide_topics(workspace_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tide_topics_due ON tide_topics(status, last_reading_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tide_topics_slug ON tide_topics(workspace_id, slug);
+
+    CREATE TABLE IF NOT EXISTS tide_panelists (
+      id                   TEXT PRIMARY KEY,
+      workspace_id         TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      external_ref         TEXT,
+      consent_at           INTEGER,
+      age_band             TEXT,
+      gender               TEXT,
+      region               TEXT,
+      demographics_json    TEXT NOT NULL DEFAULT '{}',
+      interests_json       TEXT NOT NULL DEFAULT '[]',
+      linked_accounts_json TEXT NOT NULL DEFAULT '[]',
+      profile_completeness REAL NOT NULL DEFAULT 0,
+      weight               REAL NOT NULL DEFAULT 1,
+      points               INTEGER NOT NULL DEFAULT 0,
+      badges_json          TEXT NOT NULL DEFAULT '[]',
+      last_step_at         INTEGER,
+      status               TEXT NOT NULL DEFAULT 'active',
+      created_at           INTEGER DEFAULT (unixepoch()),
+      updated_at           INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_tide_panelists_ws ON tide_panelists(workspace_id, status);
+
+    CREATE TABLE IF NOT EXISTS tide_readings (
+      id                TEXT PRIMARY KEY,
+      workspace_id      TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      topic_id          TEXT NOT NULL REFERENCES tide_topics(id) ON DELETE CASCADE,
+      captured_at       INTEGER DEFAULT (unixepoch()),
+      volume            INTEGER NOT NULL DEFAULT 0,
+      momentum          REAL NOT NULL DEFAULT 0,
+      sentiment_json    TEXT NOT NULL DEFAULT '{}',
+      demographics_json TEXT NOT NULL DEFAULT '{}',
+      drivers_json      TEXT NOT NULL DEFAULT '[]',
+      sources_json      TEXT NOT NULL DEFAULT '[]',
+      why               TEXT,
+      confidence        REAL NOT NULL DEFAULT 0,
+      panel_n           INTEGER NOT NULL DEFAULT 0,
+      created_at        INTEGER DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_tide_readings_topic ON tide_readings(topic_id, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tide_readings_ws ON tide_readings(workspace_id, captured_at DESC);
+  `);
+  // Gamification columns added to tide_panelists after it shipped.
+  alterIfMissing('tide_panelists', 'points', 'INTEGER NOT NULL DEFAULT 0');
+  alterIfMissing('tide_panelists', 'badges_json', "TEXT NOT NULL DEFAULT '[]'");
+  alterIfMissing('tide_panelists', 'last_step_at', 'INTEGER');
+
   // Chain audit_log entries: each row gets prev_hash + hash computed
   // automatically by an AFTER INSERT trigger using the registered sha256_hex UDF.
   // Order by SQLite's implicit rowid (insertion order) — created_at is per-second
