@@ -97,7 +97,7 @@ function CvPromises() {
         <div className="cv2__card">
           <div className="cv2__card-title"><span>Kept</span></div>
           <div className="cv2__fy-headline" style={{ color: 'var(--cv-accent)' }}>{kept}</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cv-accent-2)' }}>{Math.round(kept/CV_PROMISES.length*100)}% of total</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cv-accent-2)' }}>{Math.round(kept/(CV_PROMISES.length||1)*100)}% of total</div>
         </div>
         <div className="cv2__card">
           <div className="cv2__card-title"><span>On track</span></div>
@@ -138,13 +138,13 @@ function CvPromises() {
               </div>
               <span className={'cv2__promise-stage ' + p.status}>{p.stage}</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                {p.status.replace(/-/g, ' ')}
+                {(p.status || '').replace(/-/g, ' ')}
               </span>
               <div className={'cv2__promise-pct-bar' + (p.status === 'kept' ? ' kept' : '')}>
-                <span style={{ width: (p.pct*100) + '%' }} />
+                <span style={{ width: ((p.pct||0)*100) + '%' }} />
               </div>
               <span className="cv2__promise-cost">{p.cost}</span>
-              <span className="cv2__promise-receipts" title={p.evidence.join(' · ')}>{p.receipts}◯</span>
+              <span className="cv2__promise-receipts" title={(p.evidence || []).join(' · ')}>{p.receipts}◯</span>
             </div>
           ))}
         </div>

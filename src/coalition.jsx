@@ -158,6 +158,7 @@ const CoaLedger = () => {
   const totalMoney = rows.reduce((a, r) => a + (r.money || 0), 0);
 
   const fmtK = (n) => {
+    n = Number(n) || 0;
     if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n/1000).toFixed(0) + 'k';
     return n.toLocaleString();
@@ -272,7 +273,7 @@ const CoaLedger = () => {
             <div className="cl__d-stats">
               <div><span>MEMBERS</span><b>{open.members > 0 ? fmtK(open.members) : '—'}</b></div>
               <div><span>REACH</span><b>{fmtK(open.reach)}</b></div>
-              <div><span>$ COMMIT</span><b>${open.money.toLocaleString()}</b></div>
+              <div><span>$ COMMIT</span><b>${(open.money ?? 0).toLocaleString()}</b></div>
               <div><span>CHAMPION</span><b>{open.champion}</b></div>
             </div>
 

@@ -147,9 +147,9 @@ function GroundMap({ activePd, onPickPd, shade }) {
       {/* PD labels — only target PDs (set pd.target on the record) */}
       {pds.filter(pd => pd.target).map(pd => {
         // centroid-ish
-        const pts = pd.points.split(' ').map(p => p.split(',').map(Number));
-        const cx = pts.reduce((a,p) => a+p[0], 0) / pts.length;
-        const cy = pts.reduce((a,p) => a+p[1], 0) / pts.length;
+        const pts = (pd.points || '').split(' ').filter(Boolean).map(p => p.split(',').map(Number));
+        const cx = pts.length ? pts.reduce((a,p) => a+p[0], 0) / pts.length : 0;
+        const cy = pts.length ? pts.reduce((a,p) => a+p[1], 0) / pts.length : 0;
         return (
           <g key={pd.id + '-l'} transform={`translate(${cx}, ${cy})`}>
             <text textAnchor="middle" fontFamily="Fraunces, serif" fontStyle="italic" fontSize="12" fill="#1a1814" opacity="0.85">{pd.name}</text>
@@ -210,8 +210,8 @@ function VoterRow({ v, open, onToggle, onSelect, selected }) {
         </div>
         <div className="vrow__addr">{v.addr}</div>
         <div className="vrow__supp">
-          {v.support.toFixed(2)}
-          <span className="vrow__supp-bar"><span className="fill" style={{ width: `${v.support*100}%` }}/></span>
+          {(v.support ?? 0).toFixed(2)}
+          <span className="vrow__supp-bar"><span className="fill" style={{ width: `${(v.support ?? 0)*100}%` }}/></span>
         </div>
         <div className="vrow__bal">{v.ballots}</div>
         <div className="vrow__last">{v.lastContact}</div>
@@ -223,19 +223,19 @@ function VoterRow({ v, open, onToggle, onSelect, selected }) {
             <div className="dossier__name">{v.first} {v.last}</div>
             <div className="dossier__sub">{[ageOf(v), v.tenure, v.addr].filter(Boolean).join(' · ')}</div>
             <div className="dossier__facts">
-              <div><b>Support</b> {v.support.toFixed(2)}</div>
+              <div><b>Support</b> {(v.support ?? 0).toFixed(2)}</div>
               <div><b>Primary issue</b> {v.issue}</div>
               <div><b>Language</b> {v.lang}</div>
               <div><b>Household</b> {v.household}</div>
               <div><b>PD</b> {v.pd}</div>
-              <div><b>Tags</b> {v.tags.length ? v.tags.join(', ') : '—'}</div>
+              <div><b>Tags</b> {(v.tags || []).length ? v.tags.join(', ') : '—'}</div>
             </div>
 
             <div style={{ marginTop: 16 }}>
               <div className="dossier__col-title">Ballot History</div>
               <div className="dossier__ballots">
                 {[2014,2016,2018,2020,2022,2024].map((y, i) => {
-                  const voted = i < parseInt(v.ballots.split('/')[0], 10);
+                  const voted = i < parseInt((v.ballots || '0/6').split('/')[0], 10);
                   return (
                     <div key={y} className={'dossier__ballot ' + (voted ? 'dossier__ballot--voted' : '')}>
                       {String(y).slice(2)}
@@ -270,7 +270,7 @@ function ScriptDock({ open, script, onClose }) {
   return (
     <div className={'script-dock ' + (open ? 'script-dock--open' : '')}>
       <div className="script-dock__hd">
-        <div className="script-dock__eyebrow">SCRIPT · {script.mode.toUpperCase()}</div>
+        <div className="script-dock__eyebrow">SCRIPT · {(script.mode || '').toUpperCase()}</div>
         <div className="script-dock__title">{script.title}</div>
         <div className="script-dock__meta">{script.author} · {script.updated}</div>
         <div className="script-dock__close" onClick={onClose}>✕ close</div>
@@ -282,10 +282,10 @@ function ScriptDock({ open, script, onClose }) {
         <div className="script-dock__tab">Revisions</div>
       </div>
       <div className="script-body">
-        {script.scenes.map((scene, i) => (
+        {(script.scenes || []).map((scene, i) => (
           <div key={i} className="script-scene">
             <div className="script-direction">{scene.direction}</div>
-            {scene.lines.map((ln, j) => (
+            {(scene.lines || []).map((ln, j) => (
               <div key={j} className="script-line">
                 <span className={'script-who ' + (ln.who === 'VOTER' ? 'script-who--voter' : ln.who === 'SYSTEM' ? 'script-who--system' : '')}>
                   {ln.who}
@@ -432,7 +432,7 @@ function DoorScreen({ voter, script, mode }) {
   return (
     <>
       <div className="fvoter">
-        <div className="fvoter-addr">{voter.addr.toUpperCase()}</div>
+        <div className="fvoter-addr">{(voter.addr || '').toUpperCase()}</div>
         <div className="fvoter-name">{voter.first} {voter.last}</div>
         <div className="fvoter-sub">{[ageOf(voter), voter.tenure].filter(Boolean).join(' · ')} · ballot {voter.ballots} · issue: {voter.issue}</div>
       </div>
@@ -453,7 +453,7 @@ function DoorScreen({ voter, script, mode }) {
           {(script?.scenes || []).slice(0, 2).map((sc, i) => (
             <div key={i} style={{ marginBottom: 12 }}>
               <div className="fscript-dir">{sc.direction}</div>
-              {sc.lines.map((ln, j) => (
+              {(sc.lines || []).map((ln, j) => (
                 <div key={j} className="fscript-line">
                   <div className="fscript-who">{ln.who}</div>
                   {ln.text && <div>{ln.text.replace('{{name}}', voter.first || '[name]')}</div>}
@@ -519,7 +519,7 @@ function PhoneScreen({ voter, script, mode }) {
           <div className="fscript-dir">Warm tone. They can hear your smile.</div>
           <div className="fscript-line">
             <div className="fscript-who">CANVASSER</div>
-            <div>{script.scenes[0]?.lines[0]?.text?.replace('{{name}}', 'Ben') || 'Opener.'}</div>
+            <div>{script.scenes?.[0]?.lines?.[0]?.text?.replace('{{name}}', 'Ben') || 'Opener.'}</div>
           </div>
         </div>
       )}
@@ -589,12 +589,13 @@ function Ground() {
   const [scriptOpen, setScriptOpen] = gUS(false);
   const [activeScriptId, setActiveScriptId] = gUS(null);
   const [mode, setMode] = gUS('door-knock');
+  // Filter voters to active PD for the list. This useMemo MUST run before the
+  // noVoters early return — otherwise the hook count changes when voters load
+  // in (empty → populated), tripping React error #310 (white screen).
+  const filtered = gUM(() => voters.filter(v => v.pd === activePd || activePd === 'ALL').slice(0, 18), [activePd, voters]);
   if (noVoters) return <EmptyModule module="GROUND" label="Ground" accent="var(--m-ground)" />;
 
   const activeScript = scripts.find(s => s.id === activeScriptId) || scripts[0];
-
-  // Filter voters to active PD for the list
-  const filtered = gUM(() => voters.filter(v => v.pd === activePd || activePd === 'ALL').slice(0, 18), [activePd, voters]);
   // Universe count derives from voters matching the active PD (or all voters when ALL).
   const totalInUniverse = activePd === 'ALL' ? voters.length : voters.filter(v => v.pd === activePd).length;
   const liveCanvassers = canvassersLive.filter(c => c.status === 'live').length;
@@ -685,14 +686,14 @@ function Ground() {
           <div>
             <div style={{ padding:'0 30px' }}>
               {activeScript ? (<>
-              <div style={{ fontFamily:'var(--font-mono)', fontSize:10, letterSpacing:'0.2em', color:'var(--text-3)' }}>SCRIPT · {activeScript.mode.toUpperCase()}</div>
+              <div style={{ fontFamily:'var(--font-mono)', fontSize:10, letterSpacing:'0.2em', color:'var(--text-3)' }}>SCRIPT · {(activeScript.mode || '').toUpperCase()}</div>
               <div style={{ fontFamily:'var(--font-display)', fontSize:34, letterSpacing:'-0.01em', margin:'4px 0 6px' }}>{activeScript.title}</div>
               <div style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--text-3)' }}>{activeScript.author} · {activeScript.updated}</div>
               <div style={{ height: 1, background:'var(--rule)', margin:'18px 0' }}/>
-              {activeScript.scenes.map((scene, i) => (
+              {(activeScript.scenes || []).map((scene, i) => (
                 <div key={i} className="script-scene">
                   <div className="script-direction">{scene.direction}</div>
-                  {scene.lines.map((ln, j) => (
+                  {(scene.lines || []).map((ln, j) => (
                     <div key={j} className="script-line">
                       <span className={'script-who ' + (ln.who === 'VOTER' ? 'script-who--voter' : ln.who === 'SYSTEM' ? 'script-who--system' : '')}>
                         {ln.who}

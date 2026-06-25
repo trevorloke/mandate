@@ -15,7 +15,7 @@ const LedgerFilings = () => {
   const { records: history } = useLiveRecords('ledger', 'filing_history', LEDGER_FILINGS.history);
   const { records: currentRecs } = useLiveRecords('ledger', 'filing_current', [LEDGER_FILINGS.current]);
   const f = currentRecs[0];
-  const passed = f ? f.checks.filter(c => c.pass).length : 0;
+  const passed = f ? (f.checks || []).filter(c => c.pass).length : 0;
   const regs = LEDGER_REGULATORS;
   const regBy = Object.fromEntries(regs.map(r => [r.id, r]));
   const primary = regs.find(r => r.role === 'primary');
@@ -74,7 +74,7 @@ const LedgerFilings = () => {
         </div>
         {queue.map(q => (
           <div key={q.id} className={`lfile__qrow ${q.urgent ? 'urgent' : ''} ${q.id === f?.id ? 'current' : ''}`}>
-            <span className="lfile__qreg">{regBy[q.regulator].short}</span>
+            <span className="lfile__qreg">{regBy[q.regulator]?.short}</span>
             <span className="lfile__qname">
               <b>{q.period}</b>
               <em>{q.id}</em>
@@ -87,7 +87,7 @@ const LedgerFilings = () => {
               <em>{q.progress}%</em>
             </span>
             <span className={`lfile__qstatus status--${q.status}`}>
-              <i className="dot"></i>{q.status.replace('-', ' ')}
+              <i className="dot"></i>{(q.status || '').replace('-', ' ')}
             </span>
           </div>
         ))}
@@ -99,7 +99,7 @@ const LedgerFilings = () => {
         <div className="lfile__current-h">
           <div>
             <div className="lfile__eyebrow">Spotlight · in flight</div>
-            <h3>{regBy[f.regulator].short} <em>· {f.title}</em></h3>
+            <h3>{regBy[f.regulator]?.short} <em>· {f.title}</em></h3>
           </div>
           <div className="lfile__chip ready">READY · awaiting candidate signature</div>
         </div>
@@ -111,7 +111,7 @@ const LedgerFilings = () => {
               <div className="lfile__progress-bar">
                 <div className="lfile__progress-fill" style={{ width: f.progress + '%' }} />
               </div>
-              <em>{f.progress}% complete · {passed} of {f.checks.length} checks passed</em>
+              <em>{f.progress}% complete · {passed} of {(f.checks || []).length} checks passed</em>
             </div>
           </div>
         </div>
@@ -123,10 +123,10 @@ const LedgerFilings = () => {
 
           {/* Summary numbers */}
           <div className="lfile__summary">
-            <div><span>Revenue</span><b>${f.summary.totalRevenue.toLocaleString()}</b></div>
-            <div><span>Expense</span><b>${f.summary.totalExpense.toLocaleString()}</b></div>
-            <div><span>Net</span><b className="up">${f.summary.netCash.toLocaleString()}</b></div>
-            <div><span>Itemized</span><b>{f.summary.itemizedDonations}</b></div>
+            <div><span>Revenue</span><b>${(f.summary?.totalRevenue ?? 0).toLocaleString()}</b></div>
+            <div><span>Expense</span><b>${(f.summary?.totalExpense ?? 0).toLocaleString()}</b></div>
+            <div><span>Net</span><b className="up">${(f.summary?.netCash ?? 0).toLocaleString()}</b></div>
+            <div><span>Itemized</span><b>{f.summary?.itemizedDonations}</b></div>
           </div>
 
           <div className="lfile__sched-table">
@@ -137,7 +137,7 @@ const LedgerFilings = () => {
               <span className="r">AMOUNT</span>
               <span>STATUS</span>
             </div>
-            {f.schedules.map(s => (
+            {(f.schedules || []).map(s => (
               <div key={s.id} className={`lfile__sched-row status--${s.status}`}>
                 <span className="lfile__sched-code">{s.code}</span>
                 <span className="lfile__sched-name">
@@ -145,7 +145,7 @@ const LedgerFilings = () => {
                   {s.note && <em>{s.note}</em>}
                 </span>
                 <span className="r ljr__num">{s.items}</span>
-                <span className="r ljr__num">${s.$.toLocaleString()}</span>
+                <span className="r ljr__num">${(s.$ ?? 0).toLocaleString()}</span>
                 <span className={`lfile__sched-status status--${s.status}`}>
                   {s.status === 'done' && <><i className="dot"></i>Done</>}
                   {s.status === 'na'   && <><i className="dot"></i>N/A</>}
@@ -160,7 +160,7 @@ const LedgerFilings = () => {
         <div className="lfile__rail">
           <div className="lfile__checks">
             <div className="lfile__h">PRE-FILING CHECKS</div>
-            {f.checks.map(c => (
+            {(f.checks || []).map(c => (
               <div key={c.id} className={`lfile__check ${c.pass ? 'pass' : 'pend'}`}>
                 <span className="lfile__check-i">{c.pass ? '✓' : '○'}</span>
                 <span className="lfile__check-l">
@@ -173,7 +173,7 @@ const LedgerFilings = () => {
 
           <div className="lfile__activity">
             <div className="lfile__h">ACTIVITY</div>
-            {f.activity.map((a, i) => (
+            {(f.activity || []).map((a, i) => (
               <div className="lfile__act" key={i}>
                 <span className="lfile__act-t">{a.t}</span>
                 <span className={`lfile__act-w ${a.who === 'auto' ? 'auto' : ''}`}>{a.who}</span>
@@ -205,9 +205,9 @@ const LedgerFilings = () => {
                 <b>{h.period}</b>
                 <em>due {h.due}</em>
               </span>
-              <span className="lfile__hist-reg">{regBy[h.regulator].short}</span>
+              <span className="lfile__hist-reg">{regBy[h.regulator]?.short}</span>
               <span>{h.filed}</span>
-              <span className="r ljr__num">${h.amount.toLocaleString()}</span>
+              <span className="r ljr__num">${(h.amount ?? 0).toLocaleString()}</span>
               <span className={`r ${h.flags > 0 ? 'flag' : ''}`}>{h.flags}</span>
               <span className="lfile__hist-auditor">{h.auditor}</span>
               <span className={`lfile__hist-status status--${h.status}`}>

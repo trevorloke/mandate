@@ -121,7 +121,7 @@ function OpTargets() {
   const { records: OP_TARGETS } = useLiveRecords('opposition', 'target', OP_TARGETS_FB);
   const sorted = [...OP_TARGETS].sort((a, b) => {
     const order = { critical: 0, high: 1, medium: 2, low: 3 };
-    return order[a.threat] - order[b.threat];
+    return (order[a.threat] ?? 99) - (order[b.threat] ?? 99);
   });
   return (
     <div>
@@ -160,8 +160,8 @@ function OpTargets() {
             </div>
 
             <div className="op2__target-tags">
-              {t.weaknesses.map((w, i) => <span key={i} className="op2__weakness">⚠ {w}</span>)}
-              {t.strengths.slice(0, 2).map((s, i) => <span key={i} className="op2__strength">◆ {s}</span>)}
+              {(t.weaknesses || []).map((w, i) => <span key={i} className="op2__weakness">⚠ {w}</span>)}
+              {(t.strengths || []).slice(0, 2).map((s, i) => <span key={i} className="op2__strength">◆ {s}</span>)}
             </div>
           </div>
         ))}
@@ -212,15 +212,15 @@ function OpClaims() {
       <div>
         {rows.map((c, i) => {
           const target = OP_TARGETS.find(t => t.id === c.target);
-          const evs = c.evidenceIds.map(id => OP_EVIDENCE.find(e => e.id === id)).filter(Boolean);
+          const evs = (c.evidenceIds || []).map(id => OP_EVIDENCE.find(e => e.id === id)).filter(Boolean);
           const reb = OP_REBUTTALS.find(r => r.id === c.rebuttalId);
-          const verdictKey = c.verdict.replace(/[\s·]+/g, '-').replace(/--+/g, '-');
+          const verdictKey = (c.verdict || '').replace(/[\s·]+/g, '-').replace(/--+/g, '-');
           return (
             <div key={c.id} className="op2__claim">
               <div className="op2__claim-num">
                 #{String(i+1).padStart(3, '0')}
                 <div style={{ marginTop: 6, color: 'var(--op-ink-3)' }}>
-                  {c.date.slice(5)}
+                  {(c.date || '').slice(5)}
                 </div>
               </div>
               <div>
@@ -245,8 +245,8 @@ function OpClaims() {
                 <span className={'op2__verdict ' + verdictKey}>{c.verdict}</span>
                 <div className="op2__heat">
                   <span>HEAT</span>
-                  <div className="op2__heat-bar"><span style={{ width: (c.heat*100) + '%' }} /></div>
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(c.heat*100)}</span>
+                  <div className="op2__heat-bar"><span style={{ width: ((c.heat||0)*100) + '%' }} /></div>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{Math.round((c.heat||0)*100)}</span>
                 </div>
               </div>
             </div>
@@ -295,7 +295,7 @@ function OpEvidence() {
           <div key={e.id} className="op2__ev">
             <div className="op2__ev-head">
               <span>{e.id} · {e.kind} · {e.vault}</span>
-              <span className={'op2__ev-strength ' + e.strength.replace('+','\\+')}>{e.strength}</span>
+              <span className={'op2__ev-strength ' + (e.strength || '').replace('+','\\+')}>{e.strength}</span>
             </div>
             <div className="op2__ev-title">
               {e.vault === 'restricted'
@@ -308,7 +308,7 @@ function OpEvidence() {
                 : e.summary}
             </div>
             <div className="op2__ev-source">
-              {e.source.toUpperCase()} · {e.date.slice(0,10)} · linked to {e.linked.length} claim{e.linked.length===1?'':'s'}
+              {(e.source || '').toUpperCase()} · {(e.date || '').slice(0,10)} · linked to {(e.linked || []).length} claim{(e.linked || []).length===1?'':'s'}
             </div>
           </div>
         ))}
@@ -319,7 +319,7 @@ function OpEvidence() {
 
 function RedactedTitle({ title }) {
   // Replace ~25% of words with redaction bars to evoke classified docs
-  const words = title.split(' ');
+  const words = (title || '').split(' ');
   return (
     <span>
       {words.map((w, i) => {

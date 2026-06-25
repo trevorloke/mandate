@@ -9,7 +9,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 function AcLibrary({ onPickCourse, onPickArticle }) {
   const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
   const { records: ACAD_ARTICLES } = useLiveRecords('academy', 'article', ACAD_ARTICLES_FB);
-  const featured = ACAD_COURSES.find(c => c.featured);
+  const featured = ACAD_COURSES.find(c => c.featured) || ACAD_COURSES[0];
   const byCat = acUM(() => {
     const m = {};
     ACAD_CATEGORIES.forEach(c => m[c] = []);
@@ -20,6 +20,7 @@ function AcLibrary({ onPickCourse, onPickArticle }) {
   return (
     <div>
       {/* FEATURED */}
+      {featured && (
       <div className="lyc-feat" onClick={()=>onPickCourse(featured.id)}>
         <div className="lyc-feat__visual">
           <div className="lyc-feat__num">№<br/>14</div>
@@ -31,7 +32,7 @@ function AcLibrary({ onPickCourse, onPickArticle }) {
         <aside className="lyc-feat__side">
           <div className="lyc-feat__side-h">Continue · Chapter 4 of 9</div>
           <div className="lyc-feat__chapters">
-            {featured.chapterList.slice(0, 6).map(ch => (
+            {(featured.chapterList || []).slice(0, 6).map(ch => (
               <div key={ch.n} className={`lyc-feat__chap ${ch.done?'done':''} ${ch.now?'now':''}`}>
                 <span className="lyc-feat__chap-n">{ch.n.toString().padStart(2,'0')}</span>
                 <span className="lyc-feat__chap-t">{ch.t}<small>{ch.sub}</small></span>
@@ -49,6 +50,7 @@ function AcLibrary({ onPickCourse, onPickArticle }) {
           </div>
         </aside>
       </div>
+      )}
 
       {/* COURSE GRID */}
       <div className="lyc__sect">
@@ -110,7 +112,7 @@ function CourseCard({ c, onPick }) {
       <div className="lyc-card__poster">
         <div className="lyc-card__poster-grad" style={{background: c.gradient}}></div>
         <div className="lyc-card__poster-cat">{c.required && '★ '}{c.cat}</div>
-        <div className="lyc-card__poster-num">{c.id.slice(-2).toUpperCase()}</div>
+        <div className="lyc-card__poster-num">{(c.id || '').slice(-2).toUpperCase()}</div>
         <div className="lyc-card__poster-instr">— {c.instructor}</div>
       </div>
       <div className="lyc-card__body">
@@ -134,8 +136,17 @@ function CourseCard({ c, onPick }) {
 function AcCourse({ courseId, onBack }) {
   const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
   const { records: ACAD_FACULTY } = useLiveRecords('academy', 'faculty', ACAD_FACULTY_FB);
-  const c = ACAD_COURSES.find(x => x.id === courseId) || ACAD_COURSES.find(x=>x.featured);
-  const instructor = ACAD_FACULTY.find(f => f.id === c?.instructorId);
+  const c = ACAD_COURSES.find(x => x.id === courseId) || ACAD_COURSES.find(x=>x.featured) || ACAD_COURSES[0];
+  if (!c) {
+    return (
+      <div className="lyc-course" style={{ padding: 32 }}>
+        <div className="lyc-course__breadcrumb" style={{cursor:'pointer'}} onClick={onBack}>← Library</div>
+        <p style={{fontFamily:'var(--font-serif)', fontStyle:'italic', color:'var(--lyc-mute)'}}>No course to show yet.</p>
+      </div>
+    );
+  }
+  const instructor = ACAD_FACULTY.find(f => f.id === c?.instructorId)
+    || { name: c.instructor || '—', title: '' };
   const chapters = c.chapterList || [
     { n:1, t:'Introduction', d:'08:00', done:true, sub:'Overview' },
     { n:2, t:'Foundations', d:'14:00', done:true, sub:'Core ideas' },
@@ -164,17 +175,17 @@ function AcCourse({ courseId, onBack }) {
         </div>
         <div className="lyc-course__below">
           <div className="lyc-course__breadcrumb" style={{cursor:'pointer'}} onClick={onBack}>← Library  ·  {c.cat}  ·  Chapter {nowChap.n} of {chapters.length}</div>
-          <h1 className="lyc-course__h1">{c.title.split(' ').slice(0,-1).join(' ')} <em>{c.title.split(' ').slice(-1)}</em></h1>
+          <h1 className="lyc-course__h1">{(c.title || '').split(' ').slice(0,-1).join(' ')} <em>{(c.title || '').split(' ').slice(-1)}</em></h1>
           <p style={{fontFamily:'var(--font-serif)', fontStyle:'italic', fontSize:16, color:'rgba(240,230,208,0.75)', maxWidth:'56ch', margin:'8px 0 0', lineHeight:1.45}}>{c.sub}</p>
 
           <div className="lyc-course__instr-row">
-            <div className="lyc-course__instr-pip">{instructor.name.split(' ').map(p=>p[0]).slice(0,2).join('')}</div>
+            <div className="lyc-course__instr-pip">{(instructor.name || '').split(' ').map(p=>p[0]).slice(0,2).join('')}</div>
             <div className="lyc-course__instr-meta">
               <div className="lyc-course__instr-name">{instructor.name}</div>
               <div className="lyc-course__instr-title">{instructor.title}</div>
             </div>
             <div style={{marginLeft:'auto', display:'flex', gap:14, fontFamily:'var(--font-mono)', fontSize:10, color:'var(--lyc-mute-2)', letterSpacing:'0.1em', textTransform:'uppercase'}}>
-              <span>{c.students.toLocaleString()} students</span>
+              <span>{(c.students || 0).toLocaleString()} students</span>
               <span>·</span>
               <span>★ {c.rating}</span>
               <span>·</span>

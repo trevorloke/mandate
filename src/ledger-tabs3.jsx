@@ -27,12 +27,13 @@ const LedgerCompliance = () => {
   );
 
   // Score sparkline
-  const score = c.scoreSeries[c.scoreSeries.length - 1];
-  const min = Math.min(...c.scoreSeries) - 0.5;
-  const max = Math.max(...c.scoreSeries) + 0.2;
+  const scoreSeries = c.scoreSeries || [];
+  const score = scoreSeries[scoreSeries.length - 1] ?? 0;
+  const min = Math.min(...scoreSeries) - 0.5;
+  const max = Math.max(...scoreSeries) + 0.2;
   const w = 220, h = 36, pad = 2;
-  const pts = c.scoreSeries.map((v, i) => {
-    const x = pad + (i / (c.scoreSeries.length - 1)) * (w - pad * 2);
+  const pts = scoreSeries.map((v, i) => {
+    const x = pad + (i / (scoreSeries.length - 1)) * (w - pad * 2);
     const y = pad + (1 - (v - min) / (max - min)) * (h - pad * 2);
     return [x, y];
   });
@@ -51,7 +52,7 @@ const LedgerCompliance = () => {
             <b>{score.toFixed(1)}<em>%</em></b>
             <svg viewBox={`0 0 ${w} ${h}`} className="lcomp__spark">
               <path d={sparkD} stroke="#0d4f3c" strokeWidth="1.4" fill="none" />
-              <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2.5" fill="#0d4f3c" />
+              {pts.length > 0 && <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2.5" fill="#0d4f3c" />}
             </svg>
             <em>10-period trailing</em>
           </div>
@@ -273,8 +274,8 @@ const LedgerAssets = () => {
                 <span className="lasset__cat-pill">{catBy[it.cat]?.label}</span>
                 <span className="lasset__sn">{it.sn}</span>
                 <span className="lasset__date">{it.acquired}</span>
-                <span className="r ljr__num">${it.cost.toLocaleString()}</span>
-                <span className="r ljr__num">${it.book.toLocaleString()}</span>
+                <span className="r ljr__num">${(it.cost ?? 0).toLocaleString()}</span>
+                <span className="r ljr__num">${(it.book ?? 0).toLocaleString()}</span>
                 <span className="lasset__cust">{it.custodian}</span>
                 <span className={`lasset__status status--${it.status}`}>
                   <i className="dot"></i>{it.status}
@@ -289,7 +290,7 @@ const LedgerAssets = () => {
                     {it.insurance && <div><span>INSURANCE</span><b>{it.insurance}</b></div>}
                     {it.batch && <div><span>BATCH SIZE</span><b>{it.batch}</b></div>}
                     {it.deployed != null && <div><span>DEPLOYED</span><b>{it.deployed} of {it.batch}</b></div>}
-                    <div><span>DEPRECIATION</span><b>${(it.cost - it.book).toLocaleString()}</b></div>
+                    <div><span>DEPRECIATION</span><b>${((it.cost ?? 0) - (it.book ?? 0)).toLocaleString()}</b></div>
                   </div>
                   {it.flag && <div className="lasset__detail-flag">⚐ {it.flag}</div>}
                   <div className="lasset__detail-actions">

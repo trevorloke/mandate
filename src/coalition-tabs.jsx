@@ -68,7 +68,7 @@ const CoaAsks = () => {
                     {a.notes && <div className="ca__card-notes">{a.notes}</div>}
                     <div className="ca__card-foot">
                       <span className={`ca__card-due ${overdue?'overdue':soon?'soon':''}`}>
-                        {a.stage === 3 && a.delivered ? 'delivered ' + a.delivered.slice(5) : a.due.slice(5)}
+                        {a.stage === 3 && a.delivered ? 'delivered ' + a.delivered.slice(5) : (a.due || '').slice(5)}
                       </span>
                       <span className="ca__card-champ">{a.champion}</span>
                     </div>

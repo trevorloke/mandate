@@ -53,12 +53,12 @@ function BTabQueue({ onOpenPost }) {
           </div>
           <div className="b-q-lane__body">
             {grouped[l.key].map(p => {
-              const plat = PLAT_TAB[p.platform];
+              const plat = PLAT_TAB[p.platform] || { label:'', cls:'' };
               return (
                 <div key={p.id} className="b-q-card" onClick={() => onOpenPost(p)}>
                   <div className="b-q-card__hd">
                     <span className={'b-post__plat b-post__plat--' + plat.cls}>{plat.label}</span>
-                    <span className="b-q-card__day">{p.day.toUpperCase()} · {p.slot}</span>
+                    <span className="b-q-card__day">{(p.day || '').toUpperCase()} · {p.slot}</span>
                     {p.urgent && <span className="b-q-card__urgent">URGENT</span>}
                   </div>
                   <div className="b-q-card__title">{p.headline}</div>
@@ -605,12 +605,12 @@ function BTabPress() {
           </div>
           <div className="b-l-panel__body b-l-panel__body--list">
             {BEACON_PRESS_OUTLETS.map((o, i) => {
-              const max = Math.max(...BEACON_PRESS_OUTLETS.map(x => x.count));
+              const max = Math.max(1, ...BEACON_PRESS_OUTLETS.map(x => x.count || 0));
               return (
                 <div key={i} className="b-outlet">
                   <div className="b-outlet__name">{o.name}</div>
                   <div className="b-outlet__count">{o.count}</div>
-                  <div className="b-outlet__bar"><div className="b-outlet__bar-fill" style={{ width: (o.count/max)*100 + '%' }} /></div>
+                  <div className="b-outlet__bar"><div className="b-outlet__bar-fill" style={{ width: ((o.count || 0)/max)*100 + '%' }} /></div>
                   <div className="b-outlet__sub">{o.sub}</div>
                 </div>
               );

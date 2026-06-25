@@ -8,7 +8,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 /* ─── READING (long-form article) ─── */
 function AcReading({ articleId, onBack }) {
   const { records: ACAD_ARTICLES } = useLiveRecords('academy', 'article', ACAD_ARTICLES_FB);
-  const a = ACAD_ARTICLES.find(x => x.id === articleId) || ACAD_ARTICLES[0];
+  const a = ACAD_ARTICLES.find(x => x.id === articleId) || ACAD_ARTICLES[0] || {};
 
   const sections = [
     'A door is older than a poll',
@@ -95,13 +95,13 @@ function AcPath({ onPickCourse }) {
       <div className="lyc-path__col">
         <h3>Continue<small>{inProgress.length} in progress</small></h3>
         {inProgress.map(c => {
-          const cls = c.cat.toLowerCase().includes('field') ? 'canvass' : c.cat.toLowerCase().includes('comms') ? 'media' : 'policy';
+          const cls = (c.cat || '').toLowerCase().includes('field') ? 'canvass' : (c.cat || '').toLowerCase().includes('comms') ? 'media' : 'policy';
           const nextChap = (c.chapterList || [{n: Math.ceil(c.chapters * c.progress) + 1, t:'Continue where you left off'}])
             .find(ch => ch.now) || (c.chapterList && c.chapterList[Math.floor(c.progress * c.chapters)]) || {n: Math.ceil(c.chapters * c.progress) + 1, t:'Resume'};
           return (
             <div key={c.id} className="lyc-path__cur" onClick={()=>onPickCourse(c.id)}>
               <div className={`lyc-path__cur-poster ${cls}`}>
-                <div className="lyc-path__cur-poster-num">{c.id.slice(-2).toUpperCase()}</div>
+                <div className="lyc-path__cur-poster-num">{(c.id || '').slice(-2).toUpperCase()}</div>
               </div>
               <div className="lyc-path__cur-body">
                 <div className="lyc-path__cur-cat">{c.cat}</div>
@@ -198,7 +198,7 @@ function AcFaculty() {
             <div className="lyc-fac-bio">{f.bio}</div>
             <div className="lyc-fac-stats">
               <span><b>{f.courses}</b>courses</span>
-              <span><b>{f.students.toLocaleString()}</b>students</span>
+              <span><b>{(f.students || 0).toLocaleString()}</b>students</span>
             </div>
           </article>
         ))}

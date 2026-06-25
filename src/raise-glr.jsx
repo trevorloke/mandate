@@ -89,9 +89,9 @@ const GiftsJournal = ({ filter }) => {
     groups[g.date].push(g);
   });
   const order = Object.keys(groups);
-  const fmt = (n) => '$' + n.toLocaleString();
-  const total = rows.reduce((s, g) => s + g.amt, 0);
-  const cleared = rows.filter(g => g.status === 'cleared').reduce((s, g) => s + g.amt, 0);
+  const fmt = (n) => '$' + (n || 0).toLocaleString();
+  const total = rows.reduce((s, g) => s + (g.amt || 0), 0);
+  const cleared = rows.filter(g => g.status === 'cleared').reduce((s, g) => s + (g.amt || 0), 0);
   const flagged = rows.filter(g => g.status === 'flagged').length;
   const pending = rows.filter(g => g.status === 'pending').length;
 
@@ -115,7 +115,7 @@ const GiftsJournal = ({ filter }) => {
           <React.Fragment key={dateLbl}>
             <tr className="day-row">
               <td colSpan="8">
-                {dateLbl} · {groups[dateLbl].length} gifts · {fmt(groups[dateLbl].reduce((s, g) => s + g.amt, 0))}
+                {dateLbl} · {groups[dateLbl].length} gifts · {fmt(groups[dateLbl].reduce((s, g) => s + (g.amt || 0), 0))}
               </td>
             </tr>
             {groups[dateLbl].map(g => (

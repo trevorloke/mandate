@@ -11,6 +11,25 @@ import EmptyModule from './EmptyModule';
 // replies are linked to their root message via parentId.
 const CMD_MSGS_FB = [...CMD_MESSAGES_FB, ...CMD_THREAD.map(t => ({ ...t, parentId: 'm1' }))];
 
+// seed.js flattens CMD_GROUPS into per-item channel records ({ ...item, group: label }),
+// so live 'command.channel' records are flat channel items, not group objects. Rebuild
+// the sidebar group shape ([{ label, items: [...] }]) from whichever we get:
+//  - flat live records → group by their `group` field (preserving first-seen order)
+//  - static fallback groups → pass through unchanged.
+function toChannelGroups(records) {
+  if (!records || records.length === 0) return [];
+  // Already group-shaped (fallback): has an items array.
+  if (records[0] && Array.isArray(records[0].items)) return records;
+  const order = [];
+  const byLabel = new Map();
+  for (const it of records) {
+    const label = it.group || 'CHANNELS';
+    if (!byLabel.has(label)) { byLabel.set(label, { id: 'g-' + label, label, items: [] }); order.push(label); }
+    byLabel.get(label).items.push(it);
+  }
+  return order.map(l => byLabel.get(l));
+}
+
 // ── Sidebar item row
 function CmdItem({ it, active, onClick }) {
   const cls = ['cmd__item'];
@@ -39,9 +58,9 @@ function CmdItem({ it, active, onClick }) {
 // ── Message body with @mention + slash-cmd highlighting
 function MsgText({ text, mentions=[] }) {
   const parts = [];
-  let s = text;
+  let s = text || '';
   // mentions
-  mentions.forEach(m => {
+  (mentions || []).forEach(m => {
     const tag = '@' + m;
     s = s.split(tag).join('§§§MENTION:' + m + '§§§');
   });
@@ -98,7 +117,7 @@ function Msg({ m, onThread, showHover = true }) {
             <div className="voice__row">
               <div className="voice__play">▶</div>
               <div className="voice__wave">
-                {m.voice.waveform.map((h, i) => (
+                {(m.voice.waveform || []).map((h, i) => (
                   <span key={i} style={{ height: Math.max(4, h) + 'px' }} />
                 ))}
               </div>
@@ -110,8 +129,8 @@ function Msg({ m, onThread, showHover = true }) {
         {m.poll && (
           <div className="poll">
             <div className="poll__q">{m.poll.q}</div>
-            {m.poll.options.map((o, i) => {
-              const pct = (o.v / m.poll.total) * 100;
+            {(m.poll.options || []).map((o, i) => {
+              const pct = (o.v / (m.poll.total || 1)) * 100;
               return (
                 <div key={i} className="poll__opt">
                   <div className="poll__opt-bar" style={{ width: pct + '%' }} />
@@ -250,8 +269,9 @@ function ThreadPane({ root, replies, onClose }) {
 
 // ── Root
 function Command() {
-  const { records: CMD_GROUPS, isEmpty: noChannels } = useLiveRecords('command', 'channel', CMD_GROUPS_FB);
+  const { records: channelRecords, isEmpty: noChannels } = useLiveRecords('command', 'channel', CMD_GROUPS_FB);
   const { records: CMD_MESSAGES, isEmpty: noMessages } = useLiveRecords('command', 'message', CMD_MSGS_FB);
+  const CMD_GROUPS = cUM(() => toChannelGroups(channelRecords), [channelRecords]);
   const { workspace } = useAuth();
   const [activeCh, setActiveCh] = cUS(null);
   const [threadRoot, setThreadRoot] = cUS(null);
@@ -303,7 +323,7 @@ function Command() {
           {CMD_GROUPS.map(g => (
             <div key={g.id} className="cmd__group">
               <div className="cmd__group-lbl">{g.label}</div>
-              {g.items.map(it => (
+              {(g.items || []).map(it => (
                 <CmdItem
                   key={it.id}
                   it={it}

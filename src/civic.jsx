@@ -177,7 +177,7 @@ function CvToday() {
               <div>
                 <div style={{ fontWeight: 500 }}>{c.constituent}</div>
                 <div style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--cv-accent-2)', letterSpacing:'0.04em' }}>
-                  {c.ref} · {c.category.toLowerCase()}
+                  {c.ref} · {(c.category || '').toLowerCase()}
                 </div>
               </div>
               <span className="cv2__chip danger">{c.sla}</span>
@@ -224,8 +224,8 @@ function CvBills() {
     if (filter === 'all') return true;
     if (filter === 'mine') return b.myBill;
     if (filter === 'queued') return !b.myVote;
-    if (filter === 'gov') return b.sponsor.includes('Hon.');
-    if (filter === 'member') return b.sponsor.includes('Member');
+    if (filter === 'gov') return (b.sponsor || '').includes('Hon.');
+    if (filter === 'member') return (b.sponsor || '').includes('Member');
     return true;
   });
 
@@ -256,7 +256,7 @@ function CvBills() {
                   <div>
                     <div className="cv2__bill-title">{b.title}</div>
                     <div className="cv2__bill-meta">
-                      {b.sponsor.toUpperCase()} · {b.cosigners} co-signers · {b.amendments} amend.
+                      {(b.sponsor || '').toUpperCase()} · {b.cosigners} co-signers · {b.amendments} amend.
                     </div>
                   </div>
                   <span className={'cv2__chip ' + (b.myVote==='yea (intent)' || b.myVote==='yea' || b.myVote==='sponsor' ? 'ok' : (b.myVote==='nay' ? 'danger' : 'mid'))}>
@@ -268,7 +268,7 @@ function CvBills() {
 
                 {/* Reading-stage tracker */}
                 <div className="cv2__readings">
-                  {b.readings.map((r, i) => (
+                  {(b.readings || []).map((r, i) => (
                     <React.Fragment key={i}>
                       {i > 0 && <span className="cv2__rstage-arr">→</span>}
                       <div className={'cv2__rstage ' + r.status}>
@@ -283,15 +283,15 @@ function CvBills() {
                 <div className="cv2__bill-bar">
                   <div className="cv2__bill-support">
                     <span>SUPPORT</span>
-                    <div className={'cv2__bill-support-bar' + (b.inFavor < 0.5 ? ' lo' : '')}>
-                      <span style={{ width: (b.inFavor*100) + '%' }} />
+                    <div className={'cv2__bill-support-bar' + ((b.inFavor || 0) < 0.5 ? ' lo' : '')}>
+                      <span style={{ width: ((b.inFavor || 0)*100) + '%' }} />
                     </div>
-                    <span>{Math.round(b.inFavor*100)}%</span>
+                    <span>{Math.round((b.inFavor || 0)*100)}%</span>
                   </div>
-                  <span className="cv2__bill-meta-r">WHIP · {b.whip.toUpperCase()}</span>
+                  <span className="cv2__bill-meta-r">WHIP · {(b.whip || '').toUpperCase()}</span>
                   <span className="cv2__bill-meta-r">NEXT · {b.next}</span>
-                  <span className="cv2__bill-meta-r">ISSUES · {b.issues.join(' · ')}</span>
-                  {b.linked.promise && <span className="cv2__chip info">{(CV_PROMISES.find(p=>p.id===b.linked.promise)?.title || '').slice(0,28)}…</span>}
+                  <span className="cv2__bill-meta-r">ISSUES · {(b.issues || []).join(' · ')}</span>
+                  {b.linked?.promise && <span className="cv2__chip info">{(CV_PROMISES.find(p=>p.id===b.linked.promise)?.title || '').slice(0,28)}…</span>}
                 </div>
               </div>
             ))}
@@ -397,7 +397,7 @@ function CvCases() {
             <tbody>
               {rows.map(c => (
                 <tr key={c.id}>
-                  <td className="mono" style={{ fontSize: 10.5, color: 'var(--cv-accent-2)' }}>{c.ref.slice(-4)}</td>
+                  <td className="mono" style={{ fontSize: 10.5, color: 'var(--cv-accent-2)' }}>{(c.ref || '').slice(-4)}</td>
                   <td><span className={'cv2__urg ' + c.urgency} /></td>
                   <td>
                     <div><a className="cv2__link">{c.constituent}</a></div>
@@ -405,12 +405,12 @@ function CvCases() {
                   </td>
                   <td>
                     <div>{c.issue}</div>
-                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--cv-accent-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{c.category}</div>
+                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--cv-accent-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{c.category || ''}</div>
                   </td>
                   <td className="mono" style={{ fontSize: 11 }}>{c.assigned}</td>
                   <td>
                     <span className={'cv2__chip ' + (c.status==='resolved' ? 'ok' : c.status==='waiting-ministry' ? 'warn' : c.status==='ack-sent' ? 'mid' : 'info')}>
-                      {c.status.replace(/-/g, ' ')}
+                      {(c.status || '').replace(/-/g, ' ')}
                     </span>
                   </td>
                   <td className="mono" style={{ fontSize: 11, color: c.sla?.includes('overdue') ? 'var(--cv-danger)' : 'var(--cv-ink-2)' }}>
@@ -517,20 +517,20 @@ function CvHansard() {
           <div className="cv2__card-title">
             <span>Speeches · my contributions</span>
             <span className="cv2__card-title-r">
-              {CV_SPEECHES.reduce((a,s)=>a+s.words,0).toLocaleString()} words · {CV_SPEECHES.filter(s=>s.clipped).length} clipped for socials
+              {CV_SPEECHES.reduce((a,s)=>a+(s.words||0),0).toLocaleString()} words · {CV_SPEECHES.filter(s=>s.clipped).length} clipped for socials
             </span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 24px' }}>
             {CV_SPEECHES.map(s => (
               <div key={s.id} className="cv2__speech-row">
-                <div className="cv2__speech-stage">{s.stage} · {s.at.slice(5)}</div>
+                <div className="cv2__speech-stage">{s.stage} · {(s.at || '').slice(5)}</div>
                 <div className="cv2__speech-title">{s.title}</div>
                 <div className="cv2__speech-meta">
                   <span>{s.duration}</span>
                   <span>{s.words} words</span>
                   <span>HANSARD {s.hansardRef}</span>
                   {s.clipped && <span style={{ color: 'var(--cv-accent)' }}>★ clipped</span>}
-                  <span>· {s.topics.join(' · ')}</span>
+                  <span>· {(s.topics || []).join(' · ')}</span>
                 </div>
               </div>
             ))}
