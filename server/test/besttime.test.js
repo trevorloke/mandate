@@ -29,9 +29,14 @@ test('nextBestTime returns the soonest upcoming top window', async () => {
     { id: 'b1', workspaceId: 'ws_bt', groupId: 'g', platform: 'mastodon', body: 'x', status: 'published', publishedAt: new Date('2026-06-01T10:00:00Z'), metricsJson: JSON.stringify({ likes: 50 }) }, // Mon 10:00 (top)
     { id: 'b2', workspaceId: 'ws_bt', groupId: 'g', platform: 'mastodon', body: 'y', status: 'published', publishedAt: new Date('2026-06-02T15:00:00Z'), metricsJson: JSON.stringify({ likes: 1 }) },
   ]);
-  const r = await bt.nextBestTime('ws_bt', {});
+  // Pin the reference instant so "soonest upcoming" is deterministic regardless
+  // of which weekday CI runs on. `after` is a Monday 00:00 UTC, so among the two
+  // seeded windows (Mon 10:00 avg 50, Tue 15:00 avg 1) the soonest upcoming is
+  // Mon 10:00. (Without this, on a Tuesday the soonest window is Tue 15:00.)
+  const after = new Date('2026-06-01T00:00:00Z'); // Monday
+  const r = await bt.nextBestTime('ws_bt', { after });
   assert.ok(r.time instanceof Date, 'returns a Date');
-  assert.ok(r.time.getTime() > Date.now(), 'in the future');
+  assert.ok(r.time.getTime() > after.getTime(), 'after the reference time');
   const dh = bt.dayHourInTz(r.time, 'GMT');
   assert.deepEqual(dh, { day: 1, hour: 10 }, 'lands on the top engagement window (Mon 10:00 UTC)');
 });
