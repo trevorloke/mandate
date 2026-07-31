@@ -1,6 +1,6 @@
 // Mandate 2.0 — Shell primitives
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import './shell.css';
 import { useT } from './i18n';
 

@@ -1,5 +1,5 @@
 // Personal access tokens for headless API access.
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../auth/api';
 
 export default function AdminTokens() {

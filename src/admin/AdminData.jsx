@@ -1,7 +1,7 @@
 // Generic module data editor.
 // Shows a grid of (module · kind) buckets seeded from the prototype data.
 // Click into one to view, edit JSON records, add new ones.
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import { getSchema } from './schemas';

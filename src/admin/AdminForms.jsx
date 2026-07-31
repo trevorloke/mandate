@@ -1,5 +1,5 @@
 // Public forms — admin defines schema + a public POST endpoint.
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../auth/api';
 import { getSchema } from './schemas';
 
