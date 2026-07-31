@@ -4,11 +4,10 @@ import { CV_MEMBER, CV_ORDER_TODAY, CV_BILLS as CV_BILLS_FB, CV_CASES as CV_CASE
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 import { CvCommittees, CvPromises, CvCommunity, CvLetters, CvSpend, CvStaff, CvTrends } from './civic-tabs';
-import { TODAY } from './data';
 
 // Civic 2.0 — shell + Today / Bills / Cases / Hansard tabs
 
-const { useState: cvUS, useMemo: cvUM } = React;
+const { useState: cvUS } = React;
 
 const CV_TABS = [
   { k: 'today',     label: 'Today' },

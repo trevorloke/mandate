@@ -1,4 +1,4 @@
-import React, { useState as acUS, useMemo as acUM } from 'react';
+import { useState as acUS, useMemo as acUM } from 'react';
 import './academy.css';
 import { ACAD_COURSES as ACAD_COURSES_FB, ACAD_CATEGORIES, ACAD_ARTICLES as ACAD_ARTICLES_FB, ACAD_FACULTY as ACAD_FACULTY_FB, ACAD_TRANSCRIPT } from './academy-data';
 import { useLiveRecords } from './auth/useLiveRecords';

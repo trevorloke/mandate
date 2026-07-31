@@ -4,7 +4,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 
 // Events 2.0 — tab content components
 
-const { useState: evUS2, useMemo: evUM2 } = React;
+const { useMemo: evUM2 } = React;
 
 const _evDayName = (iso) => {
   const dt = new Date(iso + 'T12:00');

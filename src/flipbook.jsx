@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import './flipbook.css';
 
 // Mandate 2.0 — Flipbook v2: data-as-illustration tableaux (Hungarian infographic style).

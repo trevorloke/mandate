@@ -1,11 +1,8 @@
-import React from 'react';
 import './ledger-tabs2.css';
 import { LEDGER_FILINGS, LEDGER_REGULATORS, LEDGER_REPORTS } from './ledger-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Ledger tabs (Filings, Reports)
-
-const { useState: lT2US, useMemo: lT2UM } = React;
 
 /* ──────────────────────────────────────────────────────
    FILINGS — multi-jurisdiction regulatory

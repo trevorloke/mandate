@@ -1,4 +1,3 @@
-import React, { useState as acUS2 } from 'react';
 import './academy.css';
 import { ACAD_ARTICLES as ACAD_ARTICLES_FB, ACAD_COURSES as ACAD_COURSES_FB, ACAD_FACULTY as ACAD_FACULTY_FB, ACAD_PATH_SCHED, ACAD_PATH_CERTS } from './academy-data';
 import { useLiveRecords } from './auth/useLiveRecords';
@@ -88,7 +87,6 @@ function AcReading({ articleId, onBack }) {
 function AcPath({ onPickCourse }) {
   const { records: ACAD_COURSES } = useLiveRecords('academy', 'course', ACAD_COURSES_FB);
   const inProgress = ACAD_COURSES.filter(c => c.progress > 0 && c.progress < 1);
-  const featured = ACAD_COURSES.find(c => c.featured);
 
   return (
     <div className="lyc-path">

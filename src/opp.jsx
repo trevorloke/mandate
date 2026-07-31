@@ -7,7 +7,7 @@ import { OpLeads, OpRebuttals, OpMonitors, OpSources } from './opp-tabs';
 
 // Opposition 2.0 — shell + Targets / Claims / Evidence
 
-const { useState: opUS, useMemo: opUM } = React;
+const { useState: opUS } = React;
 
 const OP_TABS = [
   { k: 'targets',  label: 'Targets' },
@@ -30,7 +30,6 @@ function Opposition2() {
   const liveSpikes  = OP_MONITORS.filter(m => m.spike).length;
   const openLeads   = OP_LEADS.filter(l => l.status !== 'cold' && l.status !== 'evidence-secured').length;
   const inReview    = OP_REBUTTALS.filter(r => r.status === 'in-review' || r.status === 'drafted').length;
-  const newClaims   = OP_CLAIMS.filter(c => !c.rebuttalId || OP_REBUTTALS.find(r=>r.id===c.rebuttalId)?.status === 'drafted').length;
   const tabBadges = {
     targets:   String(OP_TARGETS.filter(t=>t.dossierStatus==='live').length),
     claims:    String(OP_CLAIMS.length),

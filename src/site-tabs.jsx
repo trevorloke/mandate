@@ -1,11 +1,11 @@
 import React from 'react';
-import { SITE_PAGES as SITE_PAGES_FB, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_FORMS as SITE_FORMS_FB, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH } from './site-data';
+import { SITE_PAGES as SITE_PAGES_FB, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_FORMS as SITE_FORMS_FB, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS } from './site-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 
 // Site 2.0 — tab content components
 // Builder canvas, CMS, Experiments, Forms, Audience, Deploys
 
-const { useState: stUS2, useMemo: stUM2 } = React;
+const { useState: stUS2 } = React;
 
 /* ── PAGES ── */
 function SitePagesTab() {
@@ -264,7 +264,6 @@ function SiteExperimentsTab() {
     <div className="site2__xp-grid">
       {SITE_EXPERIMENTS.map(x => {
         const variants = x.variants || [];
-        const totVis = variants.reduce((s,v)=>s+(v.visitors||0),0);
         const winnerLetter = x.winner;
         return (
           <article key={x.id} className={`site2__xp ${x.status==='won'?'won':''}`}>
