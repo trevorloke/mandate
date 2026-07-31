@@ -335,7 +335,10 @@ const Coalition2 = () => {
   const committed = COA_LEDGER.filter(r => r.status === 'committed' || r.status === 'public').length;
   const publicCount = COA_LEDGER.filter(r => r.status === 'public').length;
   const totalReach = COA_LEDGER.reduce((s, r) => s + (Number(r.reach) || 0), 0);
-  const openAsks = liveAsks.filter(a => !['Delivered', 'Lost', 'delivered', 'lost'].includes(a.stage)).length;
+  // Ask stage is a numeric index into COA_ASKS_STAGES (3 = Delivered, 4 = Lost)
+  // on kanban-shaped records, but legacy records may carry the stage name.
+  const askClosed = (s) => typeof s === 'number' ? s >= 3 : ['Delivered', 'Lost', 'delivered', 'lost'].includes(s);
+  const openAsks = liveAsks.filter(a => !askClosed(a.stage)).length;
   const fmtReach = (n) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
                        : n >= 1_000 ? `${Math.round(n / 1_000)}k`
                        : String(n);
