@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { db } from '../db/index.js';
 import { workspaces, moduleData, recordShares, auditLog } from '../db/schema.js';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { PLANS, PLAN_KEYS, planFor, usageSnapshot } from '../lib/plans.js';
 

@@ -192,7 +192,7 @@ export async function processRetries() {
       // Make a new attempt (which inserts a fresh delivery row at attempt+1)
       await attempt(hook, d.event_id, d.event, d.payload, d.attempt + 1);
       processed++;
-    } catch (e) {
+    } catch {
       // On unexpected error, release lease so another worker can retry.
       try { releaseLease(d.id, {}); } catch {}
     }

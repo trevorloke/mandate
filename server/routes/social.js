@@ -824,7 +824,7 @@ app.post('/shorten', requireRole('editor'), async (c) => {
     try {
       await db.insert(socialLinks).values({ id, workspaceId: me.workspaceId, slug, targetUrl: target, title, postId, utm: cleanUtm && Object.keys(cleanUtm).length ? JSON.stringify(cleanUtm) : null, createdById: me.id });
       break;
-    } catch (e) { if (attempt === 1) return c.json({ error: 'could not create link' }, 500); }
+    } catch { if (attempt === 1) return c.json({ error: 'could not create link' }, 500); }
   }
   return c.json({ ok: true, id, slug, shortUrl: `${shortBase(c)}/l/${slug}`, targetUrl: target });
 });

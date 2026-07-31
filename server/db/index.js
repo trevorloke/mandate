@@ -6,7 +6,6 @@ import { dirname, join } from 'path';
 import { existsSync } from 'fs';
 import { createHash } from 'crypto';
 import * as schema from './schema.js';
-import { sql } from 'drizzle-orm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.MANDATE_DB || './mandate.db';

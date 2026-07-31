@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { users, sessions, invites, auditLog } from '../db/schema.js';
-import { eq, and, isNull, isNotNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { requireAuth, requireRole, setSessionCookie, ROLES } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
 import { notify } from '../lib/notify.js';

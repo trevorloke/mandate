@@ -1,7 +1,7 @@
 // Lightweight metrics endpoint — admin+ for the current workspace.
 import { Hono } from 'hono';
 import { db } from '../db/index.js';
-import { workspaces, users, moduleData, auditLog, webhooks, webhookDeliveries, publicForms, sessions, apiTokens } from '../db/schema.js';
+import { users, moduleData, auditLog, webhooks, webhookDeliveries, publicForms, sessions, apiTokens } from '../db/schema.js';
 import { and, eq, count, isNull, isNotNull, gt } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { subscriberCount } from '../lib/realtime.js';

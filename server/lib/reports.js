@@ -52,7 +52,7 @@ async function generateBucketCsv({ workspaceId, params }) {
   };
 }
 
-async function generateAuditLog({ workspaceId, params, lastRunAt }) {
+async function generateAuditLog({ workspaceId, lastRunAt }) {
   // Audit_log isn't workspace-scoped at the table level — but actions on a workspace's
   // resources are joined via user.workspace_id. For simplicity, return entries by users
   // in this workspace. (At real scale, an action_workspace_id column would be cleaner.)
