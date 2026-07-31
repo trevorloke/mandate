@@ -152,7 +152,6 @@ export async function verifyTotpOrRecovery(user, codeRaw) {
     let hashes = []; try { hashes = JSON.parse(user.recoveryCodesHash); } catch {}
     for (let i = 0; i < hashes.length; i++) {
       // bcrypt.compare is sync-blocking; run sequentially
-      // eslint-disable-next-line no-await-in-loop
       if (await bcrypt.compare(code.toLowerCase(), hashes[i])) {
         // Consume this recovery code (one-time use)
         const remaining = hashes.filter((_, j) => j !== i);
