@@ -19,8 +19,8 @@ const _evShortDay = (iso) => {
 function EvScheduleTab({ onPick }) {
   const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
   const groups = evUM2(() => {
-    const future = EV_LIST.filter(e => e.attended === null).sort((a,b)=> a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
-    const past   = EV_LIST.filter(e => e.attended !== null).sort((a,b)=> b.date.localeCompare(a.date));
+    const future = EV_LIST.filter(e => e.attended === null).sort((a,b)=> (a.date||'').localeCompare(b.date||'') || (a.start||'').localeCompare(b.start||''));
+    const past   = EV_LIST.filter(e => e.attended !== null).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const byDate = (arr) => {
       const m = new Map();
       arr.forEach(e => { if (!m.has(e.date)) m.set(e.date, []); m.get(e.date).push(e); });
@@ -38,8 +38,8 @@ function EvScheduleTab({ onPick }) {
 
       {groups.upcoming.map(([date, evts]) => {
         const sd = _evShortDay(date);
-        const totalCap = evts.reduce((s,e)=>s+e.capacity, 0);
-        const totalRsvp = evts.reduce((s,e)=>s+e.rsvped, 0);
+        const totalCap = evts.reduce((s,e)=>s+(e.capacity||0), 0);
+        const totalRsvp = evts.reduce((s,e)=>s+(e.rsvped||0), 0);
         return (
           <React.Fragment key={date}>
             <div className="ev2__day-h">
@@ -68,10 +68,10 @@ function EvScheduleTab({ onPick }) {
 
 function EvRow({ e, onPick, past }) {
   const { records: EV_VENUES } = useLiveRecords('events', 'venue', EV_VENUES_FB);
-  const type = EV_TYPES[e.type];
+  const type = EV_TYPES[e.type] || { tint: 'var(--text-3)', label: e.type || '—' };
   const venue = EV_VENUES.find(v => v.id === e.venue);
-  const fillPct = Math.min(100, Math.round((e.rsvped / e.capacity) * 100));
-  const shiftPct = Math.round((e.shiftsFilled / e.shifts) * 100);
+  const fillPct = e.capacity > 0 ? Math.min(100, Math.round((e.rsvped / e.capacity) * 100)) : 0;
+  const shiftPct = e.shifts > 0 ? Math.round((e.shiftsFilled / e.shifts) * 100) : 0;
   return (
     <div className={`ev2__row ${past?'past':''}`} onClick={()=>onPick && onPick(e.id)}>
       <div className="ev2__time">
@@ -85,7 +85,7 @@ function EvRow({ e, onPick, past }) {
         <div className="ev2__row-meta" style={{marginTop:8, flexDirection:'row', display:'flex', flexWrap:'wrap', gap:'4px 14px', alignItems:'center'}}>
           <span className="l">{venue?.name} <span style={{color:'var(--text-4)'}}>·</span> {venue?.city}</span>
           <span className="ev2__row-host">
-            <span className="ev2__row-host-pip">{e.host.split(/[ &]/).map(x=>x[0]).slice(0,2).join('')}</span>
+            <span className="ev2__row-host-pip">{(e.host || '').split(/[ &]/).map(x=>x[0]).slice(0,2).join('')}</span>
             <span>{e.host}</span>
           </span>
           {e.ticketed && <span style={{color:'var(--ev-rust)'}}>● ticketed</span>}
@@ -106,7 +106,7 @@ function EvRow({ e, onPick, past }) {
         {past && (
           <div className="ev2__cap-row">
             <span>Att.</span>
-            <span className="ev2__cap-bar full"><span style={{ width: `${Math.round((e.attended/e.rsvped)*100)}%`}}></span></span>
+            <span className="ev2__cap-bar full"><span style={{ width: `${e.rsvped > 0 ? Math.round((e.attended/e.rsvped)*100) : 0}%`}}></span></span>
             <span className="ev2__cap-num">{e.attended}/{e.rsvped}</span>
           </div>
         )}
@@ -165,7 +165,7 @@ function EvCalendarTab() {
             </div>
             {c.d && (eventsByDay[c.d]||[]).map(ev => (
               <div key={ev.id} className="ev2__cal-event" data-type={ev.type}>
-                <b>{ev.title.replace(/^[^·]+·\s*/,'').replace(/^Town Hall · /,'')}</b>
+                <b>{(ev.title || '').replace(/^[^·]+·\s*/,'').replace(/^Town Hall · /,'')}</b>
                 <small>{ev.start} · {ev.rsvped}/{ev.capacity}</small>
               </div>
             ))}
@@ -180,12 +180,19 @@ function EvCalendarTab() {
 function EvDetailTab() {
   const { records: EV_LIST } = useLiveRecords('events', 'event', EV_LIST_FB);
   const { records: EV_VENUES } = useLiveRecords('events', 'venue', EV_VENUES_FB);
-  const e = EV_LIST.find(x => x.id === 'e-fund-gala');
+  const e = EV_LIST.find(x => x.id === 'e-fund-gala') || EV_LIST[0];
+  if (!e) {
+    return (
+      <div className="ev2__detail" style={{ padding: 32, fontFamily: 'var(--font-serif)', fontStyle: 'italic', color: 'var(--text-3)' }}>
+        No featured event to show yet.
+      </div>
+    );
+  }
   const venue = EV_VENUES.find(v => v.id === e.venue);
   const totalRev = EV_GALA_TICKETS.reduce((s,t)=>s+t.rev, 0);
   const totalSold = EV_GALA_TICKETS.reduce((s,t)=>s+t.sold, 0);
   const totalCap = EV_GALA_TICKETS.reduce((s,t)=>s+t.cap, 0);
-  const maxRsvp = Math.max(...EV_GALA_RSVPS.map(p=>p.n));
+  const maxRsvp = Math.max(...EV_GALA_RSVPS.map(p=>p.n), 0.0001);
 
   const galaShifts = EV_SHIFTS.filter(s=>s.eventId==='e-fund-gala');
 
@@ -270,6 +277,7 @@ function EvDetailTab() {
           ))}
         </div>
 
+        {venue && (
         <div className="ev2__chart" style={{padding:'14px 18px 18px'}}>
           <div className="ev2__chart-h">Venue · {venue.name}</div>
           <div style={{fontFamily:'var(--font-serif)', fontSize:13, color:'var(--text-2)', fontStyle:'italic', marginBottom:8}}>{venue.notes}</div>
@@ -279,6 +287,7 @@ function EvDetailTab() {
             <div><span style={{color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.12em', fontSize:9}}>Access</span><br/><strong style={{fontFamily:'var(--font-display)', fontSize:13, fontWeight:400}}>{venue.accessibility}</strong></div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -300,7 +309,7 @@ function EvVenuesTab() {
           <div className="ev2__venue-stats">
             <div><span className="v">{v.cap}</span><span className="k">Capacity</span></div>
             <div><span className="v">{v.priorEvents}</span><span className="k">Past events</span></div>
-            <div><span className="v" style={{fontSize:11, fontFamily:'var(--font-mono)', letterSpacing:'0.04em'}}>{v.accessibility.includes('Full')?'A11y full':v.accessibility.split(' · ')[0]}</span><span className="k">A11y</span></div>
+            <div><span className="v" style={{fontSize:11, fontFamily:'var(--font-mono)', letterSpacing:'0.04em'}}>{(v.accessibility||'').includes('Full')?'A11y full':(v.accessibility||'—').split(' · ')[0]}</span><span className="k">A11y</span></div>
           </div>
         </article>
       ))}
@@ -325,7 +334,7 @@ function EvHostsTab() {
       {EV_HOSTS.map(h => (
         <div key={h.id} className="ev2__host-row">
           <span className="ev2__host-name">
-            <span className="ev2__host-pip">{h.name.split(' ').map(x=>x[0]).slice(0,2).join('')}</span>
+            <span className="ev2__host-pip">{(h.name || '').split(' ').map(x=>x[0]).slice(0,2).join('')}</span>
             {h.name}
           </span>
           <span className="ev2__host-num" style={{textAlign:'left', color:'var(--text-3)'}}>{h.joined}</span>
@@ -362,10 +371,10 @@ function EvShiftsTab() {
           <div key={eid} className="ev2__shifts">
             <div className="ev2__shifts-h">
               <span>
-                <span style={{fontFamily:'var(--font-mono)', fontSize:10, color:'var(--ev-rust)', letterSpacing:'0.16em', textTransform:'uppercase', display:'block'}}>{e.date} · {e.start}</span>
-                {e.title}
+                <span style={{fontFamily:'var(--font-mono)', fontSize:10, color:'var(--ev-rust)', letterSpacing:'0.16em', textTransform:'uppercase', display:'block'}}>{e?.date} · {e?.start}</span>
+                {e?.title}
               </span>
-              <small>{totFilled}/{totCap} filled · {Math.round((totFilled/totCap)*100)}%</small>
+              <small>{totFilled}/{totCap} filled · {totCap > 0 ? Math.round((totFilled/totCap)*100) : 0}%</small>
             </div>
             {shifts.map(s => (
               <div key={s.id} className="ev2__shift">

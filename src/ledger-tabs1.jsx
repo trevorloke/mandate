@@ -26,8 +26,9 @@ const LedgerChart = () => {
   }, [LEDGER_COA]);
 
   const fmt = (n) => {
-    const neg = n < 0;
-    return (neg ? '−$' : '$') + Math.abs(n).toLocaleString();
+    const v = n || 0;
+    const neg = v < 0;
+    return (neg ? '−$' : '$') + Math.abs(v).toLocaleString();
   };
 
   const pickedAcct = LEDGER_COA.find(a => a.code === picked);
@@ -87,7 +88,7 @@ const LedgerChart = () => {
         {/* detail rail */}
         {pickedAcct && (
           <div className="lcoa__detail">
-            <div className="lcoa__detail-eyebrow">Account · {pickedAcct.kind.toUpperCase()}</div>
+            <div className="lcoa__detail-eyebrow">Account · {(pickedAcct.kind || '').toUpperCase()}</div>
             <div className="lcoa__detail-code">{pickedAcct.code}</div>
             <div className="lcoa__detail-name">{pickedAcct.name}</div>
             <div className="lcoa__detail-bal">
@@ -99,7 +100,7 @@ const LedgerChart = () => {
               <div className="lcoa__detail-chart-h">12-WEEK ACTIVITY</div>
               <svg viewBox="0 0 240 80" className="lcoa__sparkline">
                 {(() => {
-                  const seed = pickedAcct.code.charCodeAt(2) || 50;
+                  const seed = (pickedAcct.code || '').charCodeAt(2) || 50;
                   const pts = Array.from({ length: 12 }, (_, i) => {
                     const v = (Math.sin((i + seed) * 0.7) * 0.4 + 0.5 + (i / 30));
                     return [i * (240 / 11), 70 - v * 50];
@@ -125,12 +126,12 @@ const LedgerChart = () => {
 
             <div className="lcoa__detail-h">RECENT ACTIVITY</div>
             <div className="lcoa__detail-feed">
-              {LEDGER_JOURNAL.filter(je => je.account.startsWith(pickedAcct.code)).slice(0, 5).map(je => (
+              {LEDGER_JOURNAL.filter(je => (je.account || '').startsWith(pickedAcct.code || '')).slice(0, 5).map(je => (
                 <div className="lcoa__detail-feed-row" key={je.id}>
                   <span className="lcoa__date">{je.date}</span>
                   <span className="lcoa__memo">{je.memo}</span>
                   <span className={`lcoa__num ${je.credit ? 'cr' : ''}`}>
-                    {je.debit ? '$' + je.debit.toLocaleString() : '$' + je.credit.toLocaleString()}
+                    {je.debit ? '$' + je.debit.toLocaleString() : '$' + (je.credit || 0).toLocaleString()}
                   </span>
                 </div>
               ))}
@@ -207,7 +208,7 @@ const LedgerReconcile = () => {
       <div className="lrec__bar">
         <div className="lrec__progress">
           <div className="lrec__progress-bar">
-            <div className="lrec__progress-fill" style={{ width: `${(rows.filter(x => x.cleared).length / rows.length) * 100}%` }} />
+            <div className="lrec__progress-fill" style={{ width: `${(rows.filter(x => x.cleared).length / (rows.length || 1)) * 100}%` }} />
           </div>
           <em>{rows.filter(x => x.cleared).length} / {rows.length} matched</em>
         </div>
@@ -260,17 +261,17 @@ const LedgerBills = () => {
   const [picked, setPicked] = lTUS([]);
 
   const bills = LEDGER_BILLS.filter(b => filter === 'all' || b.status === filter);
-  const total = bills.reduce((a, b) => a + b.amt, 0);
+  const total = bills.reduce((a, b) => a + (b.amt || 0), 0);
   const dueSoon = LEDGER_BILLS.filter(b => {
     const d = new Date(b.due); const now = new Date();
     return (d - now) < 7 * 86400000;
   });
-  const dueSoon$ = dueSoon.reduce((a, b) => a + b.amt, 0);
+  const dueSoon$ = dueSoon.reduce((a, b) => a + (b.amt || 0), 0);
 
   const togglePick = (id) => {
     setPicked(picked.includes(id) ? picked.filter(x => x !== id) : [...picked, id]);
   };
-  const pickedTotal = bills.filter(b => picked.includes(b.id)).reduce((a, b) => a + b.amt, 0);
+  const pickedTotal = bills.filter(b => picked.includes(b.id)).reduce((a, b) => a + (b.amt || 0), 0);
 
   const daysUntil = (d) => {
     const dt = new Date(d); const now = new Date();
@@ -340,9 +341,9 @@ const LedgerBills = () => {
                 <em>{b.notes}</em>
               </span>
               <span className="lbills__cat">{b.kind}</span>
-              <span className="r lbills__amt">${b.amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="r lbills__amt">${(b.amt ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               <span className={`lbills__due ${dueClass}`}>
-                <b>{b.due.split('-').slice(1).join('/')}</b>
+                <b>{(b.due || '').split('-').slice(1).join('/')}</b>
                 <em>{days < 0 ? Math.abs(days) + 'd over' : days === 0 ? 'today' : days + 'd'}</em>
               </span>
               <span className="lbills__approver">

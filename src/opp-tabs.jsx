@@ -33,15 +33,15 @@ function OpLeads() {
                 return (
                   <div key={l.id} className={'op2__lead ' + l.priority}>
                     <div className="op2__lead-meta">
-                      ▸ {target?.name.split(' ').pop() || l.target} · {l.priority}
+                      ▸ {target?.name?.split(' ').pop() || l.target} · {l.priority}
                     </div>
                     <div className="op2__lead-topic">
                       {l.redactions > 0 && <span className="op2__ev-redact" style={{ width: '40px', display: 'inline-block', marginRight: 4 }} />}
                       {l.topic}
                     </div>
                     <div className="op2__lead-foot">
-                      <span>{l.owner === '—' ? 'unowned' : l.owner.split(' ')[0]}</span>
-                      <span className={'conf' + (l.confidence < 0.5 ? ' lo' : '')}>{Math.round(l.confidence * 100)}%</span>
+                      <span>{!l.owner || l.owner === '—' ? 'unowned' : l.owner.split(' ')[0]}</span>
+                      <span className={'conf' + ((l.confidence || 0) < 0.5 ? ' lo' : '')}>{Math.round((l.confidence || 0) * 100)}%</span>
                     </div>
                     <div className="op2__lead-foot">
                       <span>{l.source} · {l.age}d old</span>

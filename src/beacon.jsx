@@ -54,7 +54,7 @@ function BMetric({ m }) {
 // ── Post modal
 function BModal({ post, onClose }) {
   if (!post) return null;
-  const plat = PLAT[post.platform];
+  const plat = PLAT[post.platform] || { label:'', cls:'' };
   return (
     <div className="b-modal-backdrop" onClick={onClose}>
       <div className="b-modal" onClick={e => e.stopPropagation()}>
@@ -78,7 +78,7 @@ function BModal({ post, onClose }) {
             {post.boost && <div className="b-modal__row"><span className="b-modal__row-k">Paid boost</span><span>{post.boost.spend} · {post.boost.state}</span></div>}
             {post.stats && <div className="b-modal__row"><span className="b-modal__row-k">Live performance</span><span>{post.stats.imp} impressions · {post.stats.eng} engagement</span></div>}
             <div className="b-modal__row"><span className="b-modal__row-k">Scheduled</span><span>Monday, April 14 · {post.slot} PT</span></div>
-            <div className="b-modal__row"><span className="b-modal__row-k">Cross-post</span><span>Coupled with p{post.id.slice(1)} on companion account</span></div>
+            <div className="b-modal__row"><span className="b-modal__row-k">Cross-post</span><span>Coupled with p{String(post.id || '').slice(1)} on companion account</span></div>
           </div>
         </div>
         <div className="b-modal__ft">

@@ -101,7 +101,7 @@ const CoaDirectory = () => {
               <div className="cd__file-stats">
                 <div><span>MEMBERS</span><b>{fmtK(open.members)}</b></div>
                 <div><span>REACH</span><b>{fmtK(open.reach)}</b></div>
-                <div><span>$ COMMIT</span><b>${open.money.toLocaleString()}</b></div>
+                <div><span>$ COMMIT</span><b>${(open.money ?? 0).toLocaleString()}</b></div>
                 {file?.affiliates && <div><span>AFFILIATES</span><b>{file.affiliates}</b></div>}
               </div>
 
@@ -111,7 +111,7 @@ const CoaDirectory = () => {
                   <div className="cd__contacts">
                     {file.contacts.map((c,i) => (
                       <div key={i} className={`cd__contact cd__contact--${c.tier}`}>
-                        <div className="cd__contact-avatar">{c.name.split(' ').map(p=>p[0]).join('').slice(0,2)}</div>
+                        <div className="cd__contact-avatar">{(c.name || '').split(' ').map(p=>p[0]).join('').slice(0,2)}</div>
                         <div className="cd__contact-body">
                           <b>{c.name}</b>
                           <em>{c.title}</em>
@@ -134,7 +134,7 @@ const CoaDirectory = () => {
                   <div className="cd__history">
                     {file.history.map((h,i) => (
                       <div key={i} className="cd__h-row">
-                        <span className="cd__h-date">{h.date.slice(5)}</span>
+                        <span className="cd__h-date">{(h.date || '').slice(5)}</span>
                         <span className={`cd__h-kind cd__h-kind--${h.kind}`}>{h.kind}</span>
                         <span className="cd__h-text">{h.text}</span>
                       </div>

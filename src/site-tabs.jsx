@@ -44,7 +44,7 @@ function SitePagesTab() {
               <div className="site2__page-route">{p.route}</div>
               <div className="site2__page-name">{p.title}</div>
               <div className="site2__page-stats">
-                <span><b>{p.views7d.toLocaleString()}</b> views/7d</span>
+                <span><b>{(p.views7d || 0).toLocaleString()}</b> views/7d</span>
                 {p.conv7d!=null && <span><b>{p.conv7d.toFixed(1)}%</b> conv</span>}
               </div>
             </div>
@@ -263,7 +263,8 @@ function SiteExperimentsTab() {
   return (
     <div className="site2__xp-grid">
       {SITE_EXPERIMENTS.map(x => {
-        const totVis = x.variants.reduce((s,v)=>s+v.visitors,0);
+        const variants = x.variants || [];
+        const totVis = variants.reduce((s,v)=>s+(v.visitors||0),0);
         const winnerLetter = x.winner;
         return (
           <article key={x.id} className={`site2__xp ${x.status==='won'?'won':''}`}>
@@ -274,7 +275,7 @@ function SiteExperimentsTab() {
                   <span>{x.page}</span><span>·</span>
                   <span>{x.metric}</span><span>·</span>
                   <span>{x.runningDays}d</span><span>·</span>
-                  <span>{x.visitors.toLocaleString()} visitors</span>
+                  <span>{(x.visitors || 0).toLocaleString()} visitors</span>
                 </div>
               </div>
               <span className={`site2__xp-stamp ${x.status==='won'?'win':x.status==='running'?'run':x.status}`}>
@@ -283,17 +284,17 @@ function SiteExperimentsTab() {
             </header>
 
             <div className="site2__xp-bars">
-              {x.variants.map(v => {
-                const max = Math.max(...x.variants.map(vv=>vv.rate));
+              {variants.map(v => {
+                const max = Math.max(...variants.map(vv=>vv.rate||0), 0.0001);
                 return (
                   <React.Fragment key={v.name}>
                     <span className="site2__xp-letter">{v.name}</span>
                     <span style={{color:'var(--text-2)'}}>{v.label}</span>
                     <span className={`site2__xp-bar ${winnerLetter===v.name?'is-winner':''}`}>
-                      <span className="site2__xp-bar-fill" style={{ width: `${(v.rate/max)*100}%` }}></span>
+                      <span className="site2__xp-bar-fill" style={{ width: `${((v.rate||0)/max)*100}%` }}></span>
                     </span>
-                    <span className="site2__xp-rate">{v.rate.toFixed(2)}%</span>
-                    <span className="site2__xp-conv">{v.conv}/{v.visitors.toLocaleString()}</span>
+                    <span className="site2__xp-rate">{(v.rate||0).toFixed(2)}%</span>
+                    <span className="site2__xp-conv">{v.conv}/{(v.visitors||0).toLocaleString()}</span>
                     <span style={{color:'var(--text-3)', fontSize:10}}>
                       {v.avg ? v.avg : ''}
                     </span>
@@ -305,10 +306,10 @@ function SiteExperimentsTab() {
             <div className="site2__xp-foot">
               <span className="site2__xp-conf">
                 <span style={{textTransform:'uppercase', letterSpacing:'0.1em', fontSize:9.5}}>Confidence</span>
-                <span className="site2__xp-conf-bar"><span style={{ width: `${x.confidence*100}%` }}></span></span>
-                <span style={{color:'var(--ink)'}}>{(x.confidence*100).toFixed(0)}%</span>
+                <span className="site2__xp-conf-bar"><span style={{ width: `${(x.confidence||0)*100}%` }}></span></span>
+                <span style={{color:'var(--ink)'}}>{((x.confidence||0)*100).toFixed(0)}%</span>
               </span>
-              <span className={`site2__xp-lift ${x.lift.startsWith('−')?'neg':''}`}>{x.lift}</span>
+              <span className={`site2__xp-lift ${(x.lift||'').startsWith('−')?'neg':''}`}>{x.lift}</span>
             </div>
             {x.pauseReason && (
               <div style={{marginTop:8, fontFamily:'var(--font-mono)', fontSize:10, color:'var(--danger)'}}>⚠ {x.pauseReason}</div>
@@ -329,11 +330,11 @@ function SiteFormsTab() {
         {SITE_FORMS.map(f => (
           <div key={f.id} className="site2__form-row">
             <div>
-              <div className="name">{f.name}<small>{f.page} · {f.fields.length} fields · avg {f.completionTime}</small></div>
+              <div className="name">{f.name}<small>{f.page} · {(f.fields || []).length} fields · avg {f.completionTime}</small></div>
             </div>
-            <div className="stat"><b>{f.submits7d.toLocaleString()}</b><span>submits/7d</span></div>
-            <div className="stat"><b>{f.views7d.toLocaleString()}</b><span>views</span></div>
-            <div className="stat"><b>{f.complete.toFixed(1)}%</b><span>complete</span></div>
+            <div className="stat"><b>{(f.submits7d || 0).toLocaleString()}</b><span>submits/7d</span></div>
+            <div className="stat"><b>{(f.views7d || 0).toLocaleString()}</b><span>views</span></div>
+            <div className="stat"><b>{(f.complete || 0).toFixed(1)}%</b><span>complete</span></div>
             <div className="stat" style={{color: f.errors>10?'var(--danger)':'inherit'}}>
               <b>{f.errors}</b><span>errors/7d</span>
             </div>

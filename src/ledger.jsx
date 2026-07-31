@@ -132,11 +132,11 @@ const LedgerJournal = ({ onPick }) => {
 
   const filtered = journal.filter(je => {
     if (filter !== 'all' && je.type !== filter) return false;
-    if (q && !(je.memo + ' ' + je.ref + ' ' + je.account).toLowerCase().includes(q.toLowerCase())) return false;
+    if (q && !((je.memo || '') + ' ' + (je.ref || '') + ' ' + (je.account || '')).toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
 
-  const totals = filtered.reduce((a, je) => ({ dr: a.dr + je.debit, cr: a.cr + je.credit }), { dr: 0, cr: 0 });
+  const totals = filtered.reduce((a, je) => ({ dr: a.dr + (je.debit || 0), cr: a.cr + (je.credit || 0) }), { dr: 0, cr: 0 });
   const flagged = filtered.filter(je => je.flagged).length;
 
   return (
@@ -197,14 +197,14 @@ const LedgerJournal = ({ onPick }) => {
               </span>
               <span className="ljr__num r">{je.debit ? '$' + je.debit.toLocaleString() : '—'}</span>
               <span className="ljr__num r cr">{je.credit ? '$' + je.credit.toLocaleString() : '—'}</span>
-              <span className="ljr__num r bal">${je.balance.toLocaleString()}</span>
+              <span className="ljr__num r bal">${(je.balance ?? 0).toLocaleString()}</span>
               <span className={`ljr__sig ${je.signed === 'auto' ? 'auto' : 'human'}`}>{je.signed}</span>
             </div>
             {openId === je.id && (
               <div className="ljr__detail">
                 <div className="ljr__detail-h">
                   <span>SPLITS &nbsp;·&nbsp; {je.id}</span>
-                  <em>{je.source} · {je.type.toUpperCase()}</em>
+                  <em>{je.source} · {(je.type || '').toUpperCase()}</em>
                 </div>
                 <div className="ljr__splits">
                   <div className="ljr__split-h">
@@ -212,7 +212,7 @@ const LedgerJournal = ({ onPick }) => {
                     <span className="r">DEBIT</span>
                     <span className="r">CREDIT</span>
                   </div>
-                  {je.splits.map((s, i) => (
+                  {(je.splits || []).map((s, i) => (
                     <div key={i} className="ljr__split">
                       <span>{s.acct}</span>
                       <span className="r ljr__num">{s.dr ? '$' + s.dr.toLocaleString() : ''}</span>
@@ -221,8 +221,8 @@ const LedgerJournal = ({ onPick }) => {
                   ))}
                   <div className="ljr__split totals">
                     <span>TOTALS</span>
-                    <span className="r ljr__num">${je.splits.reduce((a, s) => a + s.dr, 0).toLocaleString()}</span>
-                    <span className="r ljr__num cr">${je.splits.reduce((a, s) => a + s.cr, 0).toLocaleString()}</span>
+                    <span className="r ljr__num">${(je.splits || []).reduce((a, s) => a + (s.dr || 0), 0).toLocaleString()}</span>
+                    <span className="r ljr__num cr">${(je.splits || []).reduce((a, s) => a + (s.cr || 0), 0).toLocaleString()}</span>
                   </div>
                 </div>
                 {je.flagged && (

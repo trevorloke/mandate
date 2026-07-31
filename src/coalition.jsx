@@ -158,6 +158,7 @@ const CoaLedger = () => {
   const totalMoney = rows.reduce((a, r) => a + (r.money || 0), 0);
 
   const fmtK = (n) => {
+    n = Number(n) || 0;
     if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n/1000).toFixed(0) + 'k';
     return n.toLocaleString();
@@ -272,7 +273,7 @@ const CoaLedger = () => {
             <div className="cl__d-stats">
               <div><span>MEMBERS</span><b>{open.members > 0 ? fmtK(open.members) : '—'}</b></div>
               <div><span>REACH</span><b>{fmtK(open.reach)}</b></div>
-              <div><span>$ COMMIT</span><b>${open.money.toLocaleString()}</b></div>
+              <div><span>$ COMMIT</span><b>${(open.money ?? 0).toLocaleString()}</b></div>
               <div><span>CHAMPION</span><b>{open.champion}</b></div>
             </div>
 
@@ -334,7 +335,10 @@ const Coalition2 = () => {
   const committed = COA_LEDGER.filter(r => r.status === 'committed' || r.status === 'public').length;
   const publicCount = COA_LEDGER.filter(r => r.status === 'public').length;
   const totalReach = COA_LEDGER.reduce((s, r) => s + (Number(r.reach) || 0), 0);
-  const openAsks = liveAsks.filter(a => !['Delivered', 'Lost', 'delivered', 'lost'].includes(a.stage)).length;
+  // Ask stage is a numeric index into COA_ASKS_STAGES (3 = Delivered, 4 = Lost)
+  // on kanban-shaped records, but legacy records may carry the stage name.
+  const askClosed = (s) => typeof s === 'number' ? s >= 3 : ['Delivered', 'Lost', 'delivered', 'lost'].includes(s);
+  const openAsks = liveAsks.filter(a => !askClosed(a.stage)).length;
   const fmtReach = (n) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
                        : n >= 1_000 ? `${Math.round(n / 1_000)}k`
                        : String(n);

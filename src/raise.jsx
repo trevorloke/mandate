@@ -164,7 +164,7 @@ const StageColumn = ({ stage, prospects, onPick }) => {
               </div>
             </div>
             <div className="r-card__next">{p.next}</div>
-            <div className="r-card__officer">{p.officer === '—' ? 'unassigned' : p.officer.split(' ').map(s => s[0]).join('')} · {p.tags.slice(0,2).join(' · ')}</div>
+            <div className="r-card__officer">{!p.officer || p.officer === '—' ? 'unassigned' : p.officer.split(' ').map(s => s[0]).join('')} · {(p.tags || []).slice(0,2).join(' · ')}</div>
           </div>
         ))}
       </div>
@@ -308,9 +308,9 @@ const DonorTable = ({ donors }) => (
       {donors.map(d => (
         <tr key={d.id}>
           <td className="name">{d.name}</td>
-          <td className="num gift">${d.gift.toLocaleString()}</td>
+          <td className="num gift">${(d.gift ?? 0).toLocaleString()}</td>
           <td className="freq">{d.freq}</td>
-          <td className="num gift">${d.ltv.toLocaleString()}</td>
+          <td className="num gift">${(d.ltv ?? 0).toLocaleString()}</td>
           <td className="list">{d.list}</td>
           <td className="num freq">{d.last}</td>
         </tr>
@@ -353,9 +353,9 @@ const ProspectDrawer = ({ prospect, onClose, onLogGift }) => {
   if (!prospect) return null;
   const detail = RAISE_PROSPECT_DETAIL[prospect.id] || {
     wealthScore: 'B · est. capacity ' + prospect.capacity,
-    affil: prospect.tags.join(' · '),
+    affil: (prospect.tags || []).join(' · '),
     history: [
-      { d: prospect.last.split(' ').slice(-2).join(' '), a: prospect.last, n: '—' },
+      { d: (prospect.last || '').split(' ').slice(-2).join(' '), a: prospect.last, n: '—' },
     ],
     given: '—',
     asks: 1,
@@ -422,7 +422,7 @@ const ProspectDrawer = ({ prospect, onClose, onLogGift }) => {
           </div>
           <div className="r-drawer__sec">
             <div className="r-drawer__sec-h">Tags</div>
-            {prospect.tags.map(t => <span className="r-drawer__tag" key={t}>{t}</span>)}
+            {(prospect.tags || []).map(t => <span className="r-drawer__tag" key={t}>{t}</span>)}
           </div>
         </div>
         <div className="r-drawer__actions">
