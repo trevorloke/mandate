@@ -176,6 +176,7 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
   const [page, setPage] = useState(0);
   const [importing, setImporting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [mapping, setMapping] = useState(null);       // { rows, headers, map: {header: schemaKey|''}, mode }
   const [pasteText, setPasteText] = useState('');
   const [selected, setSelected] = useState(new Set()); // _dbIds
   const [filters, setFilters] = useState({});         // schema-aware select/boolean filters
@@ -231,7 +232,7 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
   };
   useEffect(() => {
     load();
-    setPage(0); setQ(''); setSelected(new Set()); setFilters({});
+    setPage(0); setQ(''); setSelected(new Set()); setFilters({}); setMapping(null);
   }, [module, kind]);
 
   // Filter + sort
@@ -350,7 +351,7 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
     try {
       setImporting(true);
       if (mode === 'append') {
-        for (const r of rows) await api.createData(module, kind, r);
+        await api.bulkData(module, kind, rows, 'append');
         setMsg({ kind: 'ok', text: `Appended ${rows.length} records.` });
       } else {
         await api.bulkData(module, kind, rows);
@@ -364,6 +365,21 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
     }
   };
 
+  // Route parsed rows: with a schema, go through the column-mapping/preview
+  // step; without one, import as parsed (legacy behavior).
+  const beginImport = async (rows, mode) => {
+    if (!schema || !rows.length) { await importRows(rows, mode); return true; }
+    const headers = Object.keys(rows[0]);
+    setMapping({ rows, headers, map: autoMap(headers, schema), mode });
+    return false; // pending confirmation
+  };
+
+  const confirmMapping = async () => {
+    await importRows(mapping.rows.map(r => mapRow(r, mapping.map)), mapping.mode);
+    setMapping(null);
+    setImportOpen(false);
+  };
+
   // File picker with the mode baked in via fileRef.current.dataset.mode.
   const pickFile = (mode) => { fileRef.current.dataset.mode = mode; fileRef.current.click(); };
   const onFilePicked = async (e) => {
@@ -373,7 +389,7 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
     e.target.value = '';
     try {
       const text = await readFileAsText(file);
-      await importRows(fromCSV(text), mode);
+      await beginImport(fromCSV(text), mode);
     } catch (err) {
       setMsg({ kind: 'err', text: 'Import failed: ' + err.message });
     }
@@ -383,10 +399,9 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
     const text = (pasteText || '').trim();
     if (!text) { setMsg({ kind: 'err', text: 'Paste some CSV first.' }); return; }
     try {
-      const rows = fromCSV(text);
-      await importRows(rows, mode);
+      const done = await beginImport(fromCSV(text), mode);
       setPasteText('');
-      setImportOpen(false);
+      if (done) setImportOpen(false);
     } catch (err) {
       setMsg({ kind: 'err', text: 'Import failed: ' + err.message });
     }
@@ -409,7 +424,7 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
           {canEdit && (
             <>
               <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={onFilePicked} />
-              <button className="adm__btn adm__btn--ghost" onClick={() => setImportOpen(o => !o)} disabled={importing}>
+              <button className="adm__btn adm__btn--ghost" onClick={() => { setImportOpen(o => !o); setMapping(null); }} disabled={importing}>
                 {importing ? 'Importing…' : (importOpen ? '× Close import' : '⤓ Import')}
               </button>
             </>
@@ -426,30 +441,43 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
       {canEdit && importOpen && (
         <div className="adm__panel" style={{ marginBottom: 18 }}>
           <div className="adm__panel-h">Import {label || kind}</div>
-          <p style={{ margin: '8px 0 14px', color: 'var(--ink-4)', fontSize: 13 }}>
-            <b>Append</b> adds rows to the existing {records.length}. <b>Replace</b> deletes everything in this bucket and loads the new rows. The first CSV row should be the header.
-          </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-            <button className="adm__btn" onClick={() => pickFile('append')} disabled={importing}>⤓ Upload CSV → Append</button>
-            <button className="adm__btn adm__btn--danger" onClick={() => pickFile('replace')} disabled={importing}>⤓ Upload CSV → Replace</button>
-            {schema && (
-              <button className="adm__btn adm__btn--ghost" onClick={downloadTemplate}>↓ Download template</button>
-            )}
-          </div>
-          <label className="adm__field-label" style={{ display: 'block', marginBottom: 6 }}>Or paste CSV here</label>
-          <textarea
-            className="adm__field-textarea"
-            value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
-            placeholder={schema ? schema.fields.map(f => f.key).join(',') + '\nvalue1,value2,…' : 'Paste rows here (first row = header)'}
-            rows={6}
-            spellCheck={false}
-          />
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="adm__btn" onClick={() => importPaste('append')} disabled={importing || !pasteText.trim()}>Paste → Append</button>
-            <button className="adm__btn adm__btn--danger" onClick={() => importPaste('replace')} disabled={importing || !pasteText.trim()}>Paste → Replace</button>
-            <button className="adm__btn adm__btn--ghost" onClick={() => { setPasteText(''); setImportOpen(false); }}>Cancel</button>
-          </div>
+          {mapping ? (
+            <ImportMapper
+              schema={schema}
+              mapping={mapping}
+              importing={importing}
+              onChange={setMapping}
+              onConfirm={confirmMapping}
+              onCancel={() => setMapping(null)}
+            />
+          ) : (
+            <>
+              <p style={{ margin: '8px 0 14px', color: 'var(--ink-4)', fontSize: 13 }}>
+                <b>Append</b> adds rows to the existing {records.length}. <b>Replace</b> deletes everything in this bucket and loads the new rows. The first CSV row should be the header.
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                <button className="adm__btn" onClick={() => pickFile('append')} disabled={importing}>⤓ Upload CSV → Append</button>
+                <button className="adm__btn adm__btn--danger" onClick={() => pickFile('replace')} disabled={importing}>⤓ Upload CSV → Replace</button>
+                {schema && (
+                  <button className="adm__btn adm__btn--ghost" onClick={downloadTemplate}>↓ Download template</button>
+                )}
+              </div>
+              <label className="adm__field-label" style={{ display: 'block', marginBottom: 6 }}>Or paste CSV here</label>
+              <textarea
+                className="adm__field-textarea"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder={schema ? schema.fields.map(f => f.key).join(',') + '\nvalue1,value2,…' : 'Paste rows here (first row = header)'}
+                rows={6}
+                spellCheck={false}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button className="adm__btn" onClick={() => importPaste('append')} disabled={importing || !pasteText.trim()}>Paste → Append</button>
+                <button className="adm__btn adm__btn--danger" onClick={() => importPaste('replace')} disabled={importing || !pasteText.trim()}>Paste → Replace</button>
+                <button className="adm__btn adm__btn--ghost" onClick={() => { setPasteText(''); setImportOpen(false); }}>Cancel</button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -687,6 +715,93 @@ function formatCell(v, type) {
   if (type === 'boolean') return v ? '✓' : '·';
   if (typeof v === 'object') return <span style={{ color: 'var(--ink-5)', fontSize: 11 }}>{JSON.stringify(v).slice(0, 30)}…</span>;
   return String(v).slice(0, 60);
+}
+
+// ── CSV import column mapping ─────────────────────────────────────────
+// Auto-map each CSV header to a schema field by normalized match (lowercase,
+// strip non-alphanumerics) against the field key AND the field label.
+const normHeader = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+function autoMap(headers, schema) {
+  const map = {};
+  for (const h of headers) {
+    const n = normHeader(h);
+    const f = schema.fields.find(f => normHeader(f.key) === n || normHeader(f.label) === n);
+    map[h] = f ? f.key : '';   // '' = ignore this column
+  }
+  return map;
+}
+// Transform a parsed CSV row through the mapping; empty cells are skipped.
+function mapRow(row, map) {
+  const out = {};
+  for (const [h, k] of Object.entries(map)) {
+    if (!k) continue;
+    const v = row[h];
+    if (v == null || v === '') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function ImportMapper({ schema, mapping, importing, onChange, onConfirm, onCancel }) {
+  const { rows, headers, map, mode } = mapping;
+  const mappedCount = Object.values(map).filter(Boolean).length;
+  const mappedFields = schema.fields.filter(f => Object.values(map).includes(f.key));
+  const previewRows = rows.slice(0, 3).map(r => mapRow(r, map));
+  return (
+    <>
+      <p style={{ margin: '8px 0 14px', color: 'var(--ink-4)', fontSize: 13 }}>
+        Map each CSV column to a {schema.label || 'schema'} field, or ignore it.{' '}
+        <b>{mappedCount} of {headers.length}</b> {headers.length === 1 ? 'column' : 'columns'} mapped · {headers.length - mappedCount} ignored.
+      </p>
+      <div className="adm__map-grid">
+        {headers.map(h => (
+          <div key={h} className="adm__map-row">
+            <span className="adm__map-col" title={h}>{h}</span>
+            <span className="adm__map-arrow">→</span>
+            <select
+              className="adm__filter-chip"
+              value={map[h]}
+              onChange={e => onChange({ ...mapping, map: { ...map, [h]: e.target.value } })}
+            >
+              <option value="">— ignore —</option>
+              {schema.fields.map(f => <option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+      {mappedFields.length > 0 && (
+        <>
+          <div className="adm__field-label" style={{ margin: '16px 0 6px' }}>
+            Preview — first {previewRows.length} of {rows.length} {rows.length === 1 ? 'row' : 'rows'}
+          </div>
+          <div className="adm__table-wrap">
+            <table className="adm__table">
+              <thead>
+                <tr>{mappedFields.map(f => <th key={f.key}>{f.label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {previewRows.map((r, i) => (
+                  <tr key={i}>
+                    {mappedFields.map(f => <td key={f.key}>{formatCell(r[f.key], f.type)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <button
+          className={mode === 'replace' ? 'adm__btn adm__btn--danger' : 'adm__btn'}
+          onClick={onConfirm}
+          disabled={importing || mappedCount === 0}
+        >
+          Import {rows.length} {rows.length === 1 ? 'row' : 'rows'} ({mode})
+        </button>
+        <button className="adm__btn adm__btn--ghost" onClick={onCancel} disabled={importing}>Cancel</button>
+      </div>
+    </>
+  );
 }
 
 function RecordForm({ module, kind, record, onCancel, onSubmit }) {

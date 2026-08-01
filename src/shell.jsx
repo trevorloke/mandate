@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import './shell.css';
 import { useT } from './i18n';
+import QuickAdd from './QuickAdd';
 
 // ── Module registry (ink/paper, per-module chromatic territory)
 const MOD2 = [
@@ -105,6 +106,7 @@ const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conduc
             <span className="mdt__heartbeat-label">PULSE</span>
             <span className="mdt__heartbeat-val tnum">{beats}</span>
           </div>
+          <QuickAdd route={route} enabledModules={enabledModules} />
           <button className="mdt__cmd" onClick={onCmd}>
             <span style={{ opacity:0.7 }}>⌕</span>
             <span className="mdt__cmd-label">{t('shell.jump')}</span>

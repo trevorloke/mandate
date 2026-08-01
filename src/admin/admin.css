@@ -902,3 +902,18 @@
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ── CSV import column mapping ── */
+.adm__map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px 20px;
+}
+.adm__map-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.adm__map-col {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-3);
+}
+.adm__map-arrow { color: var(--ink-6); font-size: 12px; }
+.adm__map-row .adm__filter-chip { flex: 1; min-width: 0; }

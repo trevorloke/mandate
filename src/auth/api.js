@@ -68,7 +68,7 @@ export const api = {
   createData:  (mod, kind, data) => fetchJson(`/api/data/${mod}/${kind}`, { method: 'POST', body: data }),
   updateData:  (mod, kind, id, data) => fetchJson(`/api/data/${mod}/${kind}/${id}`, { method: 'PUT', body: data }),
   deleteData:  (mod, kind, id) => fetchJson(`/api/data/${mod}/${kind}/${id}`, { method: 'DELETE' }),
-  bulkData:    (mod, kind, records) => fetchJson(`/api/data/${mod}/${kind}/_bulk`, { method: 'PUT', body: records }),
+  bulkData:    (mod, kind, records, mode) => fetchJson(`/api/data/${mod}/${kind}/_bulk`, { method: 'PUT', body: mode ? { records, mode } : records }),
   restoreData: (mod, kind, id) => fetchJson(`/api/data/${mod}/${kind}/${id}/restore`, { method: 'POST' }),
 
   listTrash:   () => fetchJson('/api/data/_trash'),
