@@ -37,7 +37,7 @@ export function publicMediaUrl(id, origin) {
 // Resolve a post's mediaJson (array of {id,mime}) into rich refs the adapters
 // can use: raw bytes (for byte-upload platforms) + a public URL (for URL ones).
 export function loadMediaForPost(mediaJson, origin) {
-  let refs = [];
+  let refs;
   try { refs = JSON.parse(mediaJson || '[]'); } catch { refs = []; }
   return refs.map((r) => {
     const m = getMedia(r.id);

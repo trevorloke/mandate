@@ -88,7 +88,7 @@ async function buildFacets(text, service, token) {
     const start = blen(text.slice(0, at));
     facets.push({ index: { byteStart: start, byteEnd: start + blen(m[2]) }, features: [{ $type: 'app.bsky.richtext.facet#tag', tag: m[2].slice(1) }] });
   }
-  const menRe = /(^|\s)(@[a-zA-Z0-9][a-zA-Z0-9.\-]+)/g;
+  const menRe = /(^|\s)(@[a-zA-Z0-9][a-zA-Z0-9.-]+)/g;
   const mentions = [];
   while ((m = menRe.exec(text))) mentions.push({ handle: m[2].slice(1).replace(/\.+$/, ''), at: m.index + m[1].length, raw: m[2] });
   for (const mn of mentions) {

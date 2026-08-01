@@ -1,6 +1,6 @@
 // Mandate 2.0 — Fabric: hover-preview + full dossier
 // ObjRef wraps any inline reference to a first-class object. Hover → mini card. Click → full dossier drawer.
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { modByKey } from './shell';
 import './fabric.css';
@@ -17,7 +17,7 @@ const ObjRef = ({ kind, id, children, subtle = false }) => {
   const anchorRef = useRef(null);
   const obj = OBJ[id];
 
-  const showPreview = (e) => {
+  const showPreview = () => {
     if (!anchorRef.current) return;
     const r = anchorRef.current.getBoundingClientRect();
     setRect({ x: r.left + r.width/2, y: r.bottom + 6 });

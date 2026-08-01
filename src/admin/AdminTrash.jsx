@@ -1,5 +1,5 @@
 // Trash bin — soft-deleted module records, with restore + permanent delete.
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import { getSchema } from './schemas';

@@ -1,5 +1,5 @@
 // Threaded comments on any target id. Realtime via SSE.
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../auth/useRealtime';

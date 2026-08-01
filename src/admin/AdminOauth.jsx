@@ -1,5 +1,5 @@
 // OAuth/OIDC providers — admin only.
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../auth/api';
 
 export default function AdminOauth() {

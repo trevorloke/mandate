@@ -6,7 +6,7 @@
 import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
 import { db } from '../db/index.js';
-import { oauthProviders, users, sessions, workspaces, auditLog } from '../db/schema.js';
+import { oauthProviders, users, sessions, auditLog } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { requireAuth, requireRole, setSessionCookie } from '../middleware/auth.js';
 import { planFor, hasFeature, assertQuota, QuotaError } from '../lib/plans.js';

@@ -50,7 +50,6 @@ const LedgerChart = () => {
         {/* tree */}
         <div className="lcoa__tree">
           {groups.map(g => {
-            const subTotal = g.kids.reduce((a, k) => a + (k.balance || 0), 0);
             const isCollapsed = collapsed[g.header.code];
             return (
               <div className="lcoa__group" key={g.header.code}>
@@ -158,7 +157,6 @@ const LedgerReconcile = () => {
   const cleared = rows.filter(x => x.cleared).reduce((a, x) => a + (x.side === 'cr' ? x.amt : -x.amt), 0);
   const outstanding = rows.filter(x => !x.cleared);
   const out$ = outstanding.reduce((a, x) => a + (x.side === 'cr' ? x.amt : -x.amt), 0);
-  const reconciledBal = r.bookBalance + 0; // synthetic: remains $614,820 since outstanding cheques are book-only
 
   const toggle = (id) => {
     setRows(rows.map(x => x.id === id ? { ...x, cleared: !x.cleared } : x));

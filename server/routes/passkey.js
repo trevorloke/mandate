@@ -19,7 +19,7 @@ import { db } from '../db/index.js';
 import { users, sessions, passkeys, webauthnChallenges, auditLog } from '../db/schema.js';
 import { and, eq, lt } from 'drizzle-orm';
 import { requireAuth, setSessionCookie } from '../middleware/auth.js';
-import { planFor, hasFeature, FeatureGateError } from '../lib/plans.js';
+import { planFor, hasFeature } from '../lib/plans.js';
 
 const newId = (p='') => p + randomBytes(12).toString('hex');
 const SESSION_DAYS = 14;

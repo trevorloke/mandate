@@ -12,7 +12,7 @@ const STAGE_TONES = ['#7a8a98','#c5874f','#6b8b73','#2a4d35','#9aa09a'];
 
 const CoaAsks = () => {
   const { records: COA_ASKS } = useLiveRecords('coalition', 'ask', COA_ASKS_FB);
-  const [hover, setHover] = caUS(null);
+  const [_hover, setHover] = caUS(null);
   const stages = COA_ASKS_STAGES;
   const asks = COA_ASKS;
 

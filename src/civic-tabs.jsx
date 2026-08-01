@@ -1,4 +1,4 @@
-import React, { useState as cvUS, useMemo as cvUM } from 'react';
+import { useState as cvUS } from 'react';
 import { CV_MEMBER, CV_BILLS as CV_BILLS_FB, CV_COMMITTEES, CV_HEARINGS, CV_PROMISES as CV_PROMISES_FB, CV_OFFICE_WEEK, CV_LETTERS, CV_STAFF, CV_SPEND, CV_TRENDS } from './civic-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 

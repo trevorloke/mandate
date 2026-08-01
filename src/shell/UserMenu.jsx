@@ -1,5 +1,5 @@
 // User menu — avatar dropdown with profile, admin, logout.
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { useT, useLocale, LOCALES } from '../i18n';
 import './UserMenu.css';

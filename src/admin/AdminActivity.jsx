@@ -1,6 +1,6 @@
 // Workspace activity feed — like the audit log but readable to all viewers,
 // auto-refreshes via SSE on data events.
-import React, { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../auth/useRealtime';

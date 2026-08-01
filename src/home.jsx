@@ -1,6 +1,6 @@
 // Home — workspace summary that reads from the user's real records.
 // No more dummy data. Shows greeting + per-module record counts + quick links.
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import './home.css';
 import { useNav2 } from './shell';
 import { useAuth } from './auth/AuthContext';

@@ -1,4 +1,4 @@
-import React, { useState as opUS, useMemo as opUM } from 'react';
+import { useState as opUS } from 'react';
 import { OP_TARGETS as OP_TARGETS_FB, OP_CLAIMS as OP_CLAIMS_FB, OP_LEADS as OP_LEADS_FB, OP_LEAD_STAGES, OP_REBUTTALS, OP_MONITORS, OP_SOURCES } from './opp-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 

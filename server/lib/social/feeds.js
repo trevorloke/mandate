@@ -54,7 +54,7 @@ export async function syncFeed(feedId) {
   else { const idx = items.findIndex((i) => i.guid === feed.lastItemGuid); newItems = idx === -1 ? items.slice(0, 10) : items.slice(0, idx); }
   newItems = newItems.slice(0, 10);
 
-  let accountIds = []; try { accountIds = JSON.parse(feed.accountIds || '[]'); } catch { accountIds = []; }
+  let accountIds; try { accountIds = JSON.parse(feed.accountIds || '[]'); } catch { accountIds = []; }
   const accts = accountIds.length
     ? await db.select().from(socialAccounts).where(and(eq(socialAccounts.workspaceId, feed.workspaceId), inArray(socialAccounts.id, accountIds)))
     : [];

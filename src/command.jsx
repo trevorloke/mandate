@@ -57,7 +57,6 @@ function CmdItem({ it, active, onClick }) {
 
 // ── Message body with @mention + slash-cmd highlighting
 function MsgText({ text, mentions=[] }) {
-  const parts = [];
   let s = text || '';
   // mentions
   (mentions || []).forEach(m => {

@@ -7,7 +7,7 @@ import { mockFetch, jsonResponse } from './helpers.js';
 
 const meta = await import('../lib/social/meta.js');
 const ig = await import('../lib/social/instagram.js');
-const { metaFetch, isMetaAuthError } = await import('../lib/social/meta-token.js');
+const { isMetaAuthError } = await import('../lib/social/meta-token.js');
 
 const app = { clientId: 'c', clientSecret: 's' };
 const oauthErr = (msg = 'expired') => jsonResponse({ error: { code: 190, type: 'OAuthException', message: msg } }, 400);

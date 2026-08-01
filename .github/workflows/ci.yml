@@ -20,5 +20,4 @@ jobs:
       - name: Test (server engine)
         run: npm test
       - name: Lint
-        run: npm run lint
-        continue-on-error: true   # repo has pre-existing lint debt outside the social engine; non-blocking for now
+        run: npm run lint   # errors block; react-hooks compiler diagnostics surface as warnings

@@ -1,13 +1,13 @@
 import React from 'react';
 import './site.css';
-import { SITE_PAGES as SITE_PAGES_FB, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_LAYER_TREE, SITE_COLLECTIONS, SITE_CMS_ISSUES, SITE_FORMS as SITE_FORMS_FB, SITE_DONATE_FUNNEL, SITE_AUDIENCE, SITE_DEPLOYS, SITE_HEALTH } from './site-data';
+import { SITE_PAGES as SITE_PAGES_FB, SITE_EXPERIMENTS as SITE_EXPERIMENTS_FB, SITE_COLLECTIONS, SITE_FORMS as SITE_FORMS_FB, SITE_HEALTH } from './site-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 import { SitePagesTab, SiteBuilderTab, SiteCMSTab, SiteExperimentsTab, SiteFormsTab, SiteAudienceTab, SiteDeploysTab } from './site-tabs';
 
 // Site 2.0 — main shell + Pages tab + tab dispatch
 
-const { useState: stUS, useMemo: stUM } = React;
+const { useState: stUS } = React;
 
 const SITE_TAB_DEFS = [
   { k:'pages',       label:'Pages' },

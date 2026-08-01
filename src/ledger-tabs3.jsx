@@ -5,7 +5,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Ledger tabs (Compliance, Assets)
 
-const { useState: lT3US, useMemo: lT3UM } = React;
+const { useState: lT3US } = React;
 
 /* ──────────────────────────────────────────────────────
    COMPLIANCE — rules engine + audit log

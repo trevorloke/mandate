@@ -11,7 +11,6 @@ const TICK_MS = 6 * 60 * 60 * 1000;  // snapshot every 6h (daily dedupe keeps on
 let started = false;
 
 const utcDay = (d = new Date()) => d.toISOString().slice(0, 10);
-const num = (v) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : 0; };
 const parseAsk = (a) => { const m = /\$?([\d.]+)\s*([KkMm])?/.exec(String(a ?? '')); if (!m) return 0; return parseFloat(m[1]) * (/[Mm]/.test(m[2] || '') ? 1e6 : /[Kk]/.test(m[2] || '') ? 1e3 : 1); };
 
 const moneyFull = (n) => '$' + Math.round(n).toLocaleString();

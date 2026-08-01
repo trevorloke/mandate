@@ -6,7 +6,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 // Mandate 2.0 — Coalition · GRAPH tab
 // Force graph of relationships — candidate, orgs, people, opposition
 
-const { useState: cgUS, useMemo: cgUM, useRef: cgUR } = React;
+const { useState: cgUS, useMemo: cgUM } = React;
 
 const NODE_STYLES = {
   cand:           { fill:'#2a4d35', stroke:'#1a3a25', text:'#fff',     fontWeight:600 },

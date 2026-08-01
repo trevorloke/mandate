@@ -1,5 +1,5 @@
 // Admin shell — tab nav between sub-panels.
-import React, { useState } from 'react';
+import { useState } from 'react';
 import './admin.css';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';

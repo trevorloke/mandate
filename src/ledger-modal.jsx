@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import './ledger-modal.css';
 import { LEDGER_COA as LEDGER_COA_FB } from './ledger-data';
 import { useLiveRecords } from './auth/useLiveRecords';

@@ -1,7 +1,6 @@
 // Empty-state overlay for module pages. Shown when the user's workspace has
 // no records for this module's primary bucket — directs them to admin to add
 // some, or load sample data, or import a backup.
-import React from 'react';
 import './EmptyModule.css';
 
 export default function EmptyModule({ module, label, accent }) {

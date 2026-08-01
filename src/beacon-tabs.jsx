@@ -1,6 +1,5 @@
-import React from 'react';
 import './beacon-tabs.css';
-import { BEACON_ACCOUNTS as BEACON_ACCOUNTS_FB, BEACON_DAYS, BEACON_POSTS as BEACON_POSTS_FB } from './beacon-data';
+import { BEACON_POSTS as BEACON_POSTS_FB } from './beacon-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { BEACON_TRACKED_TERMS, BEACON_MENTION_TIMELINE, BEACON_AUTHORS, BEACON_SOV_HISTORY, BEACON_TOP_POSTS, BEACON_ENG_OVER_TIME, BEACON_BEST_TIME, BEACON_CONTENT_SCORE, BEACON_BOOSTS, BEACON_BOOST_SUGGESTIONS, BEACON_PRESS, BEACON_PRESS_OUTLETS as BEACON_PRESS_OUTLETS_FB } from './beacon-data2';
 
@@ -99,7 +98,6 @@ function BSparkBars({ data, max, color = 'var(--b-accent)', height = 56 }) {
 }
 
 function BTabListening() {
-  const maxMent = Math.max(...BEACON_MENTION_TIMELINE);
   return (
     <div className="b-listen-tab">
       {/* Top: timeline + tracked terms summary */}
@@ -357,7 +355,7 @@ function BEngChart({ data }) {
         {data.map((p, i) => (
           <text key={i} x={xs(i)} y={H-4} fontSize="9" fontFamily="var(--font-mono)" fill="var(--text-3)" textAnchor="middle">{p.d}</text>
         ))}
-        {lines.map((l, i) => (
+        {lines.map((l) => (
           <g key={l.key+'lab'}>
             <circle cx={xs(data.length-1)} cy={ys(data[data.length-1][l.key])} r="3" fill={l.color} />
             <text x={xs(data.length-1)+6} y={ys(data[data.length-1][l.key])+3} fontSize="10" fontFamily="var(--font-mono)" fill={l.color}>{l.label}</text>

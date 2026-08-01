@@ -1,6 +1,6 @@
 // Notification bell — sits next to the user avatar in the shell.
 // Realtime: subscribes to `notification.new` events and refetches.
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../auth/useRealtime';

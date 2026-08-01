@@ -6,7 +6,6 @@ import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import { useAuth } from './auth/AuthContext';
 import EmptyModule from './EmptyModule';
-import { Shell } from './shell';
 import { CoaGraph } from './coalition-graph';
 import { CoaDirectory } from './coalition-directory';
 import { CoaAsks, CoaOps, CoaComms, CoaEvents } from './coalition-tabs';
@@ -14,7 +13,7 @@ import { CoaAsks, CoaOps, CoaComms, CoaEvents } from './coalition-tabs';
 // Mandate 2.0 — Coalition (diplomatic registry)
 // Shell + KPI strip + tabs + LEDGER tab
 
-const { useState: cUS, useMemo: cUM, useEffect: cUE } = React;
+const { useState: cUS } = React;
 
 /* ── Sparkline ─────────────────────────────────────── */
 const CSpark = ({ pts, color = '#2a4d35' }) => {

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import './ledger.css';
 import { LEDGER_JOURNAL, LEDGER_KPIS } from './ledger-data';
 import { useLiveRecords } from './auth/useLiveRecords';
@@ -12,7 +12,7 @@ import { LedgerCompliance, LedgerAssets } from './ledger-tabs3';
 // Mandate 2.0 — Ledger (Finance / QuickBooks) v2
 // Editorial accounting: ledger paper, ink, mono numbers, double-entry feel.
 
-const { useState: lUS, useMemo: lUM } = React;
+const { useState: lUS } = React;
 
 /* ── Sparkline ─────────────────────────────────────── */
 const LSpark = ({ pts, color = '#5c4a1f', fill = false }) => {
@@ -122,13 +122,13 @@ const LedgerTabs = ({ tab, setTab, onNewEntry, counts = {} }) => {
 };
 
 /* ── Journal — register view ─────────────────────── */
-const LedgerJournal = ({ onPick }) => {
+const LedgerJournal = () => {
   const [filter, setFilter] = lUS('all');
   const [q, setQ] = lUS('');
   const [openId, setOpenId] = lUS(null);
 
   // Live-load journal entries from DB; fallback to prototype data if API empty.
-  const { records: journal, loading } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL);
+  const { records: journal } = useLiveRecords('ledger', 'journal', LEDGER_JOURNAL);
 
   const filtered = journal.filter(je => {
     if (filter !== 'all' && je.type !== filter) return false;

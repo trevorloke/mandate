@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import './auth.css';
 import { useAuth } from './AuthContext';
 import { api } from './api';
@@ -71,7 +71,7 @@ export default function Login({ onSwitchToSignup }) {
       setForgotMsg(r.resetUrl
         ? { kind: 'ok', text: `Reset link generated. (Prototype: copy this) ${window.location.origin}${r.resetUrl}` }
         : { kind: 'ok', text: 'If that email is registered, a reset link has been sent.' });
-    } catch (e) {
+    } catch {
       setForgotMsg({ kind: 'ok', text: 'If that email is registered, a reset link has been sent.' });
     } finally { setBusy(false); }
   };

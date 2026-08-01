@@ -1,6 +1,6 @@
 import React from 'react';
 import './raise.css';
-import { RAISE_KPIS, RAISE_TODAY, RAISE_PULSE, RAISE_GIFTMIX, RAISE_PROSPECT_DETAIL, RAISE_DONORS, RAISE_STAGES, RAISE_PROSPECTS, RAISE_STORIES, RAISE_FEED, RAISE_COMPLIANCE } from './raise-data';
+import { RAISE_KPIS, RAISE_TODAY, RAISE_PULSE, RAISE_GIFTMIX, RAISE_PROSPECT_DETAIL, RAISE_DONORS, RAISE_STAGES, RAISE_PROSPECTS, RAISE_STORIES } from './raise-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { useBusinessMetrics } from './auth/useBusinessMetrics';
 import EmptyModule from './EmptyModule';

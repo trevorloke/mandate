@@ -1,7 +1,7 @@
 import React from 'react';
 import './events.css';
 import { EvScheduleTab, EvCalendarTab, EvDetailTab, EvVenuesTab, EvHostsTab, EvShiftsTab } from './events-tabs';
-import { EV_LIST as EV_LIST_FB, EV_TYPES, EV_VENUES as EV_VENUES_FB, EV_HOSTS as EV_HOSTS_FB, EV_SUMMARY, EV_SHIFTS } from './events-data';
+import { EV_LIST as EV_LIST_FB, EV_VENUES as EV_VENUES_FB, EV_HOSTS as EV_HOSTS_FB } from './events-data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import EmptyModule from './EmptyModule';
 

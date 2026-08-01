@@ -5,7 +5,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 
 // Mandate 2.0 — Raise · Gifts / Lists / Reports tab views
 
-const { useState: glrUS, useMemo: glrUM } = React;
+const { useState: glrUS } = React;
 
 /* ── Gifts: daily summary strip ───────────────────────────── */
 const GiftsSummary = () => {
@@ -171,7 +171,6 @@ const RaiseGifts = () => {
 
 /* ── Lists tab ────────────────────────────────────────────── */
 const ListCard = ({ list }) => {
-  const fmt = (n) => n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + 'k' : n;
   return (
     <div className="r-list-card" style={{ '--list-color': list.color }}>
       <div className="r-list-card__kind">

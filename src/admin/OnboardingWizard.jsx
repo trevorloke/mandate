@@ -3,7 +3,7 @@
 // `workspace.settings.onboarded !== true` AND user is super_admin.
 //
 // Steps: welcome → campaign → modules → team (optional) → data → done
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { api } from '../auth/api';
 import { useAuth } from '../auth/AuthContext';
 import './OnboardingWizard.css';
@@ -41,7 +41,7 @@ const TZ_OPTIONS = [
 const STEPS = ['welcome', 'campaign', 'modules', 'team', 'data', 'done'];
 
 export default function OnboardingWizard({ onComplete }) {
-  const { workspace, setWorkspace, refresh } = useAuth();
+  const { workspace, setWorkspace } = useAuth();
   const [step, setStep] = useState('welcome');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');

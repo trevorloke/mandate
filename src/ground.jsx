@@ -8,7 +8,7 @@ import { ageOf } from './util';
 
 // Mandate 2.0 — Ground module (Desk + Field tabs)
 
-const { useState: gUS, useEffect: gUE, useRef: gUR, useMemo: gUM } = React;
+const { useState: gUS, useMemo: gUM } = React;
 
 // ── Universe sentence — editable pills
 function UniverseSentence({ cuts, onChange, count }) {
@@ -311,7 +311,7 @@ function ScriptDock({ open, script, onClose }) {
 }
 
 // ── Field tab — phone frame + context columns
-function FieldView({ mode, setMode }) {
+function FieldView() {
   const { records: voters } = useLiveRecords('ground', 'voter', VOTERS);
   const { records: shifts } = useLiveRecords('ground', 'shift', SHIFTS);
   const { records: scripts } = useLiveRecords('ground', 'script', SCRIPTS);
@@ -527,7 +527,7 @@ function PhoneScreen({ voter, script, mode }) {
   );
 }
 
-function TextScreen({ mode }) {
+function TextScreen() {
   return (
     <div>
       <div className="fvoter">
@@ -550,7 +550,7 @@ function TextScreen({ mode }) {
   );
 }
 
-function StreetScreen({ mode }) {
+function StreetScreen() {
   return (
     <div>
       <div className="fvoter">

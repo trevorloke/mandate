@@ -1,5 +1,5 @@
 // 2FA enrollment + management panel.
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { api } from '../auth/api';
 
 export default function TotpPanel({ user, onChange }) {
