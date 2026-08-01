@@ -85,6 +85,67 @@ export async function rebuildFromModuleData(workspaceId, createdById = null) {
   return { created, linked, totalEntities: byKey.size, multiModule };
 }
 
+// Live resolution — resolve a batch of just-written module records into the
+// directory, so Directory stays current on every create/update/import without
+// the manual rebuild. Same matching rules as rebuildFromModuleData; when a
+// record's identity changed (edit moved it to a different person), its link is
+// MOVED to the newly-matched entity rather than duplicated.
+const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+
+export async function resolveRecords(workspaceId, recs, createdById = null) {
+  const idents = recs
+    .map((r) => ({ r, ident: extractIdentity(r.kind, r.data || {}) }))
+    .filter((x) => x.ident);
+  if (!idents.length) return { created: 0, linked: 0, moved: 0 };
+
+  const existing = await db.select().from(entities).where(and(eq(entities.workspaceId, workspaceId), isNull(entities.deletedAt)));
+  const byKey = new Map(existing.filter((e) => e.matchKey).map((e) => [e.matchKey, e]));
+
+  // Existing links for these record ids (chunked — SQLite caps bound variables).
+  const linkByRecord = new Map();
+  for (const ids of chunk(idents.map((x) => x.r.id), 500)) {
+    const rows = await db.select().from(entityLinks)
+      .where(and(eq(entityLinks.workspaceId, workspaceId), inArray(entityLinks.recordId, ids)));
+    for (const l of rows) linkByRecord.set(l.recordId, l);
+  }
+
+  let created = 0, linked = 0, moved = 0;
+  for (const { r, ident } of idents) {
+    const key = matchKeyOf(ident.type, ident.name, ident.email);
+    let entity = byKey.get(key);
+    if (!entity) {
+      entity = { id: newId('ent_'), workspaceId, type: ident.type, name: ident.name, email: ident.email, phone: ident.phone, matchKey: key };
+      await db.insert(entities).values({ ...entity, tagsJson: '[]', dataJson: '{}', createdById });
+      byKey.set(key, entity);
+      created += 1;
+    } else if ((!entity.email && ident.email) || (!entity.phone && ident.phone)) {
+      await db.update(entities).set({ email: entity.email || ident.email, phone: entity.phone || ident.phone, updatedAt: new Date() }).where(eq(entities.id, entity.id));
+      entity.email = entity.email || ident.email; entity.phone = entity.phone || ident.phone;
+    }
+    const prior = linkByRecord.get(r.id);
+    if (prior) {
+      if (prior.entityId !== entity.id) {
+        await db.update(entityLinks).set({ entityId: entity.id, role: ident.role }).where(eq(entityLinks.id, prior.id));
+        moved += 1;
+      }
+      continue;
+    }
+    try {
+      await db.insert(entityLinks).values({ id: newId('el_'), workspaceId, entityId: entity.id, module: r.module, kind: r.kind, recordId: r.id, role: ident.role });
+      linked += 1;
+    } catch { /* unique (entity, record) — raced */ }
+  }
+  return { created, linked, moved };
+}
+
+// Drop the directory links for an entire (module, kind) bucket — used when a
+// bulk replace deletes every record in the bucket so links don't dangle.
+export async function unlinkBucket(workspaceId, module, kind) {
+  await db.delete(entityLinks).where(and(
+    eq(entityLinks.workspaceId, workspaceId), eq(entityLinks.module, module), eq(entityLinks.kind, kind),
+  ));
+}
+
 // Assemble the 360° profile: the entity + every linked record, grouped by module.
 export async function entityProfile(workspaceId, entityId) {
   const entity = (await db.select().from(entities).where(and(eq(entities.id, entityId), eq(entities.workspaceId, workspaceId))).limit(1))[0];

@@ -17,6 +17,14 @@ import { emitWebhook } from '../lib/webhooks.js';
 import { broadcast } from '../lib/realtime.js';
 import { workspaces } from '../db/schema.js';
 import { assertQuota, QuotaError } from '../lib/plans.js';
+import { ENTITY_KINDS, resolveRecords, unlinkBucket } from '../lib/entities.js';
+
+// Live entity resolution — keep the cross-module directory current on every
+// write. Best-effort: a directory hiccup must never fail the write itself.
+async function resolveIntoDirectory(workspaceId, recs, createdById) {
+  if (!recs.length || !ENTITY_KINDS[recs[0].kind]) return;
+  try { await resolveRecords(workspaceId, recs, createdById); } catch { /* best-effort */ }
+}
 
 const app = new Hono();
 app.use('*', requireAuth);
@@ -296,14 +304,20 @@ app.put('/:module/:kind/_bulk', requireRole('editor'), requireScope('write'), re
   if (!append) {
     await db.delete(moduleData)
       .where(and(eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind)));
+    // Every record in the bucket is gone — drop its directory links too.
+    if (ENTITY_KINDS[kind]) { try { await unlinkBucket(me.workspaceId, module, kind); } catch { /* best-effort */ } }
   }
+  const inserted = [];
   for (const r of records) {
+    const rid = newId();
     await db.insert(moduleData).values({
-      id: newId(), workspaceId: me.workspaceId, module, kind,
+      id: rid, workspaceId: me.workspaceId, module, kind,
       data: JSON.stringify(r),
       ownerId: me.id,
     });
+    inserted.push({ id: rid, module, kind, data: r });
   }
+  await resolveIntoDirectory(me.workspaceId, inserted, me.id);
   await audit(me.id, append ? 'data.bulk_append' : 'data.bulk_replace', `${module}.${kind}`, { count: records.length });
   return c.json({ ok: true, count: records.length });
 });
@@ -325,6 +339,7 @@ app.post('/:module/:kind', requireRole('editor'), requireScope('write'), require
   await audit(me.id, 'data.create', id, { module, kind });
   fireWebhook(me.workspaceId, 'data.create', { id, module, kind, data });
   fireRealtime(me.workspaceId, 'data.create', { id, module, kind });
+  await resolveIntoDirectory(me.workspaceId, [{ id, module, kind, data }], me.id);
   const fresh = (await db.select().from(moduleData).where(eq(moduleData.id, id)).limit(1))[0];
   return c.json({ ok: true, record: parse(fresh) });
 });
@@ -364,6 +379,8 @@ app.put('/:module/:kind/:id', requireScope('write'), async (c) => {
   await audit(me.id, 'data.update', id, { module: row.module, kind: row.kind, prev, next: data });
   fireWebhook(me.workspaceId, 'data.update', { id, module: row.module, kind: row.kind, prev, next: data });
   fireRealtime(me.workspaceId, 'data.update', { id, module: row.module, kind: row.kind });
+  // Re-resolve: if the edit changed who this record IS, its link moves.
+  await resolveIntoDirectory(me.workspaceId, [{ id, module: row.module, kind: row.kind, data }], me.id);
   const fresh = (await db.select().from(moduleData).where(eq(moduleData.id, id)).limit(1))[0];
   return c.json({ ok: true, record: parse(fresh) });
 });
