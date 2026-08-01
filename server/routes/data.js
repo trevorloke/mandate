@@ -264,16 +264,19 @@ app.get('/:module/:kind', requireBucket('read'), async (c) => {
   return c.json({ records: rows.map(parse) });
 });
 
-// Bulk replace: PUT /api/data/:module/:kind/_bulk  → replaces all records of this kind
+// Bulk write: PUT /api/data/:module/:kind/_bulk  → replaces all records of this
+// kind, or appends when body.mode === 'append' (one request per CSV import, not
+// one per row).
 // MUST be registered before /:module/:kind/:id so the literal `_bulk` doesn't get matched as `:id`.
 app.put('/:module/:kind/_bulk', requireRole('editor'), requireScope('write'), requireBucket('write'), async (c) => {
   const me = c.get('user');
   const { module, kind } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const records = Array.isArray(body) ? body : (body.records || []);
+  const append = !Array.isArray(body) && body.mode === 'append';
 
-  // Quota: count current total minus what's about to be replaced + the new size.
-  const currentBucket = (await db.select().from(moduleData).where(and(
+  // Quota: replace frees the current bucket first; append adds on top.
+  const currentBucket = append ? 0 : (await db.select().from(moduleData).where(and(
     eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind),
   ))).length;
   const currentTotal = (await db.select().from(moduleData).where(and(
@@ -285,13 +288,15 @@ app.put('/:module/:kind/_bulk', requireRole('editor'), requireScope('write'), re
   const limit = plan.limits.records;
   if (limit !== Infinity && projected > limit) {
     return c.json({
-      error: `Bulk replace would exceed plan limit for records: ${projected}/${limit}. Upgrade or reduce payload.`,
+      error: `Bulk ${append ? 'append' : 'replace'} would exceed plan limit for records: ${projected}/${limit}. Upgrade or reduce payload.`,
       code: 'QUOTA_EXCEEDED', quota: 'records', limit, current: projected,
     }, 402);
   }
 
-  await db.delete(moduleData)
-    .where(and(eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind)));
+  if (!append) {
+    await db.delete(moduleData)
+      .where(and(eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind)));
+  }
   for (const r of records) {
     await db.insert(moduleData).values({
       id: newId(), workspaceId: me.workspaceId, module, kind,
@@ -299,7 +304,7 @@ app.put('/:module/:kind/_bulk', requireRole('editor'), requireScope('write'), re
       ownerId: me.id,
     });
   }
-  await audit(me.id, 'data.bulk_replace', `${module}.${kind}`, { count: records.length });
+  await audit(me.id, append ? 'data.bulk_append' : 'data.bulk_replace', `${module}.${kind}`, { count: records.length });
   return c.json({ ok: true, count: records.length });
 });
 

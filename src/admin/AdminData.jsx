@@ -350,7 +350,7 @@ function BucketEditor({ module, kind, label, onBack, canEdit }) {
     try {
       setImporting(true);
       if (mode === 'append') {
-        for (const r of rows) await api.createData(module, kind, r);
+        await api.bulkData(module, kind, rows, 'append');
         setMsg({ kind: 'ok', text: `Appended ${rows.length} records.` });
       } else {
         await api.bulkData(module, kind, rows);
