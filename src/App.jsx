@@ -5,6 +5,7 @@ import { useLiveRecords } from './auth/useLiveRecords';
 import { Home2 } from './home';
 import { Conductor } from './conductor';
 import CmdPalette from './CmdPalette';
+import ModuleGuide from './ModuleGuide';
 import { DossierDrawer } from './fabric';
 import { Ground } from './ground';
 import { People } from './people';
@@ -121,6 +122,14 @@ export default function App2() {
     }
   }, []);
 
+  // Global palette hook: anything in the app can open the command palette by
+  // dispatching a 'mandate:palette' CustomEvent on window.
+  useEffect(() => {
+    const onPalette = () => setCmdOpen(true);
+    window.addEventListener('mandate:palette', onPalette);
+    return () => window.removeEventListener('mandate:palette', onPalette);
+  }, []);
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') { setConductorOpen(false); }
@@ -219,7 +228,11 @@ export default function App2() {
         notifications={<NotificationBell onNav={(link) => { if (link?.startsWith('/admin')) go('admin'); }} />}
         enabledModules={enabledModules}
       >
-        {effectiveRoute === 'home' ? <Home2 /> : (Page ? <Page /> : <Home2 />)}
+        {effectiveRoute === 'home'
+          ? <Home2 />
+          : (Page
+              ? <><ModuleGuide route={effectiveRoute} /><Page /></>
+              : <Home2 />)}
       </Shell>
       <Conductor open={conductorOpen} onClose={() => setConductorOpen(false)} />
       <CmdPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onGo={(k) => { setCmdOpen(false); go(k); }} />
