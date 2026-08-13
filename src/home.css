@@ -681,34 +681,73 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Hairline grid — cards separated by 1px rules, like a broadsheet table */
-.home2__brief-grid {
+.home2__brief-tools {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex: none;
+}
+
+/* VIEW AS — small mono segmented control (admin preview) */
+.kpi-viewas {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  background: var(--paper-0);
+}
+.kpi-viewas__btn {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--rule);
+  background: transparent;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.kpi-viewas__btn:first-child { border-left: 0; }
+.kpi-viewas__btn:hover { color: var(--ink); background: var(--paper-1); }
+.kpi-viewas__btn.is-on { background: var(--ink); color: var(--paper-0); }
+
+/* KPI grid — hairline 1px gaps, broadsheet table. 4 → 2 → 1 columns. */
+.kpi-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: dense;
   gap: 1px;
   background: var(--rule);
   border: 1px solid var(--rule);
 }
 
-.brief-card {
+/* ── KPI tile ── */
+.kpi {
   appearance: none;
   display: block;
   width: 100%;
+  min-width: 0;
   text-align: left;
   background: var(--paper-0);
   border: 0;
-  padding: 16px 18px 18px;
+  padding: 14px 16px 16px;
   cursor: pointer;
   position: relative;
   transition: background 0.12s;
 }
-.brief-card:hover { background: var(--paper-1); }
-.brief-card:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.kpi:hover { background: var(--paper-1); }
+.kpi:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 
-/* attention: accent left border, module-colored */
-.brief-card--attn { box-shadow: inset 3px 0 0 var(--bc, var(--danger)); }
+/* Hero — the one large figure per persona view */
+.kpi--hero { grid-column: span 2; padding: 18px 20px 20px; }
+.kpi--list { grid-column: span 2; }
 
-.brief-card__ey {
+/* attention: module-accent left inset + red dot + ATTENTION tag */
+.kpi--attn { box-shadow: inset 3px 0 0 var(--bc, var(--danger)); }
+
+/* Eyebrow: module dot + mono uppercase label */
+.kpi__ey {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -719,50 +758,167 @@
   color: var(--ink-5);
   margin-bottom: 10px;
 }
-.brief-card__dot {
+.kpi__dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--bc, var(--ink));
   flex: none;
 }
-.brief-card__lbl {
+.kpi__lbl {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.brief-card__attn {
+.kpi__attn {
   margin-left: auto;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 9px;
   letter-spacing: 0.12em;
   color: var(--danger);
   white-space: nowrap;
 }
-
-.brief-card__headline {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  color: var(--ink);
-  text-wrap: pretty;
+.kpi__attn-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex: none;
 }
-.brief-card__detail {
-  margin-top: 7px;
-  font-family: var(--font-serif);
-  font-size: 12.5px;
-  font-style: italic;
-  line-height: 1.45;
-  color: var(--text-3);
+
+/* Value — dominant. App sans, semibold, proportional figures. */
+.kpi__val-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.kpi__val {
+  font-family: var(--font-ui);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: normal;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpi--hero .kpi__val { font-size: 54px; letter-spacing: -0.025em; }
+.kpi__val--dim { color: var(--ink-6); }
+
+/* Delta — signed, small, colored by direction × good */
+.kpi__delta {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.kpi__delta--good { color: var(--ok); }
+.kpi__delta--bad  { color: var(--danger); }
+.kpi__delta--flat { color: var(--ink-5); }
+
+/* Sparkline — de-emphasized, under the value */
+.kpi__spark { margin-top: 8px; color: var(--ink-6); }
+
+/* Sub line — one short line, muted */
+.kpi__sub {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Severity tag — icon + label, never color alone */
+.kpi__sev {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.kpi__sev--ok     { color: var(--ok); }
+.kpi__sev--warn   { color: var(--warn); }
+.kpi__sev--danger { color: var(--danger); }
+
+/* Meter — track + fill; unfilled track is a light tint of the same hue */
+.kpi__meter {
+  margin-top: 10px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--paper-2);
+}
+.kpi__meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.kpi__meter--ok     { background: rgba(46, 107, 62, 0.16); }
+.kpi__meter--warn   { background: rgba(138, 98, 6, 0.16); }
+.kpi__meter--danger { background: rgba(138, 20, 20, 0.14); }
+.kpi__meter--ok     .kpi__meter-fill { background: var(--ok); }
+.kpi__meter--warn   .kpi__meter-fill { background: var(--warn); }
+.kpi__meter--danger .kpi__meter-fill { background: var(--danger); }
+
+/* List — ≤4 compact rows: when · label · sub */
+.kpi__list {
+  display: grid;
+  gap: 7px;
+}
+.kpi__row {
+  display: grid;
+  grid-template-columns: minmax(46px, auto) 1fr;
+  column-gap: 12px;
+  row-gap: 1px;
+  align-items: baseline;
+  min-width: 0;
+}
+.kpi__when {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-5);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kpi__row-lbl {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi__row-sub {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--ink-5);
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Loading skeleton — quiet, no spinners */
 .home2__brief-skel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   background: var(--rule);
   border: 1px solid var(--rule);
@@ -791,11 +947,15 @@
 }
 
 @media (max-width: 1100px) {
-  .home2__brief-grid,
-  .home2__brief-skel { grid-template-columns: repeat(2, 1fr); }
+  .kpi-grid,
+  .home2__brief-skel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
-  .home2__brief-grid,
+  .kpi-grid,
   .home2__brief-skel { grid-template-columns: 1fr; }
-  .home2__brief-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .kpi--hero,
+  .kpi--list { grid-column: auto; }
+  .kpi--hero .kpi__val { font-size: 48px; }
+  .home2__brief-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .home2__brief-tools { flex-wrap: wrap; gap: 10px; }
 }
