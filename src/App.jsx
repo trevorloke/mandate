@@ -184,7 +184,23 @@ export default function App2() {
       }
     : DEFAULT_WORKSPACE;
 
-  const enabledModules = workspace?.settings?.modules || {};
+  // Persona-gated navigation: volunteers and candidates get a focused module
+  // set; staff and managers see everything the workspace enables. Mirrors the
+  // server's effectivePersona derivation (explicit user.persona wins, else role).
+  const PERSONA_MODULES = {
+    candidate: ['beacon', 'events', 'civic', 'academy', 'command', 'tide', 'margin'],
+    volunteer: ['ground', 'events', 'academy', 'command'],
+  };
+  const persona = user.persona
+    || (user.role === 'editor' ? 'staff' : user.role === 'viewer' ? 'volunteer' : 'manager');
+  const personaSet = PERSONA_MODULES[persona] ? new Set(PERSONA_MODULES[persona]) : null;
+  const wsModules = workspace?.settings?.modules || {};
+  const enabledModules = { ...wsModules };
+  if (personaSet) {
+    for (const m of ['ground','people','beacon','raise','ledger','coalition','civic','opposition','site','events','academy','command','tide','margin','directory']) {
+      if (!personaSet.has(m)) enabledModules[m] = false;
+    }
+  }
   const isModuleEnabled = (k) => enabledModules[k] !== false;
   // If user navigated to a disabled module, fall back to home
   const effectiveRoute = (route !== 'home' && route !== 'admin' && !isModuleEnabled(route)) ? 'home' : route;
