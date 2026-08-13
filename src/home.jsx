@@ -2,7 +2,7 @@
 // No more dummy data. Shows greeting + per-module record counts + quick links.
 import { useEffect, useState } from 'react';
 import './home.css';
-import { useNav2 } from './shell';
+import { useNav2, modByKey } from './shell';
 import { useAuth } from './auth/AuthContext';
 import { api } from './auth/api';
 
@@ -39,6 +39,16 @@ function fmtDate() {
   return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
+function briefDate() {
+  return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+function fmtClock(t) {
+  const d = new Date(t);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 const Home2 = () => {
   const { go } = useNav2();
   const { user, workspace } = useAuth();
@@ -50,8 +60,26 @@ const Home2 = () => {
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // The Brief — server-composed daily digest. 'loading' | 'ok' | 'error'.
+  // Error (endpoint not landed yet, 404, etc.) falls back to the counts grid.
+  const [brief, setBrief] = useState(null);
+  const [briefStatus, setBriefStatus] = useState('loading');
+
   useEffect(() => {
     let cancelled = false;
+
+    api.brief()
+      .then(r => {
+        if (cancelled) return;
+        if (r && Array.isArray(r.sections) && r.sections.length > 0) {
+          setBrief(r);
+          setBriefStatus('ok');
+        } else {
+          setBriefStatus('error');
+        }
+      })
+      .catch(() => { if (!cancelled) setBriefStatus('error'); });
+
     (async () => {
       const next = {};
       const tasks = [];
@@ -105,12 +133,13 @@ const Home2 = () => {
         </div>
       </header>
 
-      <section className="home2__sect">
-        <h2 className="home2__sect-h">Modules</h2>
-
-        {loading ? (
-          <p className="home2__msg">Loading…</p>
-        ) : populatedModules.length === 0 ? (
+      {counts === null || briefStatus === 'loading' ? (
+        <section className="home2__sect" aria-hidden="true">
+          <div className="home2__brief-skel"><span /><span /><span /></div>
+        </section>
+      ) : populatedModules.length === 0 ? (
+        <section className="home2__sect">
+          <h2 className="home2__sect-h">Modules</h2>
           <div className="home2__empty">
             <p>Your workspace has no records yet.</p>
             <p className="home2__hint">
@@ -121,7 +150,37 @@ const Home2 = () => {
               Open Admin →
             </button>
           </div>
-        ) : (
+        </section>
+      ) : briefStatus === 'ok' ? (
+        <section className="home2__sect home2__brief">
+          <div className="home2__brief-head">
+            <h2 className="home2__sect-h home2__brief-h">The Brief — {briefDate()}</h2>
+            {brief?.generatedAt && fmtClock(brief.generatedAt) && (
+              <span className="home2__brief-gen">as of {fmtClock(brief.generatedAt)}</span>
+            )}
+          </div>
+          <div className="home2__brief-grid">
+            {brief.sections.map((s) => (
+              <button
+                key={s.key || s.module}
+                className={'brief-card' + (s.attention ? ' brief-card--attn' : '')}
+                style={{ '--bc': modByKey(s.module)?.ac || 'var(--ink)' }}
+                onClick={() => go(s.route || s.module)}
+              >
+                <div className="brief-card__ey">
+                  <span className="brief-card__dot" aria-hidden="true" />
+                  <span className="brief-card__lbl">{s.label}</span>
+                  {s.attention && <span className="brief-card__attn">● needs attention</span>}
+                </div>
+                <div className="brief-card__headline">{s.headline}</div>
+                {s.detail && <div className="brief-card__detail">{s.detail}</div>}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section className="home2__sect">
+          <h2 className="home2__sect-h">Modules</h2>
           <div className="home2__grid">
             {populatedModules.map(([mod, count]) => (
               <button key={mod} className="home2__card home2__card--has" onClick={() => go(mod)}>
@@ -138,8 +197,8 @@ const Home2 = () => {
               </button>
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {activity.length > 0 && (
         <section className="home2__sect">

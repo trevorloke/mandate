@@ -656,3 +656,146 @@
   .home2__sect { padding: 0 16px; }
   .home2__grid { grid-template-columns: 1fr; }
 }
+
+/* ── The Brief — the daily digest, one card per module section ────────── */
+.home2__brief-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  border-bottom: 1px solid var(--ink);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.home2__brief-h {
+  margin: 0;
+  color: var(--ink);
+}
+.home2__brief-gen {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hairline grid — cards separated by 1px rules, like a broadsheet table */
+.home2__brief-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+}
+
+.brief-card {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--paper-0);
+  border: 0;
+  padding: 16px 18px 18px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.12s;
+}
+.brief-card:hover { background: var(--paper-1); }
+.brief-card:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* attention: accent left border, module-colored */
+.brief-card--attn { box-shadow: inset 3px 0 0 var(--bc, var(--danger)); }
+
+.brief-card__ey {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  margin-bottom: 10px;
+}
+.brief-card__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bc, var(--ink));
+  flex: none;
+}
+.brief-card__lbl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brief-card__attn {
+  margin-left: auto;
+  flex: none;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.brief-card__headline {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+.brief-card__detail {
+  margin-top: 7px;
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+/* Loading skeleton — quiet, no spinners */
+.home2__brief-skel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+}
+.home2__brief-skel span {
+  display: block;
+  height: 108px;
+  background: var(--paper-0);
+  position: relative;
+  overflow: hidden;
+}
+.home2__brief-skel span::before,
+.home2__brief-skel span::after {
+  content: '';
+  position: absolute;
+  left: 18px;
+  border-radius: 2px;
+  background: var(--paper-2);
+  animation: brief-skel 1.8s ease-in-out infinite;
+}
+.home2__brief-skel span::before { top: 20px; width: 76px; height: 8px; }
+.home2__brief-skel span::after  { top: 44px; width: 58%; height: 18px; }
+@keyframes brief-skel {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+@media (max-width: 1100px) {
+  .home2__brief-grid,
+  .home2__brief-skel { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .home2__brief-grid,
+  .home2__brief-skel { grid-template-columns: 1fr; }
+  .home2__brief-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
