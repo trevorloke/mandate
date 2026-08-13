@@ -25,6 +25,7 @@ export const users = sqliteTable('users', {
   name:         text('name').notNull(),
   initials:     text('initials'),
   role:         text('role').notNull().default('viewer'),  // super_admin | admin | editor | viewer
+  persona:      text('persona'),                            // manager | staff | candidate | volunteer | null (derive from role)
   workspaceId:  text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
   active:       integer('active', { mode: 'boolean' }).notNull().default(true),
   totpSecret:   text('totp_secret'),                  // base32-encoded; null until enrolled

@@ -718,9 +718,24 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-auto-flow: dense;
   gap: 1px;
-  background: var(--rule);
+  /* Hairlines come from a per-tile ring, not a painted container background —
+     an unfilled grid area must show the page, not a dead color block. */
+  background: transparent;
   border: 1px solid var(--rule);
 }
+.kpi-grid > * { box-shadow: 0 0 0 1px var(--rule); }
+.kpi__list-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3, var(--ink-5));
+  padding: 14px 0;
+}
+.kpi__list-empty-mark { opacity: 0.6; }
 
 /* ── KPI tile ── */
 .kpi {

@@ -7,6 +7,7 @@ import { users, auditLog, sessions } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { requireAuth, requireRole, ROLES } from '../middleware/auth.js';
 import { assertQuota, QuotaError } from '../lib/plans.js';
+import { PERSONAS } from '../lib/persona.js';
 
 const app = new Hono();
 
@@ -84,6 +85,13 @@ app.put('/:id', requireRole('admin'), async (c) => {
     if (body.role === 'super_admin' && me.role !== 'super_admin') return c.json({ error: 'only super_admin can assign super_admin' }, 403);
     if (target.role === 'super_admin' && me.id !== target.id && me.role !== 'super_admin') return c.json({ error: 'cannot demote super_admin' }, 403);
     updates.role = body.role;
+  }
+  if ('persona' in body) {
+    // Explicit persona, or null to clear back to role-derived default.
+    if (body.persona !== null && !PERSONAS.includes(body.persona)) {
+      return c.json({ error: 'invalid persona' }, 400);
+    }
+    updates.persona = body.persona;
   }
   if (typeof body.password === 'string' && body.password) {
     if (body.password.length < 8) return c.json({ error: 'password must be at least 8 characters' }, 400);

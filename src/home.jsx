@@ -142,7 +142,14 @@ const MeterBody = ({ s }) => {
 
 const ListBody = ({ s }) => {
   const items = Array.isArray(s.items) ? s.items.slice(0, 4) : [];
-  if (items.length === 0) return <div className="kpi__val kpi__val--dim">—</div>;
+  if (items.length === 0) {
+    return (
+      <div className="kpi__list-empty">
+        <span className="kpi__list-empty-mark">○</span>
+        Nothing scheduled
+      </div>
+    );
+  }
   return (
     <div className="kpi__list">
       {items.map((it, i) => (

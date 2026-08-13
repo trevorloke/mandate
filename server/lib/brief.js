@@ -1,11 +1,17 @@
-// Daily Brief — synthesize the whole campaign's state into ordered sections so
-// Home can show "where things stand + what needs attention" in one fetch.
+// Daily Brief v2 — synthesize the whole campaign's state into persona-shaped,
+// VISUAL sections so Home can show "where things stand + what needs attention"
+// as numbers, sparks and meters instead of prose.
 //
-// Each section is { key, module, route, label, headline, detail, attention }.
-// Sections needing attention sort first; within each group the fixed module
-// order holds (Array.prototype.sort is stable). Every builder is null-safe: an
-// empty workspace produces all nine sections with zeroed copy and
-// attention:false — buildBrief never throws.
+// Every section carries { key, module, route, label, attention, kind } plus a
+// kind-specific visual payload:
+//   kind:'stat'  → { value, raw, delta?, spark?, sub? }
+//   kind:'meter' → { value, num, den, severity, sub? }
+//   kind:'list'  → { items: [{ label, sub?, when? }] (≤4), sub? }
+//
+// One section list is built per persona (manager | staff | candidate |
+// volunteer) — same section objects, different selection and order. Every
+// builder is null-safe: an empty workspace produces zeroed values, empty
+// lists and attention:false — buildBrief never throws.
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { moduleData, entities, entityLinks } from '../db/schema.js';
@@ -13,11 +19,26 @@ import { metricsForWorkspace } from './metrics-compute.js';
 import { buildContestConfig } from './margin/build-contest.js';
 import { listTopics } from './tide/service.js';
 
+export { PERSONAS, effectivePersona } from './persona.js';
+
 const DAY = 86400000;
 const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
-const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString();
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const dateMs = (s) => { const t = Date.parse(String(s || '')); return Number.isFinite(t) ? t : null; };
+
+// Compact display formats — '$6.2K', '241', '1.5M'.
+const compactNum = (n) => {
+  n = Math.round(Number(n) || 0);
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (Math.abs(n) >= 1e4) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toLocaleString();
+};
+const compactMoney = (n) => {
+  n = Math.round(Number(n) || 0);
+  if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (Math.abs(n) >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n}`;
+};
 
 // All live records for a workspace grouped by "module.kind", each carried as
 // { data, createdAtMs } — createdAt drives the "this week" windows.
@@ -34,7 +55,7 @@ async function loadRecords(workspaceId) {
   return by;
 }
 
-export async function buildBrief(workspaceId) {
+export async function buildBrief(workspaceId, persona = 'manager') {
   const now = Date.now();
 
   // Shared inputs — each guarded so one broken source never sinks the brief.
@@ -58,21 +79,21 @@ export async function buildBrief(workspaceId) {
   } catch { /* zeroed */ }
 
   const g = (key) => (by[key] || []).map((r) => r.data);
-  const disp = (key, fallback) => metrics[key]?.display ?? fallback;
 
-  const sections = [];
-  // Push meta + build(); on any surprise, fall back to the section's zero state.
-  const add = (meta, build, zero) => {
-    try {
-      const s = build();
-      sections.push({ ...meta, headline: String(s.headline), detail: String(s.detail), attention: !!s.attention });
-    } catch {
-      sections.push({ ...meta, ...zero, attention: false });
+  // Stat visuals lifted straight off a computed metric (display/delta/spark).
+  const statFromMetric = (key, fallback) => {
+    const mt = metrics[key] || {};
+    const out = { value: mt.display ?? fallback, raw: Number.isFinite(mt.value) ? mt.value : 0 };
+    if (mt.delta && mt.delta.text) {
+      out.delta = { text: mt.delta.text, dir: mt.delta.dir, good: mt.delta.dir !== 'down' };
     }
+    if (Array.isArray(mt.spark) && mt.spark.length > 1) out.spark = mt.spark.slice(-12);
+    return out;
   };
 
-  // ── money ── raised YTD, week's gifts, cash + AP; flag bills coming due.
-  add({ key: 'money', module: 'raise', route: 'raise', label: 'Money' }, () => {
+  // ── section builders — each returns { kind, ...visual, attention } ──
+
+  const money = () => {
     const week = (by['raise.gift'] || [])
       .filter((r) => r.createdAtMs != null && now - r.createdAtMs <= 7 * DAY)
       .reduce((s, r) => s + (Number(r.data.amt) || 0), 0);
@@ -82,14 +103,14 @@ export async function buildBrief(workspaceId) {
       return ms != null && ms - now <= 7 * DAY;
     });
     return {
-      headline: disp('raise.ytd', '$0'),
-      detail: `${money(week)} this week · ${disp('ledger.cash', '$0')} on hand · ${disp('ledger.ap', '$0')} in bills`,
+      kind: 'stat',
+      ...statFromMetric('raise.ytd', '$0'),
+      sub: `${compactMoney(week)} this week`,
       attention: billsDueSoon.length > 0,
     };
-  }, { headline: '$0', detail: '$0 this week · $0 on hand · $0 in bills' });
+  };
 
-  // ── compliance ── next filing deadline + anything flagged.
-  add({ key: 'compliance', module: 'ledger', route: 'ledger', label: 'Compliance' }, () => {
+  const compliance = () => {
     const DONE = new Set(['done', 'filed', 'submitted', 'complete']);
     const open = g('ledger.filing').filter((f) => !DONE.has(String(f.status || '').toLowerCase()));
     const days = open
@@ -100,54 +121,77 @@ export async function buildBrief(workspaceId) {
       })
       .filter((d) => d != null);
     const minDays = days.length ? Math.min(...days) : null;
-    const flaggedJournal = g('ledger.journal').filter((j) => j.flagged).length;
-    const flaggedGifts = g('raise.gift').filter((x) => String(x.status || '') === 'flagged').length;
+    const flagged = g('ledger.journal').filter((j) => j.flagged).length
+      + g('raise.gift').filter((x) => String(x.status || '') === 'flagged').length;
     return {
-      headline: minDays != null ? `due in ${minDays}d` : 'No filings due',
-      detail: `${plural(flaggedJournal, 'flagged journal entry', 'flagged journal entries')} · ${plural(flaggedGifts, 'flagged gift')}`,
-      attention: (minDays != null && minDays <= 14) || flaggedJournal > 0 || flaggedGifts > 0,
+      kind: 'meter',
+      value: minDays != null ? `${minDays}d` : '—',
+      num: minDays != null ? Math.max(0, Math.min(30, minDays)) : 30,
+      den: 30,
+      severity: minDays == null ? 'ok' : minDays < 7 ? 'danger' : minDays <= 14 ? 'warn' : 'ok',
+      sub: flagged > 0 ? `${flagged} flagged` : minDays != null ? 'to next filing' : 'no filings due',
+      attention: (minDays != null && minDays <= 14) || flagged > 0,
     };
-  }, { headline: 'No filings due', detail: '0 flagged journal entries · 0 flagged gifts' });
+  };
 
-  // ── approvals ── posts held or explicitly awaiting a sign-off.
-  add({ key: 'approvals', module: 'beacon', route: 'beacon', label: 'Approvals' }, () => {
+  const approvals = () => {
     const awaiting = g('beacon.post')
       .filter((p) => /^needs/i.test(String(p.signoff || '').trim()) || p.status === 'HOLD');
-    return {
-      headline: `${plural(awaiting.length, 'post')} awaiting sign-off`,
-      detail: awaiting.length ? String(awaiting[0].headline || '') : '',
+    const s = {
+      kind: 'stat',
+      value: compactNum(awaiting.length),
+      raw: awaiting.length,
       attention: awaiting.length > 0,
     };
-  }, { headline: '0 posts awaiting sign-off', detail: '' });
+    if (awaiting.length) s.sub = String(awaiting[0].headline || 'awaiting sign-off');
+    return s;
+  };
 
-  // ── field ── universe size + shift coverage.
-  add({ key: 'field', module: 'ground', route: 'ground', label: 'Field' }, () => {
+  const fieldStat = () => {
     const voters = g('ground.voter').length;
-    const unfilled = g('ground.shift').filter((s) => (Number(s.filled) || 0) < (Number(s.cap) || 0)).length;
+    const unfilled = g('ground.shift').filter((sh) => (Number(sh.filled) || 0) < (Number(sh.cap) || 0)).length;
     return {
-      headline: `${voters.toLocaleString()} voters in universe`,
-      detail: `${plural(unfilled, 'shift')} unfilled`,
+      kind: 'stat',
+      value: compactNum(voters),
+      raw: voters,
+      sub: `${plural(unfilled, 'shift')} unfilled`,
       attention: unfilled > 0,
     };
-  }, { headline: '0 voters in universe', detail: '0 shifts unfilled' });
+  };
 
-  // ── asks ── undelivered asks whose deadline is within a week or past.
-  add({ key: 'asks', module: 'coalition', route: 'coalition', label: 'Asks' }, () => {
+  const fieldMeter = () => {
+    const shifts = g('ground.shift');
+    const den = shifts.reduce((s, sh) => s + Math.max(0, Number(sh.cap) || 0), 0);
+    const num = shifts.reduce((s, sh) => s + Math.min(Math.max(0, Number(sh.filled) || 0), Math.max(0, Number(sh.cap) || 0)), 0);
+    const ratio = den > 0 ? num / den : 1;
+    return {
+      kind: 'meter',
+      value: `${num}/${den}`,
+      num,
+      den,
+      severity: ratio >= 0.8 ? 'ok' : ratio >= 0.5 ? 'warn' : 'danger',
+      sub: 'shifts filled',
+      attention: den > 0 && num < den,
+    };
+  };
+
+  const asks = () => {
     const stalled = g('coalition.ask')
       .filter((a) => (Number(a.stage) || 0) < 3)
       .map((a) => ({ ...a, dueMs: dateMs(a.due) }))
       .filter((a) => a.dueMs != null && a.dueMs - now <= 7 * DAY)
       .sort((a, b) => a.dueMs - b.dueMs);
-    const nearest = stalled[0];
-    return {
-      headline: `${plural(stalled.length, 'ask')} stalled or due`,
-      detail: nearest ? `${nearest.org || 'Unknown org'} · due ${nearest.due}` : '',
+    const s = {
+      kind: 'stat',
+      value: compactNum(stalled.length),
+      raw: stalled.length,
       attention: stalled.length > 0,
     };
-  }, { headline: '0 asks stalled or due', detail: '' });
+    if (stalled[0]) s.sub = `${stalled[0].org || 'Unknown org'} · due ${stalled[0].due}`;
+    return s;
+  };
 
-  // ── events ── next event in the 14-day window + staffing gaps.
-  add({ key: 'events', module: 'events', route: 'events', label: 'Events' }, () => {
+  const events = () => {
     const todayStr = new Date(now).toISOString().slice(0, 10);
     const upcoming = g('events.event')
       .filter((e) => typeof e.date === 'string' && e.date >= todayStr)
@@ -155,46 +199,122 @@ export async function buildBrief(workspaceId) {
       .filter((e) => e._ms != null && e._ms - now <= 14 * DAY)
       .sort((a, b) => a._ms - b._ms);
     const gaps = upcoming.reduce((s, e) => s + Math.max(0, (Number(e.shifts) || 0) - (Number(e.shiftsFilled) || 0)), 0);
-    const next = upcoming[0];
-    return {
-      headline: next ? `${next.title || 'Untitled event'} · ${next.date}` : 'Nothing scheduled',
-      detail: `${plural(upcoming.length, 'event')} in 14d · ${plural(gaps, 'shift gap')}`,
+    const sec = {
+      kind: 'list',
+      items: upcoming.slice(0, 4).map((e) => {
+        const item = { label: String(e.title || 'Untitled event'), when: String(e.date) };
+        const where = e.venue || e.location || e.city;
+        if (where) item.sub = String(where);
+        return item;
+      }),
       attention: upcoming.some((e) => (Number(e.shiftsFilled) || 0) < (Number(e.shifts) || 0)),
     };
-  }, { headline: 'Nothing scheduled', detail: '0 events in 14d · 0 shift gaps' });
+    if (gaps > 0) sec.sub = plural(gaps, 'shift gap');
+    return sec;
+  };
 
-  // ── attention ── Tide topics currently spiking.
-  add({ key: 'attention', module: 'tide', route: 'tide', label: 'Attention' }, () => {
+  const attention = () => {
     const spiking = topics.filter((t) => t.spiking);
-    return {
-      headline: spiking.length ? `${plural(spiking.length, 'topic')} spiking` : 'Attention steady',
-      detail: spiking.length ? String(spiking[0].name || '') : '',
+    const s = {
+      kind: 'stat',
+      value: compactNum(spiking.length),
+      raw: spiking.length,
       attention: spiking.length > 0,
     };
-  }, { headline: 'Attention steady', detail: '' });
+    if (spiking.length) s.sub = String(spiking[0].name || '');
+    return s;
+  };
 
-  // ── forecast ── whether Margin has a buildable contest; informational only.
-  add({ key: 'forecast', module: 'margin', route: 'margin', label: 'Forecast' }, () => {
+  const forecast = () => {
     const districts = g('margin.district');
     const polls = g('margin.poll');
     let result;
     try { result = buildContestConfig(g('margin.contest')[0] || null, districts, polls); }
     catch { result = { error: 'build failed' }; }
     return {
-      headline: result.config ? `Forecast live — ${result.config.name}` : 'Not configured',
-      detail: `${plural(districts.length, 'district')} · ${plural(polls.length, 'poll')}`,
+      kind: 'stat',
+      value: result.config ? 'Live' : '—',
+      raw: result.config ? 1 : 0,
+      sub: result.config
+        ? String(result.config.name || 'Forecast live')
+        : `${plural(districts.length, 'district')} · ${plural(polls.length, 'poll')}`,
       attention: false,
     };
-  }, { headline: 'Not configured', detail: '0 districts · 0 polls' });
+  };
 
-  // ── directory ── canonical entities + the cross-module payoff count.
-  add({ key: 'directory', module: 'directory', route: 'directory', label: 'Directory' }, () => ({
-    headline: `${directory.total.toLocaleString()} people & orgs`,
-    detail: `${directory.multiModule.toLocaleString()} span multiple modules`,
+  const directoryStat = (sub) => () => ({
+    kind: 'stat',
+    value: compactNum(directory.total),
+    raw: directory.total,
+    sub,
     attention: false,
-  }), { headline: '0 people & orgs', detail: '0 span multiple modules' });
+  });
 
-  // Attention first; stable sort preserves the fixed order within each group.
-  sections.sort((a, b) => Number(b.attention) - Number(a.attention));
-  return sections;
+  const academy = () => {
+    const courses = g('academy.course').length;
+    return {
+      kind: 'stat',
+      value: compactNum(courses),
+      raw: courses,
+      sub: 'keep training',
+      attention: false,
+    };
+  };
+
+  // ── assembly — per-persona selection + order ──
+
+  const META = {
+    money:      { key: 'money', module: 'raise', route: 'raise', label: 'Money' },
+    compliance: { key: 'compliance', module: 'ledger', route: 'ledger', label: 'Compliance' },
+    approvals:  { key: 'approvals', module: 'beacon', route: 'beacon', label: 'Approvals' },
+    field:      { key: 'field', module: 'ground', route: 'ground', label: 'Field' },
+    asks:       { key: 'asks', module: 'coalition', route: 'coalition', label: 'Asks' },
+    events:     { key: 'events', module: 'events', route: 'events', label: 'Events' },
+    attention:  { key: 'attention', module: 'tide', route: 'tide', label: 'Attention' },
+    forecast:   { key: 'forecast', module: 'margin', route: 'margin', label: 'Forecast' },
+    directory:  { key: 'directory', module: 'directory', route: 'directory', label: 'Directory' },
+    academy:    { key: 'academy', module: 'academy', route: 'academy', label: 'Academy' },
+  };
+
+  // Zero states per kind — used when a builder throws on surprise data.
+  const ZERO = {
+    stat: { kind: 'stat', value: '0', raw: 0 },
+    meter: { kind: 'meter', value: '—', num: 0, den: 0, severity: 'ok' },
+    list: { kind: 'list', items: [] },
+  };
+
+  const managerDirectory = directoryStat(`${compactNum(directory.multiModule)} span multiple modules`);
+  const volunteerDirectory = directoryStat('people in the campaign');
+
+  const SHAPES = {
+    manager: [
+      ['money', money, 'stat'], ['compliance', compliance, 'meter'], ['approvals', approvals, 'stat'],
+      ['field', fieldStat, 'stat'], ['asks', asks, 'stat'], ['events', events, 'list'],
+      ['attention', attention, 'stat'], ['forecast', forecast, 'stat'], ['directory', managerDirectory, 'stat'],
+    ],
+    staff: [
+      ['money', money, 'stat'], ['compliance', compliance, 'meter'], ['approvals', approvals, 'stat'],
+      ['field', fieldStat, 'stat'], ['asks', asks, 'stat'], ['events', events, 'list'],
+      ['attention', attention, 'stat'], ['directory', managerDirectory, 'stat'],
+    ],
+    candidate: [
+      ['events', events, 'list'], ['money', money, 'stat'], ['field', fieldStat, 'stat'],
+      ['attention', attention, 'stat'], ['approvals', approvals, 'stat'],
+    ],
+    volunteer: [
+      ['events', events, 'list'], ['field', fieldMeter, 'meter'],
+      ['academy', academy, 'stat'], ['directory', volunteerDirectory, 'stat'],
+    ],
+  };
+
+  const shape = SHAPES[persona] || SHAPES.manager;
+  return shape.map(([metaKey, build, kind]) => {
+    const meta = META[metaKey];
+    try {
+      const s = build();
+      return { ...meta, ...s, attention: !!s.attention };
+    } catch {
+      return { ...meta, ...ZERO[kind], attention: false };
+    }
+  });
 }

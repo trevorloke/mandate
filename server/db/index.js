@@ -57,6 +57,7 @@ function bootstrapTables() {
       name TEXT NOT NULL,
       initials TEXT,
       role TEXT NOT NULL DEFAULT 'viewer',
+      persona TEXT,
       workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
       active INTEGER NOT NULL DEFAULT 1,
       last_login_at INTEGER,
@@ -310,6 +311,7 @@ function bootstrapTables() {
   alterIfMissing('users', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0');
   alterIfMissing('users', 'recovery_codes_hash', 'TEXT');
   alterIfMissing('users', 'locale', "TEXT NOT NULL DEFAULT 'en'");
+  alterIfMissing('users', 'persona', 'TEXT');
   alterIfMissing('public_forms', 'captcha_provider', 'TEXT');
   alterIfMissing('public_forms', 'captcha_sitekey', 'TEXT');
   alterIfMissing('public_forms', 'captcha_secret', 'TEXT');
