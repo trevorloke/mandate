@@ -4,6 +4,7 @@ import { WORKSPACE as DEFAULT_WORKSPACE } from './data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { Home2 } from './home';
 import { Conductor } from './conductor';
+import CmdPalette from './CmdPalette';
 import { DossierDrawer } from './fabric';
 import { Ground } from './ground';
 import { People } from './people';
@@ -97,6 +98,7 @@ export default function App2() {
   })();
   const [route, setRoute] = useState(initial);
   const [conductorOpen, setConductorOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
   const { records: conductorAsks } = useLiveRecords('conductor', 'ask', []);
   const conductorNowCount = conductorAsks.filter(c => c.window === 'NOW').length;
 
@@ -124,6 +126,9 @@ export default function App2() {
       if (e.key === 'Escape') { setConductorOpen(false); }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault(); setConductorOpen(v => !v);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); setCmdOpen(v => !v);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -191,7 +196,7 @@ export default function App2() {
         onGo={go}
         workspace={ws}
         user={user.initials || (user.name || '').split(/\s+/).filter(Boolean).map(s => s[0]?.toUpperCase()).slice(0,2).join('') || '—'}
-        onCmd={() => {}}
+        onCmd={() => setCmdOpen(true)}
         onConductor={() => setConductorOpen(true)}
         conductorCount={conductorNowCount}
         userMenu={<UserMenu onAdmin={() => go('admin')} />}
@@ -201,6 +206,7 @@ export default function App2() {
         {effectiveRoute === 'home' ? <Home2 /> : (Page ? <Page /> : <Home2 />)}
       </Shell>
       <Conductor open={conductorOpen} onClose={() => setConductorOpen(false)} />
+      <CmdPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onGo={(k) => { setCmdOpen(false); go(k); }} />
       <DossierDrawer />
     </Nav2Ctx.Provider>
   );

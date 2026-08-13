@@ -44,6 +44,8 @@ import linksRoutes from './routes/links.js';
 import tideRoutes from './routes/tide.js';
 import entityRoutes from './routes/entities.js';
 import marginRoutes from './routes/margin.js';
+import briefRoutes from './routes/brief.js';
+import searchRoutes from './routes/search.js';
 import { startMetricsWorker } from './lib/metrics-compute.js';
 import { startTideWorker } from './lib/tide-worker.js';
 
@@ -119,6 +121,8 @@ app.route('/api/social', socialRoutes);
 app.route('/api/tide', tideRoutes);
 app.route('/api/entities', entityRoutes);
 app.route('/api/margin', marginRoutes);
+app.route('/api/brief', briefRoutes);
+app.route('/api/search', searchRoutes);
 app.route('/l', linksRoutes);
 
 // Static SPA serving (production deploys). When `dist/` exists OR
