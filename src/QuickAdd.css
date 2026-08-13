@@ -74,3 +74,19 @@
   color: var(--ink-4);
   margin-bottom: 20px;
 }
+.qa__done-dir {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  margin: -10px 0 18px;
+}
+.qa__done-flag {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #8a5310;
+  border: 1px solid #d9b98a;
+  background: #faf3e6;
+  padding: 8px 12px;
+  margin: 0 auto 18px;
+  max-width: 440px;
+}

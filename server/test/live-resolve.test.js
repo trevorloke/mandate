@@ -97,3 +97,16 @@ test('non-entity kinds do not create directory entries', async () => {
   assert.equal(r.status, 200);
   assert.equal((await allEntities()).length, before);
 });
+
+test('gifts resolve via their donor field', async () => {
+  // Bo Lindqvist's entity is name-keyed (created without an email), so a gift
+  // naming the donor matches it. (An email-keyed entity intentionally does NOT
+  // match an email-less record — conservative matching avoids false merges.)
+  const r = await rq('POST', '/raise/gift', { donor: 'Bo Lindqvist', amt: 100, status: 'cleared' });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.directory?.entityName, 'Bo Lindqvist');
+  assert.equal(j.directory?.matchedExisting, true, 'matched the existing Bo Lindqvist entity');
+  const links = await allLinks();
+  assert.ok(links.find((l) => l.kind === 'gift' && l.role === 'donor'));
+});

@@ -38,6 +38,7 @@ export function extractIdentity(kind, data) {
   let name = String(data.name || '').trim();
   if (!name && (data.first || data.last)) name = [data.first, data.last].filter(Boolean).join(' ').trim();
   if (!name && data.fullName) name = String(data.fullName).trim();
+  if (!name && data.donor) name = String(data.donor).trim(); // gifts identify their person via `donor`
   if (!name) return null;
   return { type: def.type, role: def.role, name, email: cleanEmail(data.email), phone: String(data.phone || '').trim() || null };
 }
@@ -96,7 +97,7 @@ export async function resolveRecords(workspaceId, recs, createdById = null) {
   const idents = recs
     .map((r) => ({ r, ident: extractIdentity(r.kind, r.data || {}) }))
     .filter((x) => x.ident);
-  if (!idents.length) return { created: 0, linked: 0, moved: 0 };
+  if (!idents.length) return { created: 0, linked: 0, moved: 0, results: [] };
 
   const existing = await db.select().from(entities).where(and(eq(entities.workspaceId, workspaceId), isNull(entities.deletedAt)));
   const byKey = new Map(existing.filter((e) => e.matchKey).map((e) => [e.matchKey, e]));
@@ -110,6 +111,8 @@ export async function resolveRecords(workspaceId, recs, createdById = null) {
   }
 
   let created = 0, linked = 0, moved = 0;
+  const results = [];              // per-record outcome, for caller feedback
+  const createdThisCall = new Set(); // entity ids minted during THIS call
   for (const { r, ident } of idents) {
     const key = matchKeyOf(ident.type, ident.name, ident.email);
     let entity = byKey.get(key);
@@ -117,11 +120,18 @@ export async function resolveRecords(workspaceId, recs, createdById = null) {
       entity = { id: newId('ent_'), workspaceId, type: ident.type, name: ident.name, email: ident.email, phone: ident.phone, matchKey: key };
       await db.insert(entities).values({ ...entity, tagsJson: '[]', dataJson: '{}', createdById });
       byKey.set(key, entity);
+      createdThisCall.add(entity.id);
       created += 1;
     } else if ((!entity.email && ident.email) || (!entity.phone && ident.phone)) {
       await db.update(entities).set({ email: entity.email || ident.email, phone: entity.phone || ident.phone, updatedAt: new Date() }).where(eq(entities.id, entity.id));
       entity.email = entity.email || ident.email; entity.phone = entity.phone || ident.phone;
     }
+    results.push({
+      recordId: r.id,
+      entityId: entity.id,
+      entityName: entity.name,
+      matchedExisting: !createdThisCall.has(entity.id),
+    });
     const prior = linkByRecord.get(r.id);
     if (prior) {
       if (prior.entityId !== entity.id) {
@@ -135,7 +145,7 @@ export async function resolveRecords(workspaceId, recs, createdById = null) {
       linked += 1;
     } catch { /* unique (entity, record) — raced */ }
   }
-  return { created, linked, moved };
+  return { created, linked, moved, results };
 }
 
 // Drop the directory links for an entire (module, kind) bucket — used when a
