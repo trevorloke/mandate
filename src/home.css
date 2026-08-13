@@ -657,6 +657,80 @@
   .home2__grid { grid-template-columns: 1fr; }
 }
 
+/* ── DO — Today's verb-first action row ───────────────────────────────── */
+.home2__do {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.home2__do-ey {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  flex: none;
+}
+.home2__do-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.do-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-0);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+.do-pill:hover {
+  border-color: var(--ink);
+  background: var(--paper-1);
+  transform: translateY(-1px);
+}
+.do-pill:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.do-pill--primary {
+  background: var(--mark);
+  border-color: var(--mark-deep);
+  color: var(--mark-ink);
+}
+.do-pill--primary:hover {
+  background: var(--mark);
+  border-color: var(--ink);
+}
+.do-pill__kbd {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper);
+  color: var(--ink-5);
+}
+@media (max-width: 640px) {
+  .home2__do { flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+  .home2__do-row { width: 100%; }
+  .do-pill { flex: 1 1 auto; justify-content: center; }
+}
+
 /* ── The Brief — the daily digest, one card per module section ────────── */
 .home2__brief-head {
   display: flex;
@@ -974,3 +1048,80 @@
   .home2__brief-head { flex-direction: column; align-items: flex-start; gap: 8px; }
   .home2__brief-tools { flex-wrap: wrap; gap: 10px; }
 }
+
+/* ── GETTING STARTED — activation checklist above the KPI grid ────────── */
+.gstart {
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--rule);
+  padding: 12px 16px 14px;
+  margin-bottom: 14px;
+}
+.gstart__head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.gstart__ey {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+}
+.gstart__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.gstart__x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-5);
+  cursor: pointer;
+}
+.gstart__x:hover { color: var(--ink); }
+.gstart__x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.gstart__bar {
+  height: 2px;
+  margin: 8px 0 10px;
+  background: var(--rule);
+}
+.gstart__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--mark);
+  transition: width 0.2s ease;
+}
+.gstart__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.gstart__step {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.gstart__step--done { color: var(--ink-5); }
+.gstart__step--todo {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--rule);
+}
+.gstart__step--todo:hover { text-decoration-color: var(--ink); }
+.gstart__step--todo:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

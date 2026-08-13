@@ -20,7 +20,9 @@ app.get('/', requireRole('viewer'), async (c) => {
     persona = viewAs;
   }
   const sections = await buildBrief(me.workspaceId, persona);
-  return c.json({ persona, sections, generatedAt: Date.now() });
+  // buildBrief attaches `activation` as an own property of the sections array;
+  // lift it to a top-level field since JSON.stringify drops array properties.
+  return c.json({ persona, sections, activation: sections.activation, generatedAt: Date.now() });
 });
 
 export default app;

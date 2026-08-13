@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import './home.css';
 import { useNav2, modByKey, Spark2 } from './shell';
+import { TODAY_ACTIONS } from './simple-map';
 import { useAuth } from './auth/AuthContext';
 import { api } from './auth/api';
 
@@ -186,6 +187,38 @@ const KpiTile = ({ s, hero, go }) => {
   );
 };
 
+// ── Getting started — activation checklist card shown above the KPI grid ──
+const ACT_BUCKETS = { voter: 'ground.voter', gift: 'raise.gift', event: 'events.event', post: 'beacon.post' };
+
+const ActivationCard = ({ activation, go, onDismiss }) => {
+  const steps = Array.isArray(activation.steps) ? activation.steps : [];
+  const done = steps.filter(s => s.done).length;
+  const onStep = (s) => {
+    if (s.key === 'team') { go('admin'); return; }
+    const bucket = ACT_BUCKETS[s.key];
+    if (bucket) window.dispatchEvent(new CustomEvent('mandate:quickadd', { detail: { bucket } }));
+  };
+  return (
+    <div className="gstart">
+      <div className="gstart__head">
+        <span className="gstart__ey">GETTING STARTED</span>
+        <span className="gstart__count">{done} OF {steps.length}</span>
+        <button className="gstart__x" aria-label="Dismiss getting started" onClick={onDismiss}>×</button>
+      </div>
+      <div className="gstart__bar" aria-hidden="true">
+        <span className="gstart__bar-fill" style={{ width: `${steps.length ? (done / steps.length) * 100 : 0}%` }} />
+      </div>
+      <div className="gstart__steps">
+        {steps.map(s => s.done ? (
+          <span key={s.key} className="gstart__step gstart__step--done">✓ {s.label}</span>
+        ) : (
+          <button key={s.key} className="gstart__step gstart__step--todo" onClick={() => onStep(s)}>{s.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // ── Home ─────────────────────────────────────────────────────────────────
 const Home2 = () => {
   const { go } = useNav2();
@@ -204,6 +237,15 @@ const Home2 = () => {
   const [brief, setBrief] = useState(null);
   const [briefStatus, setBriefStatus] = useState('loading');
   const [viewAs, setViewAs] = useState(null);
+
+  // Getting-started card — dismissible once, remembered locally.
+  const [activationHidden, setActivationHidden] = useState(() => {
+    try { return localStorage.getItem('mdt:activation:done') === '1'; } catch { return false; }
+  });
+  const dismissActivation = () => {
+    try { localStorage.setItem('mdt:activation:done', '1'); } catch {}
+    setActivationHidden(true);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -255,10 +297,16 @@ const Home2 = () => {
   const populatedModules = counts ? Object.entries(counts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]) : [];
   const emptyModules     = counts ? Object.entries(counts).filter(([, n]) => n === 0) : [];
 
+  // Current persona — the brief payload carries it; default while loading.
+  const persona = brief?.persona || viewAs || 'manager';
+
+  // Verb-first actions for this persona (bucket entries only for enabled modules).
+  const todayActions = TODAY_ACTIONS.filter(a =>
+    a.personas.includes(persona) && (!a.bucket || isEnabled(a.bucket.split('.')[0])));
+
   // Compose the tile order: one hero first, then the rest in API order.
   let tiles = [];
   if (briefStatus === 'ok' && brief) {
-    const persona = brief.persona || viewAs || 'manager';
     const sections = brief.sections;
     const hero = pickHero(sections, persona, workspace?.daysToVote);
     if (hero.synthetic) {
@@ -292,23 +340,47 @@ const Home2 = () => {
         </div>
       </header>
 
+      {todayActions.length > 0 && (
+        <section className="home2__sect home2__do" aria-label="Quick actions">
+          <span className="home2__do-ey" aria-hidden="true">DO</span>
+          <div className="home2__do-row">
+            {todayActions.map((a, i) => (
+              <button
+                key={a.label}
+                className={'do-pill' + (i === 0 ? ' do-pill--primary' : '')}
+                onClick={() => window.dispatchEvent(a.palette
+                  ? new CustomEvent('mandate:palette')
+                  : new CustomEvent('mandate:quickadd', { detail: { bucket: a.bucket } }))}
+              >
+                {a.label}
+                {a.palette && <kbd className="do-pill__kbd" aria-hidden="true">⌘K</kbd>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {counts === null || briefStatus === 'loading' ? (
         <section className="home2__sect" aria-hidden="true">
           <div className="home2__brief-skel"><span /><span /><span /><span /></div>
         </section>
       ) : populatedModules.length === 0 ? (
         <section className="home2__sect">
-          <h2 className="home2__sect-h">Modules</h2>
-          <div className="home2__empty">
-            <p>Your workspace has no records yet.</p>
-            <p className="home2__hint">
-              Pick a module from the top nav, or open <b>Admin → Module data</b> to add records (donors, voters, posts, etc.).
-              You can also load realistic sample data for any bucket from there.
-            </p>
-            <button className="home2__cta" onClick={() => { try { localStorage.setItem('mandate2:route', 'admin'); } catch {} window.location.reload(); }}>
-              Open Admin →
-            </button>
-          </div>
+          {/* Empty workspace: the checklist IS the empty state (a path, not a wall of text). */}
+          {brief?.activation && !activationHidden ? (
+            <ActivationCard activation={brief.activation} go={go} onDismiss={dismissActivation} />
+          ) : (
+            <div className="home2__empty">
+              <p>Your workspace has no records yet.</p>
+              <p className="home2__hint">
+                Hit <b>+ Add</b> (or press <b>N</b>) to create your first record, or load
+                sample data from <b>Admin → Module data</b>.
+              </p>
+              <button className="home2__cta" onClick={() => { try { localStorage.setItem('mandate2:route', 'admin'); } catch {} window.location.reload(); }}>
+                Open Admin →
+              </button>
+            </div>
+          )}
         </section>
       ) : briefStatus === 'ok' ? (
         <section className="home2__sect home2__brief">
@@ -338,6 +410,9 @@ const Home2 = () => {
               )}
             </div>
           </div>
+          {brief?.activation && !brief.activation.complete && !activationHidden && (
+            <ActivationCard activation={brief.activation} go={go} onDismiss={dismissActivation} />
+          )}
           <div className="kpi-grid">
             {tiles.map(({ s, hero }) => (
               <KpiTile key={(s.key || s.route || s.label) + (hero ? '@hero' : '')} s={s} hero={hero} go={go} />

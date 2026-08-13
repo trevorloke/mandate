@@ -1,0 +1,182 @@
+/* ModuleGuide — slim orientation strip above module pages.
+   Paper strip, hairline bottom rule, mono idiom; ≈44–52px tall. */
+
+.mg-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 44px;
+  padding: var(--s-2) var(--s-4);
+  background: var(--paper-0);
+  border-bottom: var(--border-hair);
+}
+
+/* ── Left: identity */
+.mg-id {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.mg-dot {
+  align-self: center;
+  flex: none;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+}
+.mg-name {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.mg-desc {
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  color: var(--text-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Middle: first actions */
+.mg-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: none;
+  flex-wrap: wrap;
+}
+.mg-btn {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border: var(--border);
+  border-radius: var(--r-ctrl);
+  background: var(--paper);
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.mg-btn:hover {
+  border-color: var(--rule-2);
+  background: var(--paper-1);
+  color: var(--text-1);
+}
+
+/* ── Right: connections */
+.mg-conns {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: none;
+}
+.mg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: var(--text-4);
+  background: var(--paper-1);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mg-chip-glyph { flex: none; color: var(--text-4); }
+.mg-chip--more { cursor: default; }
+
+/* ── SIMPLE | FULL segmented control (view mode) */
+.mg-seg {
+  flex: none;
+  display: inline-flex;
+  align-items: stretch;
+  height: 24px;
+  border: var(--border-hair);
+  border-radius: var(--r-ctrl);
+  background: var(--paper-0);
+  overflow: hidden;
+}
+.mg-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  background: transparent;
+  box-shadow: inset 0 -2px 0 transparent;
+  white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.mg-seg-btn + .mg-seg-btn { border-left: var(--border-hair); }
+.mg-seg-btn:hover { color: var(--text-2); background: var(--paper-1); }
+.mg-seg-btn.is-active {
+  color: var(--text-1);
+  background: var(--mark-soft);
+  box-shadow: inset 0 -2px 0 var(--mark);
+}
+
+/* ── Dismiss */
+.mg-close {
+  flex: none;
+  width: 20px; height: 20px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-4);
+  border-radius: var(--r-ctrl);
+}
+.mg-close:hover { color: var(--text-1); background: var(--paper-1); }
+
+/* ── Collapsed '?' pill */
+.mg-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  margin: var(--s-1) var(--s-4) 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-4);
+  border: var(--border-hair);
+  border-radius: var(--r-pill);
+  background: var(--paper-0);
+}
+.mg-pill:hover { color: var(--text-1); border-color: var(--rule); }
+
+/* Collapsed row: `? · SIMPLE|FULL` — keeps the view toggle reachable when the
+   guide strip is dismissed. */
+.mg-pillrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-1) var(--s-4) 0;
+}
+.mg-pillrow .mg-pill { margin: 0; }
+.mg-pillrow-sep { color: var(--text-4); font-size: 10px; }
+
+/* ── Responsive: connections hide first, then actions wrap */
+@media (max-width: 980px) {
+  .mg-conns { display: none; }
+}
+@media (max-width: 640px) {
+  .mg-strip { flex-wrap: wrap; min-height: 0; }
+  .mg-actions { flex: 1 1 100%; order: 3; }
+  .mg-close { order: 2; margin-left: auto; }
+}

@@ -5,23 +5,31 @@ import { useLiveRecords } from './auth/useLiveRecords';
 import { Home2 } from './home';
 import { Conductor } from './conductor';
 import CmdPalette from './CmdPalette';
+import ModuleGuide from './ModuleGuide';
+import SimpleModule from './SimpleModule';
+import { SIMPLE_BUCKETS } from './simple-map';
 import { DossierDrawer } from './fabric';
-import { Ground } from './ground';
-import { People } from './people';
-import { Beacon } from './beacon';
-import { Raise2 } from './raise';
-import { Ledger2 } from './ledger';
-import { Coalition2 } from './coalition';
-import { Civic2 } from './civic';
-import { Opposition2 } from './opp';
-import { Site2 } from './site';
-import { Events2 } from './events';
-import { Command } from './command';
-import { Tide } from './tide';
-import { Margin } from './margin';
-import { Directory } from './directory';
-import { Academy } from './academy';
-import Admin from './admin/Admin';
+
+// Speed is a feature: module pages are code-split so first paint ships only
+// the shell + Today. Each module's code (jsx + css + data) loads on first
+// visit and is cached thereafter.
+const lazyMod = (load, name) => React.lazy(() => load().then((m) => ({ default: m[name] })));
+const Ground     = lazyMod(() => import('./ground'), 'Ground');
+const People     = lazyMod(() => import('./people'), 'People');
+const Beacon     = lazyMod(() => import('./beacon'), 'Beacon');
+const Raise2     = lazyMod(() => import('./raise'), 'Raise2');
+const Ledger2    = lazyMod(() => import('./ledger'), 'Ledger2');
+const Coalition2 = lazyMod(() => import('./coalition'), 'Coalition2');
+const Civic2     = lazyMod(() => import('./civic'), 'Civic2');
+const Opposition2 = lazyMod(() => import('./opp'), 'Opposition2');
+const Site2      = lazyMod(() => import('./site'), 'Site2');
+const Events2    = lazyMod(() => import('./events'), 'Events2');
+const Command    = lazyMod(() => import('./command'), 'Command');
+const Tide       = lazyMod(() => import('./tide'), 'Tide');
+const Margin     = lazyMod(() => import('./margin'), 'Margin');
+const Directory  = lazyMod(() => import('./directory'), 'Directory');
+const Academy    = lazyMod(() => import('./academy'), 'Academy');
+const Admin      = React.lazy(() => import('./admin/Admin'));
 import OnboardingWizard from './admin/OnboardingWizard';
 import PublicForm from './PublicForm';
 import { useAuth } from './auth/AuthContext';
@@ -33,6 +41,7 @@ import AcceptInvite from './auth/AcceptInvite';
 import ResetPassword from './auth/ResetPassword';
 import UserMenu from './shell/UserMenu';
 import NotificationBell from './shell/NotificationBell';
+import ShortcutsOverlay from './ShortcutsOverlay';
 
 const PAGE_MAP2 = {
   ground:     () => <Ground />,
@@ -52,6 +61,14 @@ const PAGE_MAP2 = {
   margin:     () => <Margin />,
   directory:  () => <Directory />,
   admin:      () => <Admin />,
+};
+
+// Per-module view mode ("Simple by default, Pro on demand") — persisted per
+// module in localStorage; only modules with a simple view get a mode at all.
+const viewModeKey = (route) => `mdt:view:${route}`;
+const readViewMode = (route) => {
+  try { return localStorage.getItem(viewModeKey(route)) === 'pro' ? 'pro' : 'simple'; }
+  catch { return 'simple'; }
 };
 
 export default function App2() {
@@ -97,8 +114,12 @@ export default function App2() {
     } catch { return 'home'; }
   })();
   const [route, setRoute] = useState(initial);
+  // Tiny bump so toggling a module's view mode (stored in localStorage)
+  // re-renders without a reload.
+  const [, setViewBump] = useState(0);
   const [conductorOpen, setConductorOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { records: conductorAsks } = useLiveRecords('conductor', 'ask', []);
   const conductorNowCount = conductorAsks.filter(c => c.window === 'NOW').length;
 
@@ -121,14 +142,33 @@ export default function App2() {
     }
   }, []);
 
+  // Global palette hook: anything in the app can open the command palette by
+  // dispatching a 'mandate:palette' CustomEvent on window.
   useEffect(() => {
+    const onPalette = () => setCmdOpen(true);
+    window.addEventListener('mandate:palette', onPalette);
+    return () => window.removeEventListener('mandate:palette', onPalette);
+  }, []);
+
+  useEffect(() => {
+    const typing = (e) => {
+      const t = e.target;
+      return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    };
     const onKey = (e) => {
-      if (e.key === 'Escape') { setConductorOpen(false); }
+      if (e.key === 'Escape') { setConductorOpen(false); setShortcutsOpen(false); }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault(); setConductorOpen(v => !v);
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault(); setCmdOpen(v => !v);
+      }
+      // Bare-key shortcuts only when not typing and no modifier held.
+      if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
+      if (e.key === '?') { e.preventDefault(); setShortcutsOpen(v => !v); }
+      if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('mandate:quickadd', { detail: {} }));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -205,6 +245,14 @@ export default function App2() {
   // If user navigated to a disabled module, fall back to home
   const effectiveRoute = (route !== 'home' && route !== 'admin' && !isModuleEnabled(route)) ? 'home' : route;
   const Page = PAGE_MAP2[effectiveRoute];
+
+  // Simple/Pro view mode: only for non-home, non-admin modules with a simple view.
+  const hasSimpleView = effectiveRoute !== 'home' && effectiveRoute !== 'admin' && !!SIMPLE_BUCKETS?.[effectiveRoute];
+  const viewMode = hasSimpleView ? readViewMode(effectiveRoute) : 'pro';
+  const onViewMode = (next) => {
+    try { localStorage.setItem(viewModeKey(effectiveRoute), next === 'pro' ? 'pro' : 'simple'); } catch { /* ignore */ }
+    setViewBump(v => v + 1);
+  };
   return (
     <Nav2Ctx.Provider value={{ route: effectiveRoute, go }}>
       <Shell
@@ -219,10 +267,32 @@ export default function App2() {
         notifications={<NotificationBell onNav={(link) => { if (link?.startsWith('/admin')) go('admin'); }} />}
         enabledModules={enabledModules}
       >
-        {effectiveRoute === 'home' ? <Home2 /> : (Page ? <Page /> : <Home2 />)}
+        <React.Suspense fallback={<div className="page-loading" aria-busy="true" />}>
+          {effectiveRoute === 'home'
+            ? <Home2 />
+            : (Page
+                ? (hasSimpleView
+                    ? <>
+                        <ModuleGuide route={effectiveRoute} mode={viewMode} onMode={onViewMode} />
+                        {viewMode === 'simple' ? <SimpleModule route={effectiveRoute} /> : <Page />}
+                      </>
+                    : <><ModuleGuide route={effectiveRoute} /><Page /></>)
+                : <Home2 />)}
+        </React.Suspense>
       </Shell>
       <Conductor open={conductorOpen} onClose={() => setConductorOpen(false)} />
-      <CmdPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onGo={(k) => { setCmdOpen(false); go(k); }} />
+      <CmdPalette
+        open={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        onGo={(k) => { setCmdOpen(false); go(k); }}
+        route={effectiveRoute}
+        hasSimpleView={hasSimpleView}
+        viewMode={viewMode}
+        onViewMode={onViewMode}
+        canWrite={user.role !== 'viewer'}
+        isAdmin={user.role === 'admin' || user.role === 'super_admin'}
+      />
+      <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <DossierDrawer />
     </Nav2Ctx.Provider>
   );

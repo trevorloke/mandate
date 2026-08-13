@@ -14,7 +14,7 @@
 // lists and attention:false — buildBrief never throws.
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { moduleData, entities, entityLinks } from '../db/schema.js';
+import { moduleData, entities, entityLinks, users } from '../db/schema.js';
 import { metricsForWorkspace } from './metrics-compute.js';
 import { buildContestConfig } from './margin/build-contest.js';
 import { listTopics } from './tide/service.js';
@@ -308,7 +308,7 @@ export async function buildBrief(workspaceId, persona = 'manager') {
   };
 
   const shape = SHAPES[persona] || SHAPES.manager;
-  return shape.map(([metaKey, build, kind]) => {
+  const sections = shape.map(([metaKey, build, kind]) => {
     const meta = META[metaKey];
     try {
       const s = build();
@@ -317,4 +317,25 @@ export async function buildBrief(workspaceId, persona = 'manager') {
       return { ...meta, ...ZERO[kind], attention: false };
     }
   });
+
+  // Activation checklist — managers only. The five first actions that predict
+  // retention; carried on the brief so Home can engineer the path to them.
+  if (persona === 'manager') {
+    let userCount = 0;
+    try {
+      const rows = await db.select({ id: users.id }).from(users)
+        .where(and(eq(users.workspaceId, workspaceId), eq(users.active, true)));
+      userCount = rows.length;
+    } catch { /* zeroed */ }
+    const steps = [
+      { key: 'voter', label: 'Add your first voter', done: g('ground.voter').length > 0 },
+      { key: 'gift', label: 'Log your first gift', done: g('raise.gift').length > 0 },
+      { key: 'event', label: 'Put an event on the calendar', done: g('events.event').length > 0 },
+      { key: 'post', label: 'Draft a social post', done: g('beacon.post').length > 0 },
+      { key: 'team', label: 'Invite a teammate', done: userCount > 1 },
+    ];
+    sections.activation = { steps, complete: steps.every((s) => s.done) };
+  }
+
+  return sections;
 }

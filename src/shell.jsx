@@ -1,9 +1,10 @@
 // Mandate 2.0 — Shell primitives
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './shell.css';
 import { useT } from './i18n';
 import QuickAdd from './QuickAdd';
+import { NAV_GROUPS, MODULE_META, plainName } from './simple-map';
 
 // ── Module registry (ink/paper, per-module chromatic territory)
 const MOD2 = [
@@ -53,12 +54,31 @@ const useNav2 = () => React.useContext(Nav2Ctx);
 const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conductorCount = 8, userMenu, notifications, enabledModules, children }) => {
   const isEnabled = (k) => !enabledModules || enabledModules[k] !== false;
   const active = route === 'home' ? null : modByKey(route);
+  const crumb = route === 'home' ? null : MODULE_META[route];
   const t = useT();
   const clock = useClock();
   const beats = useHeartbeat();
   const stripStyle = active
     ? { '--strip-bg': active.tint, '--mod-accent': active.ac }
     : {};
+
+  // Grouped nav: one open panel at a time; Esc / outside-click closes.
+  const [openGroup, setOpenGroup] = useState(null);
+  const navRef = useRef(null);
+  useEffect(() => {
+    if (!openGroup) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setOpenGroup(null); };
+    const onDown = (e) => {
+      if (navRef.current && !navRef.current.contains(e.target)) setOpenGroup(null);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [openGroup]);
+  const go = (k) => { setOpenGroup(null); onGo(k); };
 
   return (
     <div className="mdt">
@@ -75,28 +95,52 @@ const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conduc
           </button>
         </div>
 
-        <div className="mdt__nav-wrap">
-          <nav className="mdt__nav">
+        <div className={'mdt__nav-wrap' + (openGroup ? ' is-open' : '')}>
+          <nav className="mdt__nav" ref={navRef}>
           <button
             className={'mdt__tab' + (route==='home' ? ' is-active' : '')}
-            onClick={() => onGo('home')}>
-            <span className="mdt__tab-dot" />{t('shell.home')}
+            onClick={() => go('home')}>
+            <span className="mdt__tab-dot" />Today
           </button>
           <span className="mdt__nav-sep" />
-          {MOD2.filter(m => isEnabled(m.k)).map(m => (
-            <button
-              key={m.k}
-              className={'mdt__tab' + (route===m.k ? ' is-active' : '')}
-              onClick={() => onGo(m.k)}>
-              {m.n}
-            </button>
-          ))}
-          <span className="mdt__nav-sep" />
-          {isEnabled('command') && <button
-            className={'mdt__tab mdt__tab--peer' + (route==='command' ? ' is-active' : '')}
-            onClick={() => onGo('command')}>
-            <span className="live-dot" />{t('shell.command')}
-          </button>}
+          {NAV_GROUPS.map(g => {
+            const mods = g.modules.filter(isEnabled);
+            if (!mods.length) return null;
+            const open = openGroup === g.key;
+            const single = mods.length === 1;
+            return (
+              <div key={g.key} className="mdt__group">
+                <button
+                  className={'mdt__tab' + (mods.includes(route) ? ' is-active' : '') + (open ? ' is-open' : '')}
+                  aria-haspopup={single ? undefined : 'menu'}
+                  aria-expanded={single ? undefined : open}
+                  onClick={() => (single ? go(mods[0]) : setOpenGroup(open ? null : g.key))}>
+                  {g.label}
+                  {!single && <span className="mdt__tab-caret">▾</span>}
+                </button>
+                {open && !single && (
+                  <div className="mdt__menu" role="menu">
+                    {mods.map(k => {
+                      const meta = MODULE_META[k] || {};
+                      return (
+                        <button
+                          key={k}
+                          role="menuitem"
+                          className={'mdt__menu-row' + (route===k ? ' is-current' : '')}
+                          onClick={() => go(k)}>
+                          <span className="mdt__menu-name">
+                            {meta.plain || k}
+                            <span className="mdt__menu-code">{meta.code || k}</span>
+                          </span>
+                          <span className="mdt__menu-desc">{meta.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           </nav>
         </div>
 
@@ -119,12 +163,12 @@ const Shell = ({ route, onGo, workspace, user = 'MR', onCmd, onConductor, conduc
 
       <div className="mdt__strip" style={stripStyle}>
         <div className="mdt__strip-crumb">
-          <span className="mod-tag">{active ? active.tag : 'H'}</span>
+          <span className="mod-tag">{crumb ? crumb.code : 'Home'}</span>
           <span className="sep">/</span>
-          <span>{active ? active.n : 'Home'}</span>
-          {active && <>
+          <span>{crumb ? plainName(route) : 'Today'}</span>
+          {crumb && <>
             <span className="sep">·</span>
-            <span style={{ color:'var(--text-3)', fontFamily:'var(--font-ui)', fontSize:12 }}>{active.s}</span>
+            <span style={{ color:'var(--text-3)', fontFamily:'var(--font-ui)', fontSize:12 }}>{crumb.desc}</span>
           </>}
         </div>
         <div className="mdt__strip-middle">
