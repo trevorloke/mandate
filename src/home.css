@@ -657,6 +657,80 @@
   .home2__grid { grid-template-columns: 1fr; }
 }
 
+/* ── DO — Today's verb-first action row ───────────────────────────────── */
+.home2__do {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.home2__do-ey {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  flex: none;
+}
+.home2__do-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.do-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-0);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+.do-pill:hover {
+  border-color: var(--ink);
+  background: var(--paper-1);
+  transform: translateY(-1px);
+}
+.do-pill:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.do-pill--primary {
+  background: var(--mark);
+  border-color: var(--mark-deep);
+  color: var(--mark-ink);
+}
+.do-pill--primary:hover {
+  background: var(--mark);
+  border-color: var(--ink);
+}
+.do-pill__kbd {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper);
+  color: var(--ink-5);
+}
+@media (max-width: 640px) {
+  .home2__do { flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+  .home2__do-row { width: 100%; }
+  .do-pill { flex: 1 1 auto; justify-content: center; }
+}
+
 /* ── The Brief — the daily digest, one card per module section ────────── */
 .home2__brief-head {
   display: flex;

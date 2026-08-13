@@ -29,6 +29,8 @@
   scrollbar-width: none;
 }
 .mdt__nav-wrap::-webkit-scrollbar { display: none; }
+/* While a group panel is open, let it escape the scroll clip */
+.mdt__nav-wrap.is-open { overflow: visible; }
 
 .mdt__brand {
   display: inline-flex; align-items: center; gap: 10px;
@@ -109,14 +111,67 @@
   width: 1px; height: 18px; background: var(--ink-2); margin: 0 6px;
 }
 
-/* Peer tabs (Command / Field) — set apart */
-.mdt__tab--peer {
-  font-size: 12px; color: var(--ink-6);
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+/* Grouped nav — a group is a tab that may carry a panel */
+.mdt__group {
+  position: relative;
+  height: 100%;
+  display: inline-flex; align-items: center;
 }
-.mdt__tab--peer .live-dot { width: 5px; height: 5px; background: #10b981; }
+.mdt__tab-caret { font-size: 8px; opacity: 0.4; transform: translateY(1px); }
+.mdt__tab.is-open { color: var(--paper); }
+.mdt__tab.is-open .mdt__tab-caret { opacity: 0.9; }
+
+/* Group panel — ink-dark, hairlined, hanging off the bar */
+.mdt__menu {
+  position: absolute;
+  top: 100%; left: 0;
+  min-width: 268px;
+  max-width: 320px;
+  background: var(--ink);
+  border: 1px solid var(--ink-2);
+  border-top: 2px solid var(--mark);
+  box-shadow: 0 16px 40px rgba(12, 12, 12, 0.35);
+  padding: 4px 0 6px;
+  z-index: 90;
+}
+.mdt__menu-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 14px 10px;
+  white-space: normal;
+}
+.mdt__menu-row + .mdt__menu-row { border-top: 1px solid var(--ink-1); }
+.mdt__menu-row:hover { background: var(--ink-1); }
+.mdt__menu-row.is-current { box-shadow: inset 2px 0 0 var(--mark); }
+.mdt__menu-name {
+  display: flex; align-items: baseline; gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  color: var(--paper);
+}
+.mdt__menu-row.is-current .mdt__menu-name { color: var(--mark); }
+.mdt__menu-code {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-6);
+  border: 1px solid var(--ink-2);
+  padding: 1px 5px;
+  border-radius: 2px;
+  flex: none;
+}
+.mdt__menu-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Right side — heartbeat, cmd-K, user */
 .mdt__right { display: inline-flex; align-items: center; gap: 10px; flex: none; }

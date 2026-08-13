@@ -1,7 +1,7 @@
 // Global "Quick add" — create a record in any schema-backed bucket from the
 // header, without a trip through Admin → Data. Reuses the admin TypedForm and
 // the same idPrefix seeding convention as AdminData.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SCHEMAS } from './admin/schemas';
 import TypedForm from './admin/TypedForm';
 import { api } from './auth/api';
@@ -50,23 +50,32 @@ export default function QuickAdd({ route, enabledModules }) {
 
   const active = buckets.find(b => b.key === bucket) || buckets[0];
 
-  const defaultBucket = () => {
-    const inRoute = buckets.find(b => b.module === route);
-    if (inRoute) return inRoute.key;
-    if (buckets.some(b => b.key === 'raise.donor')) return 'raise.donor';
-    return buckets[0]?.key;
-  };
-
-  const openModal = () => {
-    const key = defaultBucket();
+  // Open the modal — on `preferred` (a `${module}.${kind}` bucket key) when it
+  // is a real, enabled schema bucket; otherwise on the route/default bucket.
+  const openModal = useCallback((preferred) => {
+    const valid = typeof preferred === 'string'
+      && !!SCHEMAS[preferred]
+      && buckets.some(b => b.key === preferred);
+    const key = valid
+      ? preferred
+      : buckets.find(b => b.module === route)?.key
+        || (buckets.some(b => b.key === 'raise.donor') ? 'raise.donor' : buckets[0]?.key);
     if (!key) return;
     setBucket(key);
     setData(seedData(SCHEMAS[key]));
     setErr('');
     setSaved(null);
     setOpen(true);
-  };
+  }, [buckets, route]);
   const close = () => setOpen(false);
+
+  // Global open: anywhere in the app can dispatch
+  // `new CustomEvent('mandate:quickadd', { detail: { bucket } })`.
+  useEffect(() => {
+    const onQuickAdd = (e) => openModal(e?.detail?.bucket);
+    window.addEventListener('mandate:quickadd', onQuickAdd);
+    return () => window.removeEventListener('mandate:quickadd', onQuickAdd);
+  }, [openModal]);
 
   const pickBucket = (key) => {
     setBucket(key);
@@ -116,7 +125,7 @@ export default function QuickAdd({ route, enabledModules }) {
 
   return (
     <>
-      <button className="qa__trigger" onClick={openModal} title="Quick add a record">
+      <button className="qa__trigger" onClick={() => openModal()} title="Quick add a record">
         <span className="qa__trigger-plus">+</span>
         <span className="qa__trigger-label">Add</span>
       </button>

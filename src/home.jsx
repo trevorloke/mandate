@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import './home.css';
 import { useNav2, modByKey, Spark2 } from './shell';
+import { TODAY_ACTIONS } from './simple-map';
 import { useAuth } from './auth/AuthContext';
 import { api } from './auth/api';
 
@@ -255,10 +256,16 @@ const Home2 = () => {
   const populatedModules = counts ? Object.entries(counts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]) : [];
   const emptyModules     = counts ? Object.entries(counts).filter(([, n]) => n === 0) : [];
 
+  // Current persona — the brief payload carries it; default while loading.
+  const persona = brief?.persona || viewAs || 'manager';
+
+  // Verb-first actions for this persona (bucket entries only for enabled modules).
+  const todayActions = TODAY_ACTIONS.filter(a =>
+    a.personas.includes(persona) && (!a.bucket || isEnabled(a.bucket.split('.')[0])));
+
   // Compose the tile order: one hero first, then the rest in API order.
   let tiles = [];
   if (briefStatus === 'ok' && brief) {
-    const persona = brief.persona || viewAs || 'manager';
     const sections = brief.sections;
     const hero = pickHero(sections, persona, workspace?.daysToVote);
     if (hero.synthetic) {
@@ -291,6 +298,26 @@ const Home2 = () => {
           </aside>
         </div>
       </header>
+
+      {todayActions.length > 0 && (
+        <section className="home2__sect home2__do" aria-label="Quick actions">
+          <span className="home2__do-ey" aria-hidden="true">DO</span>
+          <div className="home2__do-row">
+            {todayActions.map((a, i) => (
+              <button
+                key={a.label}
+                className={'do-pill' + (i === 0 ? ' do-pill--primary' : '')}
+                onClick={() => window.dispatchEvent(a.palette
+                  ? new CustomEvent('mandate:palette')
+                  : new CustomEvent('mandate:quickadd', { detail: { bucket: a.bucket } }))}
+              >
+                {a.label}
+                {a.palette && <kbd className="do-pill__kbd" aria-hidden="true">⌘K</kbd>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {counts === null || briefStatus === 'loading' ? (
         <section className="home2__sect" aria-hidden="true">
