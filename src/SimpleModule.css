@@ -291,12 +291,6 @@
   color: var(--paper-0);
 }
 .sm__btn--primary:hover { background: var(--ink-2); color: var(--paper-0); }
-.sm__btn--danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: var(--paper-0);
-}
-.sm__btn--danger:hover { color: var(--paper-0); border-color: var(--danger); }
 .sm__btn--danger-ghost { color: var(--danger); margin-left: auto; }
 .sm__btn--danger-ghost:hover { color: var(--danger); border-color: var(--danger); }
 .sm__btn:disabled { opacity: 0.5; cursor: default; }
@@ -309,6 +303,51 @@
   border-radius: var(--r-ctrl);
   padding: 7px 10px;
   margin-bottom: var(--s-3);
+}
+
+/* ── Undo toast (optimistic delete) */
+.sm__toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--s-5);
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 9px 6px 9px 14px;
+  background: var(--paper-0);
+  border: var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-2);
+  overflow: hidden; /* clips the countdown rule */
+  white-space: nowrap;
+}
+.sm__toast-msg {
+  font-size: 13px;
+  color: var(--text-1);
+}
+.sm__toast-undo {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  color: var(--text-2);
+  border-radius: var(--r-ctrl);
+}
+.sm__toast-undo:hover { color: var(--text-1); background: var(--paper-1); }
+.sm__toast-run {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--rule-2);
+  animation: sm-toast-run 7s linear forwards;
+}
+@keyframes sm-toast-run {
+  from { width: 100%; }
+  to   { width: 0; }
 }
 
 /* ── Responsive */

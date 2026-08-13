@@ -212,3 +212,51 @@ test('unauthenticated request gets 401', async () => {
   const r = await briefApp.request('/');
   assert.equal(r.status, 401);
 });
+
+// ── activation checklist (manager only) ─────────────────────────────────
+
+test('manager brief carries a 5-step activation checklist', async () => {
+  const brief = await buildBrief('ws_empty', 'manager');
+  const act = brief.activation;
+  assert.ok(act, 'activation rides on the manager brief');
+  assert.deepEqual(act.steps.map((s) => s.key), ['voter', 'gift', 'event', 'post', 'team']);
+  for (const s of act.steps) {
+    assert.equal(typeof s.label, 'string');
+    assert.equal(s.done, false, `empty workspace: ${s.key} undone`);
+  }
+  assert.equal(act.complete, false);
+});
+
+test('steps flip done as records land; complete once all five are', async () => {
+  const step = (b, k) => b.activation.steps.find((s) => s.key === k);
+  const before = await buildBrief('ws_main', 'manager');
+  assert.equal(step(before, 'gift').done, true, 'gifts seeded earlier');
+  assert.equal(step(before, 'event').done, true);
+  assert.equal(step(before, 'team').done, true, '3 active users');
+  assert.equal(step(before, 'voter').done, false);
+  assert.equal(step(before, 'post').done, false);
+  assert.equal(before.activation.complete, false);
+
+  await seed('ground', 'voter', { name: 'Ada Byron' });
+  await seed('beacon', 'post', { headline: 'Kickoff', status: 'DRAFT' });
+  const after = await buildBrief('ws_main', 'manager');
+  assert.equal(step(after, 'voter').done, true);
+  assert.equal(step(after, 'post').done, true);
+  assert.equal(after.activation.complete, true);
+});
+
+test('team step counts only active users', async () => {
+  await db.insert(schema.workspaces).values({ id: 'ws_act', name: 'Act', tz: 'PT', plan: 'free' });
+  await db.insert(schema.users).values([
+    { id: 'u_a1', email: 'a1@t.com', passwordHash: 'x', name: 'A1', role: 'admin', workspaceId: 'ws_act' },
+    { id: 'u_a2', email: 'a2@t.com', passwordHash: 'x', name: 'A2', role: 'editor', workspaceId: 'ws_act', active: false },
+  ]);
+  const act = (await buildBrief('ws_act', 'manager')).activation;
+  assert.equal(act.steps.find((s) => s.key === 'team').done, false, 'deactivated teammate does not count');
+});
+
+test('staff and volunteer briefs carry NO activation field', async () => {
+  assert.equal((await buildBrief('ws_main', 'staff')).activation, undefined);
+  assert.equal((await buildBrief('ws_main', 'volunteer')).activation, undefined);
+  assert.equal((await buildBrief('ws_main', 'candidate')).activation, undefined);
+});

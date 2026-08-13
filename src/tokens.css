@@ -147,3 +147,15 @@ input, textarea, select { font: inherit; color: inherit; }
   70%  { box-shadow: 0 0 0 6px rgba(225,29,72,0.0); }
   100% { box-shadow: 0 0 0 0   rgba(225,29,72,0.0); }
 }
+
+/* Route-chunk loading fallback — a quiet shimmer bar, no text flash */
+.page-loading {
+  height: 2px; margin: 0 24px; border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--text-3), transparent);
+  background-size: 200% 100%;
+  animation: page-loading-sweep 1s linear infinite;
+}
+@keyframes page-loading-sweep {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}

@@ -2,7 +2,7 @@
 // multi-tab pro app by default. Bucket chips → searchable table → detail
 // overlay with inline edit/delete for editors. Quick Add handles creation via
 // the global `mandate:quickadd` CustomEvent.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './auth/api';
 import { useAuth } from './auth/AuthContext';
 import { invalidateLive } from './auth/useLiveRecords';
@@ -56,6 +56,18 @@ export default function SimpleModule({ route }) {
   const [q, setQ] = useState('');
   const [limit, setLimit] = useState(ROW_STEP);
   const [detail, setDetail] = useState(null); // record row or null
+  const [toast, setToast] = useState(null);   // {mod, kind, id, label, seq} or null
+  const toastTimer = useRef(null);
+
+  const dismissToast = useCallback(() => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = null;
+    setToast(null);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
 
   // One listData per bucket, cached per mount; counts come from the same load.
   const loadAll = useCallback(async () => {
@@ -94,6 +106,7 @@ export default function SimpleModule({ route }) {
     setQ('');
     setLimit(ROW_STEP);
     setDetail(null);
+    dismissToast();
   }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bucket = buckets?.find(b => b.kind === active) || buckets?.[0];
@@ -147,6 +160,33 @@ export default function SimpleModule({ route }) {
 
   const closeDetail = () => {
     setDetail(null);
+    loadAll();
+  };
+
+  // Optimistic delete: record is already gone server-side; the toast only
+  // offers a 7s window to restore it. A new delete replaces the toast.
+  const handleDeleted = (rec) => {
+    setDetail(null);
+    loadAll();
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({
+      mod: route,
+      kind: bucket.kind,
+      id: rec.id,
+      label: singularLabel(schema, bucket.label),
+      seq: Date.now(), // remounts the toast so the countdown restarts
+    });
+    toastTimer.current = setTimeout(() => setToast(null), 7000);
+  };
+
+  const undoDelete = async () => {
+    const t = toast;
+    if (!t) return;
+    dismissToast();
+    try {
+      await api.restoreData(t.mod, t.kind, t.id);
+      invalidateLive(t.mod, t.kind);
+    } catch { /* already purged or offline — refresh shows the truth */ }
     loadAll();
   };
 
@@ -244,15 +284,23 @@ export default function SimpleModule({ route }) {
           record={detail}
           canEdit={canEdit}
           onClose={closeDetail}
+          onDeleted={handleDeleted}
         />
+      )}
+
+      {toast && (
+        <div className="sm__toast" key={toast.seq} role="status">
+          <span className="sm__toast-msg">{toast.label} deleted</span>
+          <button className="sm__toast-undo" onClick={undoDelete}>Undo</button>
+          <span className="sm__toast-run" aria-hidden="true" />
+        </div>
       )}
     </div>
   );
 }
 
-function DetailOverlay({ route, kind, schema, singular, record, canEdit, onClose }) {
+function DetailOverlay({ route, kind, schema, singular, record, canEdit, onClose, onDeleted }) {
   const [mode, setMode] = useState('view'); // view | edit
-  const [confirming, setConfirming] = useState(false);
   const [draft, setDraft] = useState(record.data || {});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -299,7 +347,7 @@ function DetailOverlay({ route, kind, schema, singular, record, canEdit, onClose
     try {
       await api.deleteData(route, kind, record.id);
       invalidateLive(route, kind);
-      onClose();
+      onDeleted(record);
     } catch (e) {
       setErr(e.message || 'Delete failed.');
       setBusy(false);
@@ -350,20 +398,9 @@ function DetailOverlay({ route, kind, schema, singular, record, canEdit, onClose
                     Edit
                   </button>
                 )}
-                {confirming ? (
-                  <>
-                    <button className="sm__btn sm__btn--danger" disabled={busy} onClick={remove}>
-                      {busy ? 'Deleting…' : 'Confirm delete'}
-                    </button>
-                    <button className="sm__btn" disabled={busy} onClick={() => setConfirming(false)}>
-                      Keep
-                    </button>
-                  </>
-                ) : (
-                  <button className="sm__btn sm__btn--danger-ghost" onClick={() => setConfirming(true)}>
-                    Delete
-                  </button>
-                )}
+                <button className="sm__btn sm__btn--danger-ghost" disabled={busy} onClick={remove}>
+                  {busy ? 'Deleting…' : 'Delete'}
+                </button>
               </div>
             )}
           </>

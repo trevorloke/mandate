@@ -69,6 +69,13 @@
   font-family: var(--font-serif); font-size: 14px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Action rows: verbs get a quiet arrow so "do" reads apart from "go". */
+.cp__row--act .cp__row-label::before {
+  content: '→';
+  margin-right: 8px;
+  color: var(--text-3);
+  font-family: var(--font-mono); font-size: 11px;
+}
 .cp__row-sub {
   font-family: var(--font-mono); font-size: 10px;
   letter-spacing: 0.1em; text-transform: uppercase;
