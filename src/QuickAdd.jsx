@@ -36,7 +36,7 @@ export default function QuickAdd({ route, enabledModules }) {
   const [data, setData] = useState({});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(null); // createData response when saved, else null
 
   // Every schema bucket whose module is enabled in this workspace.
   const buckets = useMemo(() => (
@@ -63,7 +63,7 @@ export default function QuickAdd({ route, enabledModules }) {
     setBucket(key);
     setData(seedData(SCHEMAS[key]));
     setErr('');
-    setSaved(false);
+    setSaved(null);
     setOpen(true);
   };
   const close = () => setOpen(false);
@@ -72,7 +72,7 @@ export default function QuickAdd({ route, enabledModules }) {
     setBucket(key);
     setData(seedData(SCHEMAS[key]));
     setErr('');
-    setSaved(false);
+    setSaved(null);
   };
 
   // Escape closes the modal.
@@ -98,9 +98,9 @@ export default function QuickAdd({ route, enabledModules }) {
     }
     setBusy(true);
     try {
-      await api.createData(active.module, active.kind, data);
+      const res = await api.createData(active.module, active.kind, data);
       invalidateLive(active.module, active.kind);
-      setSaved(true);
+      setSaved(res || {});
     } catch (ex) {
       setErr(ex.message || 'Save failed.');
     } finally {
@@ -111,7 +111,7 @@ export default function QuickAdd({ route, enabledModules }) {
   const addAnother = () => {
     setData(seedData(active.schema));
     setErr('');
-    setSaved(false);
+    setSaved(null);
   };
 
   return (
@@ -157,6 +157,16 @@ export default function QuickAdd({ route, enabledModules }) {
                 <div className="qa__done-text">
                   {active?.schema.label} saved to {moduleName(active?.module)}.
                 </div>
+                {saved.directory && (
+                  <div className="qa__done-dir">
+                    {saved.directory.matchedExisting
+                      ? `Linked to existing profile — ${saved.directory.entityName}`
+                      : `New Directory profile — ${saved.directory.entityName}`}
+                  </div>
+                )}
+                {saved.compliance?.flagged && (
+                  <div className="qa__done-flag">{saved.compliance.reason}</div>
+                )}
                 <div className="adm__actions" style={{ justifyContent: 'center' }}>
                   <button className="adm__btn" type="button" onClick={addAnother}>+ Add another</button>
                   <button className="adm__btn adm__btn--ghost" type="button" onClick={close}>Done</button>

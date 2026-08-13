@@ -295,6 +295,8 @@ export const api = {
   entityUpdate:    (id, body, sync = false) => fetchJson(`/api/entities/${id}${sync ? '?sync=1' : ''}`, { method: 'PUT', body }),
   entityDelete:    (id) => fetchJson(`/api/entities/${id}`, { method: 'DELETE' }),
   entityRebuild:   () => fetchJson('/api/entities/rebuild', { method: 'POST' }),
+  brief:           (viewAs) => fetchJson(`/api/brief${viewAs ? `?viewAs=${encodeURIComponent(viewAs)}` : ''}`),
+  search:          (q) => fetchJson(`/api/search?q=${encodeURIComponent(q)}`),
   entityByRecord:  (m, k, r) => fetchJson(`/api/entities/by-record/${m}/${k}/${encodeURIComponent(r)}`),
 
   // Margin — live workspace contest (Phase 4)

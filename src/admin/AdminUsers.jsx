@@ -35,6 +35,13 @@ export default function AdminUsers() {
     setMsg({ kind: 'ok', text: 'Updated.' });
     load();
   };
+  const onPersona = async (id, value) => {
+    try {
+      await api.updateUser(id, { persona: value || null });
+      setMsg({ kind: 'ok', text: 'Persona updated.' });
+      load();
+    } catch (e) { setMsg({ kind: 'err', text: e.message }); }
+  };
   const onDelete = async (id) => {
     if (!confirm('Delete this user? This cannot be undone.')) return;
     await api.deleteUser(id);
@@ -100,7 +107,7 @@ export default function AdminUsers() {
         <table className="adm__table">
           <thead>
             <tr>
-              <th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th>
+              <th>Name</th><th>Email</th><th>Role</th><th>Persona</th><th>Status</th><th>Last sign-in</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -109,6 +116,20 @@ export default function AdminUsers() {
                 <td><b style={{ fontWeight: 500 }}>{u.name}</b></td>
                 <td>{u.email}</td>
                 <td><span className={`adm__role-pill adm__role-pill--${u.role}`}>{u.role.replace('_', ' ')}</span></td>
+                <td>
+                  <select
+                    className="adm__field-select"
+                    style={{ fontSize: 12, padding: '2px 6px' }}
+                    value={u.persona || ''}
+                    onChange={e => onPersona(u.id, e.target.value)}
+                  >
+                    <option value="">(default)</option>
+                    <option value="manager">Manager</option>
+                    <option value="staff">Staff</option>
+                    <option value="candidate">Candidate</option>
+                    <option value="volunteer">Volunteer</option>
+                  </select>
+                </td>
                 <td>{u.active ? 'active' : <em style={{ color: '#8b2418' }}>disabled</em>}</td>
                 <td style={{ color: 'var(--ink-5)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
                   {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : '—'}

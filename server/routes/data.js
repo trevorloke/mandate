@@ -17,6 +17,80 @@ import { emitWebhook } from '../lib/webhooks.js';
 import { broadcast } from '../lib/realtime.js';
 import { workspaces } from '../db/schema.js';
 import { assertQuota, QuotaError } from '../lib/plans.js';
+import { ENTITY_KINDS, resolveRecords, unlinkBucket } from '../lib/entities.js';
+import { notify } from '../lib/notify.js';
+
+// Live entity resolution — keep the cross-module directory current on every
+// write. Best-effort: a directory hiccup must never fail the write itself.
+// Returns the per-record results ([{ recordId, entityId, entityName,
+// matchedExisting }]) so callers can tell the user what their write matched.
+async function resolveIntoDirectory(workspaceId, recs, createdById) {
+  if (!recs.length || !ENTITY_KINDS[recs[0].kind]) return [];
+  try {
+    const { results = [] } = await resolveRecords(workspaceId, recs, createdById);
+    return results;
+  } catch { return []; }
+}
+
+// ── Contribution-cap guardrail ───────────────────────────────────────────
+// After a raise.gift record lands, total the donor's gifts for the cycle and
+// flag the just-written record when it pushes the donor over the workspace's
+// contribution cap (settings.contributionCap; default $1400 — BC individual
+// cycle cap). Best-effort throughout: compliance must never fail the write.
+// Returns { flagged: true, reason } when the record was flagged, else null.
+const DEFAULT_CONTRIBUTION_CAP = 1400;
+
+async function checkContributionCap(workspaceId, record) {
+  try {
+    if (record.module !== 'raise' || record.kind !== 'gift') return null;
+    const data = record.data || {};
+    const donor = String(data.donor || data.name || '').trim().toLowerCase();
+    const amt = Number(data.amt ?? data.amount);
+    if (!donor || !(amt > 0)) return null;
+
+    const ws = (await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
+    let settings = {};
+    try { settings = JSON.parse(ws?.settings || '{}'); } catch { /* default cap */ }
+    const cap = Number(settings.contributionCap) || DEFAULT_CONTRIBUTION_CAP;
+
+    // Cycle total: every non-deleted gift in the workspace from this donor,
+    // including the just-written record itself.
+    const rows = await db.select().from(moduleData).where(and(
+      eq(moduleData.workspaceId, workspaceId),
+      eq(moduleData.module, 'raise'),
+      eq(moduleData.kind, 'gift'),
+      isNull(moduleData.deletedAt),
+    ));
+    let total = 0;
+    for (const r of rows) {
+      let d = {};
+      try { d = JSON.parse(r.data); } catch { continue; }
+      if (String(d.donor || d.name || '').trim().toLowerCase() !== donor) continue;
+      const a = Number(d.amt ?? d.amount);
+      if (a > 0) total += a;
+    }
+    if (total <= cap) return null;
+
+    const reason = `Contribution total $${total} exceeds the $${cap} individual cap`;
+    await db.update(moduleData)
+      .set({ data: JSON.stringify({ ...data, status: 'flagged', flagged: true, flagReason: reason }), updatedAt: new Date() })
+      .where(eq(moduleData.id, record.id));
+
+    // Tell every admin — same admin-user query pattern as social's notifyApprovers.
+    try {
+      const admins = await db.select().from(users)
+        .where(and(eq(users.workspaceId, workspaceId), inArray(users.role, ['admin', 'super_admin'])));
+      for (const u of admins) {
+        try {
+          await notify({ userId: u.id, kind: 'compliance.cap', title: 'Contribution over cap flagged', body: `${data.donor || data.name}: ${reason}`, link: '/' });
+        } catch { /* notifications are best-effort */ }
+      }
+    } catch { /* notifications are best-effort */ }
+    return { flagged: true, reason };
+  } catch {
+    return null; // never fail the write over a compliance check
+  }
+}
 
 const app = new Hono();
 app.use('*', requireAuth);
@@ -296,16 +370,27 @@ app.put('/:module/:kind/_bulk', requireRole('editor'), requireScope('write'), re
   if (!append) {
     await db.delete(moduleData)
       .where(and(eq(moduleData.workspaceId, me.workspaceId), eq(moduleData.module, module), eq(moduleData.kind, kind)));
+    // Every record in the bucket is gone — drop its directory links too.
+    if (ENTITY_KINDS[kind]) { try { await unlinkBucket(me.workspaceId, module, kind); } catch { /* best-effort */ } }
   }
+  const inserted = [];
+  let flaggedCount = 0;
   for (const r of records) {
+    const rid = newId();
     await db.insert(moduleData).values({
-      id: newId(), workspaceId: me.workspaceId, module, kind,
+      id: rid, workspaceId: me.workspaceId, module, kind,
       data: JSON.stringify(r),
       ownerId: me.id,
     });
+    inserted.push({ id: rid, module, kind, data: r });
+    // Cap check per row, in import order, so the running donor total flags the
+    // exact gift that crosses the cap (not every gift from that donor).
+    const compliance = await checkContributionCap(me.workspaceId, { id: rid, module, kind, data: r });
+    if (compliance?.flagged) flaggedCount += 1;
   }
+  await resolveIntoDirectory(me.workspaceId, inserted, me.id);
   await audit(me.id, append ? 'data.bulk_append' : 'data.bulk_replace', `${module}.${kind}`, { count: records.length });
-  return c.json({ ok: true, count: records.length });
+  return c.json({ ok: true, count: records.length, flaggedCount });
 });
 
 // POST /api/data/:module/:kind
@@ -325,8 +410,16 @@ app.post('/:module/:kind', requireRole('editor'), requireScope('write'), require
   await audit(me.id, 'data.create', id, { module, kind });
   fireWebhook(me.workspaceId, 'data.create', { id, module, kind, data });
   fireRealtime(me.workspaceId, 'data.create', { id, module, kind });
+  const results = await resolveIntoDirectory(me.workspaceId, [{ id, module, kind, data }], me.id);
+  const compliance = await checkContributionCap(me.workspaceId, { id, module, kind, data });
   const fresh = (await db.select().from(moduleData).where(eq(moduleData.id, id)).limit(1))[0];
-  return c.json({ ok: true, record: parse(fresh) });
+  const res = { ok: true, record: parse(fresh) };
+  const resolved = results.find((r) => r.recordId === id);
+  if (resolved) {
+    res.directory = { entityId: resolved.entityId, entityName: resolved.entityName, matchedExisting: resolved.matchedExisting };
+  }
+  if (compliance?.flagged) res.compliance = compliance;
+  return c.json(res);
 });
 
 // GET /api/data/:module/:kind/:id
@@ -364,6 +457,8 @@ app.put('/:module/:kind/:id', requireScope('write'), async (c) => {
   await audit(me.id, 'data.update', id, { module: row.module, kind: row.kind, prev, next: data });
   fireWebhook(me.workspaceId, 'data.update', { id, module: row.module, kind: row.kind, prev, next: data });
   fireRealtime(me.workspaceId, 'data.update', { id, module: row.module, kind: row.kind });
+  // Re-resolve: if the edit changed who this record IS, its link moves.
+  await resolveIntoDirectory(me.workspaceId, [{ id, module: row.module, kind: row.kind, data }], me.id);
   const fresh = (await db.select().from(moduleData).where(eq(moduleData.id, id)).limit(1))[0];
   return c.json({ ok: true, record: parse(fresh) });
 });

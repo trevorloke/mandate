@@ -4,6 +4,7 @@ import { WORKSPACE as DEFAULT_WORKSPACE } from './data';
 import { useLiveRecords } from './auth/useLiveRecords';
 import { Home2 } from './home';
 import { Conductor } from './conductor';
+import CmdPalette from './CmdPalette';
 import { DossierDrawer } from './fabric';
 import { Ground } from './ground';
 import { People } from './people';
@@ -97,6 +98,7 @@ export default function App2() {
   })();
   const [route, setRoute] = useState(initial);
   const [conductorOpen, setConductorOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
   const { records: conductorAsks } = useLiveRecords('conductor', 'ask', []);
   const conductorNowCount = conductorAsks.filter(c => c.window === 'NOW').length;
 
@@ -124,6 +126,9 @@ export default function App2() {
       if (e.key === 'Escape') { setConductorOpen(false); }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault(); setConductorOpen(v => !v);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); setCmdOpen(v => !v);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -179,7 +184,23 @@ export default function App2() {
       }
     : DEFAULT_WORKSPACE;
 
-  const enabledModules = workspace?.settings?.modules || {};
+  // Persona-gated navigation: volunteers and candidates get a focused module
+  // set; staff and managers see everything the workspace enables. Mirrors the
+  // server's effectivePersona derivation (explicit user.persona wins, else role).
+  const PERSONA_MODULES = {
+    candidate: ['beacon', 'events', 'civic', 'academy', 'command', 'tide', 'margin'],
+    volunteer: ['ground', 'events', 'academy', 'command'],
+  };
+  const persona = user.persona
+    || (user.role === 'editor' ? 'staff' : user.role === 'viewer' ? 'volunteer' : 'manager');
+  const personaSet = PERSONA_MODULES[persona] ? new Set(PERSONA_MODULES[persona]) : null;
+  const wsModules = workspace?.settings?.modules || {};
+  const enabledModules = { ...wsModules };
+  if (personaSet) {
+    for (const m of ['ground','people','beacon','raise','ledger','coalition','civic','opposition','site','events','academy','command','tide','margin','directory']) {
+      if (!personaSet.has(m)) enabledModules[m] = false;
+    }
+  }
   const isModuleEnabled = (k) => enabledModules[k] !== false;
   // If user navigated to a disabled module, fall back to home
   const effectiveRoute = (route !== 'home' && route !== 'admin' && !isModuleEnabled(route)) ? 'home' : route;
@@ -191,7 +212,7 @@ export default function App2() {
         onGo={go}
         workspace={ws}
         user={user.initials || (user.name || '').split(/\s+/).filter(Boolean).map(s => s[0]?.toUpperCase()).slice(0,2).join('') || '—'}
-        onCmd={() => {}}
+        onCmd={() => setCmdOpen(true)}
         onConductor={() => setConductorOpen(true)}
         conductorCount={conductorNowCount}
         userMenu={<UserMenu onAdmin={() => go('admin')} />}
@@ -201,6 +222,7 @@ export default function App2() {
         {effectiveRoute === 'home' ? <Home2 /> : (Page ? <Page /> : <Home2 />)}
       </Shell>
       <Conductor open={conductorOpen} onClose={() => setConductorOpen(false)} />
+      <CmdPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onGo={(k) => { setCmdOpen(false); go(k); }} />
       <DossierDrawer />
     </Nav2Ctx.Provider>
   );
