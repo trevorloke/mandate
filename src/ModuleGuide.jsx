@@ -14,7 +14,25 @@ const readHidden = (route) => {
   catch { return false; }
 };
 
-export default function ModuleGuide({ route }) {
+// Compact SIMPLE | FULL segmented control, shown only when App passes a mode.
+function ViewSeg({ mode, onMode }) {
+  return (
+    <div className="mg-seg" role="group" aria-label="View mode">
+      <button
+        className={'mg-seg-btn' + (mode === 'simple' ? ' is-active' : '')}
+        aria-pressed={mode === 'simple'}
+        onClick={() => onMode?.('simple')}
+      >Simple</button>
+      <button
+        className={'mg-seg-btn' + (mode === 'pro' ? ' is-active' : '')}
+        aria-pressed={mode === 'pro'}
+        onClick={() => onMode?.('pro')}
+      >Full</button>
+    </div>
+  );
+}
+
+export default function ModuleGuide({ route, mode, onMode }) {
   const meta = MODULE_META[route];
   const { go } = useNav2();
   const [hidden, setHidden] = useState(() => readHidden(route));
@@ -38,13 +56,22 @@ export default function ModuleGuide({ route }) {
   };
 
   if (hidden) {
-    return (
+    const pill = (
       <button
         className="mg-pill"
         title={`What is ${meta.plain}?`}
         aria-label={`Show guide for ${meta.plain}`}
         onClick={() => setHiddenPersist(false)}
       >?</button>
+    );
+    // The view toggle must stay reachable even with the guide dismissed.
+    if (!mode) return pill;
+    return (
+      <div className="mg-pillrow">
+        {pill}
+        <span className="mg-pillrow-sep" aria-hidden="true">·</span>
+        <ViewSeg mode={mode} onMode={onMode} />
+      </div>
     );
   }
 
@@ -93,6 +120,8 @@ export default function ModuleGuide({ route }) {
           )}
         </div>
       )}
+
+      {mode && <ViewSeg mode={mode} onMode={onMode} />}
 
       <button
         className="mg-close"

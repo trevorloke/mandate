@@ -6,6 +6,8 @@ import { Home2 } from './home';
 import { Conductor } from './conductor';
 import CmdPalette from './CmdPalette';
 import ModuleGuide from './ModuleGuide';
+import SimpleModule from './SimpleModule';
+import { SIMPLE_BUCKETS } from './simple-map';
 import { DossierDrawer } from './fabric';
 import { Ground } from './ground';
 import { People } from './people';
@@ -55,6 +57,14 @@ const PAGE_MAP2 = {
   admin:      () => <Admin />,
 };
 
+// Per-module view mode ("Simple by default, Pro on demand") — persisted per
+// module in localStorage; only modules with a simple view get a mode at all.
+const viewModeKey = (route) => `mdt:view:${route}`;
+const readViewMode = (route) => {
+  try { return localStorage.getItem(viewModeKey(route)) === 'pro' ? 'pro' : 'simple'; }
+  catch { return 'simple'; }
+};
+
 export default function App2() {
   const { user, workspace, loading, setupComplete } = useAuth();
   const [authView, setAuthView] = useState(setupComplete ? 'login' : 'signup');
@@ -98,6 +108,9 @@ export default function App2() {
     } catch { return 'home'; }
   })();
   const [route, setRoute] = useState(initial);
+  // Tiny bump so toggling a module's view mode (stored in localStorage)
+  // re-renders without a reload.
+  const [, setViewBump] = useState(0);
   const [conductorOpen, setConductorOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const { records: conductorAsks } = useLiveRecords('conductor', 'ask', []);
@@ -214,6 +227,14 @@ export default function App2() {
   // If user navigated to a disabled module, fall back to home
   const effectiveRoute = (route !== 'home' && route !== 'admin' && !isModuleEnabled(route)) ? 'home' : route;
   const Page = PAGE_MAP2[effectiveRoute];
+
+  // Simple/Pro view mode: only for non-home, non-admin modules with a simple view.
+  const hasSimpleView = effectiveRoute !== 'home' && effectiveRoute !== 'admin' && !!SIMPLE_BUCKETS?.[effectiveRoute];
+  const viewMode = hasSimpleView ? readViewMode(effectiveRoute) : 'pro';
+  const onViewMode = (next) => {
+    try { localStorage.setItem(viewModeKey(effectiveRoute), next === 'pro' ? 'pro' : 'simple'); } catch { /* ignore */ }
+    setViewBump(v => v + 1);
+  };
   return (
     <Nav2Ctx.Provider value={{ route: effectiveRoute, go }}>
       <Shell
@@ -231,7 +252,12 @@ export default function App2() {
         {effectiveRoute === 'home'
           ? <Home2 />
           : (Page
-              ? <><ModuleGuide route={effectiveRoute} /><Page /></>
+              ? (hasSimpleView
+                  ? <>
+                      <ModuleGuide route={effectiveRoute} mode={viewMode} onMode={onViewMode} />
+                      {viewMode === 'simple' ? <SimpleModule route={effectiveRoute} /> : <Page />}
+                    </>
+                  : <><ModuleGuide route={effectiveRoute} /><Page /></>)
               : <Home2 />)}
       </Shell>
       <Conductor open={conductorOpen} onClose={() => setConductorOpen(false)} />

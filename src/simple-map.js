@@ -124,6 +124,73 @@ export const MODULE_META = {
   },
 };
 
+// Simple View buckets — per module, an ordered list of its data buckets with
+// friendly plural labels. Consumed by SimpleModule.jsx (the one-screen default
+// view). Modules WITHOUT an entry (tide, margin, directory, command) never get
+// a simple view.
+export const SIMPLE_BUCKETS = {
+  ground: [
+    { kind: 'voter',        label: 'Voters' },
+    { kind: 'shift',        label: 'Shifts' },
+    { kind: 'canvasser',    label: 'Canvassers' },
+  ],
+  people: [
+    { kind: 'volunteer',    label: 'Volunteers' },
+  ],
+  raise: [
+    { kind: 'donor',        label: 'Donors' },
+    { kind: 'gift',         label: 'Gifts' },
+    { kind: 'prospect',     label: 'Prospects' },
+    { kind: 'pledge',       label: 'Pledges' },
+  ],
+  ledger: [
+    { kind: 'journal',      label: 'Journal' },
+    { kind: 'bill',         label: 'Bills' },
+    { kind: 'filing',       label: 'Filings' },
+    { kind: 'account',      label: 'Accounts' },
+    { kind: 'asset',        label: 'Assets' },
+  ],
+  coalition: [
+    { kind: 'endorsement',  label: 'Endorsements' },
+    { kind: 'ask',          label: 'Asks' },
+    { kind: 'org',          label: 'Orgs' },
+    { kind: 'comm',         label: 'Comms' },
+  ],
+  civic: [
+    { kind: 'case',         label: 'Cases' },
+    { kind: 'bill',         label: 'Bills' },
+    { kind: 'promise',      label: 'Promises' },
+    { kind: 'speech',       label: 'Speeches' },
+  ],
+  opposition: [
+    { kind: 'target',       label: 'Targets' },
+    { kind: 'claim',        label: 'Claims' },
+    { kind: 'evidence',     label: 'Evidence' },
+    { kind: 'lead',         label: 'Leads' },
+  ],
+  site: [
+    { kind: 'page',         label: 'Pages' },
+    { kind: 'form',         label: 'Forms' },
+    { kind: 'experiment',   label: 'Experiments' },
+  ],
+  events: [
+    { kind: 'event',        label: 'Events' },
+    { kind: 'venue',        label: 'Venues' },
+    { kind: 'host',         label: 'Hosts' },
+  ],
+  beacon: [
+    { kind: 'post',         label: 'Posts' },
+    { kind: 'account',      label: 'Accounts' },
+    { kind: 'mention',      label: 'Mentions' },
+    { kind: 'press_outlet', label: 'Press outlets' },
+  ],
+  academy: [
+    { kind: 'course',       label: 'Courses' },
+    { kind: 'article',      label: 'Articles' },
+    { kind: 'faculty',      label: 'Faculty' },
+  ],
+};
+
 // Today's verb-first action row: the five things people most often come to do.
 export const TODAY_ACTIONS = [
   { label: 'Add someone',     bucket: 'ground.voter',  personas: ['manager', 'staff', 'volunteer'] },

@@ -96,6 +96,40 @@
 .mg-chip-glyph { flex: none; color: var(--text-4); }
 .mg-chip--more { cursor: default; }
 
+/* ── SIMPLE | FULL segmented control (view mode) */
+.mg-seg {
+  flex: none;
+  display: inline-flex;
+  align-items: stretch;
+  height: 24px;
+  border: var(--border-hair);
+  border-radius: var(--r-ctrl);
+  background: var(--paper-0);
+  overflow: hidden;
+}
+.mg-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  background: transparent;
+  box-shadow: inset 0 -2px 0 transparent;
+  white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.mg-seg-btn + .mg-seg-btn { border-left: var(--border-hair); }
+.mg-seg-btn:hover { color: var(--text-2); background: var(--paper-1); }
+.mg-seg-btn.is-active {
+  color: var(--text-1);
+  background: var(--mark-soft);
+  box-shadow: inset 0 -2px 0 var(--mark);
+}
+
 /* ── Dismiss */
 .mg-close {
   flex: none;
@@ -125,6 +159,17 @@
   background: var(--paper-0);
 }
 .mg-pill:hover { color: var(--text-1); border-color: var(--rule); }
+
+/* Collapsed row: `? · SIMPLE|FULL` — keeps the view toggle reachable when the
+   guide strip is dismissed. */
+.mg-pillrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-1) var(--s-4) 0;
+}
+.mg-pillrow .mg-pill { margin: 0; }
+.mg-pillrow-sep { color: var(--text-4); font-size: 10px; }
 
 /* ── Responsive: connections hide first, then actions wrap */
 @media (max-width: 980px) {
