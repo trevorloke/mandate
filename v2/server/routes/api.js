@@ -196,7 +196,7 @@ app.get('/export', async (c) => {
     persons: (await db.query('select * from persons where workspace_id = $1', [ws])).rows,
     events: (await db.query('select * from events where workspace_id = $1 order by seq', [ws])).rows,
   };
-  for (const [key, t] of Object.entries(RECORD_TYPES)) {
+  for (const t of Object.values(RECORD_TYPES)) {
     out[t.table] = (await db.query(`select * from ${t.table} where workspace_id = $1`, [ws])).rows;
   }
   c.header('Content-Disposition', 'attachment; filename="mandate-export.json"');

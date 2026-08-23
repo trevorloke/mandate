@@ -5,7 +5,8 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // v2/ is its own workspace with its own toolchain — see v2/README.md.
+  globalIgnores(['dist', 'v2']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
