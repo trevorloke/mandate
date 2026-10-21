@@ -874,15 +874,20 @@ function CallsScreen() {
   const after = (i) => (i < 0 ? queue[0] || null : queue.length > 1 ? queue[(i + 1) % queue.length] : null);
   const upNext = at < 0 ? queue : queue.slice(at + 1).concat(queue.slice(0, at));
 
-  // Their own note (from the volunteer form) lives on the profile; the card
-  // shows its first line. Same cache as the profile screen.
+  // Their own note (from the volunteer form): the card shows its first line.
+  // GET /persons carries it on every row, so no fetch per card; only a list
+  // without the field (an older server) falls back to the profile (same cache
+  // as the profile screen).
+  const noteInList = current ? current.note !== undefined : true;
   const profile = useQuery({
     queryKey: ['person', current?.id],
     queryFn: () => apiGet(`/persons/${current.id}`),
-    enabled: Boolean(current?.id),
+    enabled: Boolean(current?.id) && !noteInList,
     staleTime: 60_000,
   });
-  const theirNote = profile.data?.person?.id === current?.id ? String(profile.data?.person?.note || '').trim() : '';
+  const theirNote = String((noteInList
+    ? current?.note
+    : profile.data?.person?.id === current?.id ? profile.data?.person?.note : '') || '').trim();
 
   useEffect(() => {
     if (!refocus.current) return;

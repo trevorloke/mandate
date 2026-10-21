@@ -225,20 +225,24 @@ app.post('/sample', async (c) => {
       const pid = newId();
       id[p.key] = pid;
       const tags = [SAMPLE_TAG, ...(S.tags[p.key] || []), ...(p.tags || [])];
+      // Spread the knocks across the past week so Today has a realistic
+      // picture. A rated person was rated by that knock, so rated_at is the
+      // contact's own time (now() is fixed for the transaction: the two match).
+      const hoursAgo = String((Object.keys(id).length * 7) % 150);
       await tx.query(
         `insert into persons (id, workspace_id, name, email, phone, address, city, lat, lng, tags, socials, rating, rated_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, case when $12::text is null then null else now() end)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                 case when $12::text is null then null else now() - ($13 || ' hours')::interval end)`,
         [pid, ctx.workspaceId, p.name, p.email || null, p.phone || null, p.address || null, p.city || null,
-         p.lat ?? null, p.lng ?? null, JSON.stringify(tags), JSON.stringify(p.socials || {}), p.rating || null],
+         p.lat ?? null, p.lng ?? null, JSON.stringify(tags), JSON.stringify(p.socials || {}), p.rating || null, hoursAgo],
       );
       emit('person', pid, 'create', { name: p.name, sample: true });
       if (p.rating) {
-        // Spread the knocks across the past week so Today has a realistic picture.
         const cid = newId();
         await tx.query(
           `insert into contacts (id, workspace_id, person_id, channel, outcome, rating, created_by, created_at)
            values ($1, $2, $3, $4, 'contacted', $5, $6, now() - ($7 || ' hours')::interval)`,
-          [cid, ctx.workspaceId, pid, p.channel || 'door', p.rating, ctx.user.id, String((Object.keys(id).length * 7) % 150)],
+          [cid, ctx.workspaceId, pid, p.channel || 'door', p.rating, ctx.user.id, hoursAgo],
         );
         emit('contact', cid, 'create', { person_id: pid, rating: p.rating, sample: true });
       }

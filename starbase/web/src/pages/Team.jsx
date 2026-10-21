@@ -1,8 +1,10 @@
 // Team (managers): one invite row (email · role · the button), then members
 // as rows with a role select, then pending invites — each with "New link"
-// (and "Cancel", once the server offers it). What each role can do sits
-// under "Roles". With email not connected the button says "Get invite link":
-// the link it shows is the way in.
+// (and "Cancel", when the server offers member.cancelInvite). One live link
+// per email: a new invite (or "New link") makes the old link stop working,
+// and Cancel stops it at once. What each role can do sits under "Roles".
+// With email not connected the button says "Get invite link": the link it
+// shows is the way in.
 import { useEffect, useId, useRef, useState } from 'react';
 import { Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,8 +18,8 @@ const ROLES = [
   { code: 'manager',   label: 'Manager',   hint: 'Everything, including the team' },
 ];
 const roleLabel = (code) => ROLES.find((r) => r.code === code)?.label || code;
-// Not on the server yet; "Cancel" appears on an invite once GET /api/actions
-// lists it (input { id }).
+// Manager-only on the server; "Cancel" appears on an invite only when
+// GET /api/actions lists it (input { id }).
 const CANCEL_INVITE = 'member.cancelInvite';
 
 // "Oct 21" (with the year only when it isn't this year), like every other screen.
@@ -65,23 +67,32 @@ function JoinLink({ sent, testId }) {
         </button>
       </div>
       <code ref={linkRef} className="ot-joinlink" data-testid={testId}>{sent.joinUrl}</code>
+      {sent.replaced && <div className="provider">The old link no longer works.</div>}
     </div>
   );
 }
 
 // A pending invite: email, role, until when; "New link" makes a fresh link
 // (same email, same role) and shows it right here. "Cancel" asks in place.
-function InvitedRow({ inv, ids, canCancel, onChanged }) {
+// `onLinkGone(email)`: that email's earlier link just stopped working, so no
+// other spot on the screen may still offer it.
+function InvitedRow({ inv, ids, canCancel, onChanged, onLinkGone }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  // Only while it is still this email's live invite: a newer invite from the
+  // form above replaces it and kills this link. (`from` covers the moment
+  // before the list catches up with the new id.)
+  const live = !!sent && (sent.id === inv.id || sent.from === inv.id);
 
   const newLink = async () => {
     setBusy(true); setError(null); setConfirming(false);
     try {
+      // The server expires the old link as it makes this one.
       const r = await action('member.invite', { email: inv.email, role: inv.role });
-      setSent({ email: r.invite.email, joinUrl: r.joinUrl, emailStatus: r.email });
+      onLinkGone(inv.email);
+      setSent({ id: r.invite.id, from: inv.id, email: r.invite.email, joinUrl: r.joinUrl, emailStatus: r.email, replaced: true });
       onChanged();
     } catch (err) {
       setError(err.message);
@@ -92,8 +103,16 @@ function InvitedRow({ inv, ids, canCancel, onChanged }) {
   const cancel = async () => {
     setBusy(true); setError(null);
     try {
-      // Every pending link for this email stops working.
-      for (const id of ids) await action(CANCEL_INVITE, { id });
+      // Every pending link for this email stops working. One that is already
+      // gone (cancelled or replaced elsewhere) is not an error.
+      for (const id of ids) {
+        try {
+          await action(CANCEL_INVITE, { id });
+        } catch (err) {
+          if (err.status !== 404) throw err;
+        }
+      }
+      onLinkGone(inv.email);
       onChanged();
     } catch (err) {
       setError(err.message);
@@ -123,7 +142,7 @@ function InvitedRow({ inv, ids, canCancel, onChanged }) {
           </span>
         )}
       </div>
-      {(confirming || sent || error) && (
+      {(confirming || live || error) && (
         <div className="ot-body">
           {confirming && (
             <div className="ot-confirm ot-confirm-danger" role="group" aria-label="Cancel invite">
@@ -134,7 +153,7 @@ function InvitedRow({ inv, ids, canCancel, onChanged }) {
               <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={() => setConfirming(false)}>No</button>
             </div>
           )}
-          {sent && <JoinLink sent={sent} />}
+          {live && <JoinLink sent={sent} />}
           {error && <p className="error">{error}</p>}
         </div>
       )}
@@ -179,13 +198,29 @@ export default function Team() {
   const emailOn = brief.data?.providers?.email === true;
   const canCancel = (allowed.data?.actions ?? []).includes(CANCEL_INVITE);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['team'] });
+  // A link replaced or cancelled below must not stay up here as "Send … this link".
+  const linkGone = (gone) => setSent((cur) => (
+    cur && cur.email.toLowerCase() === String(gone).toLowerCase() ? null : cur));
+
+  const members = team.data?.members || [];
+  // Newest first; a re-sent invite replaces the older row for that email.
+  const invitesByEmail = new Map();
+  for (const i of team.data?.invites || []) {
+    const key = String(i.email).toLowerCase();
+    const cur = invitesByEmail.get(key);
+    if (cur) cur.ids.push(i.id);
+    else invitesByEmail.set(key, { inv: i, ids: [i.id] });
+  }
+  const invites = [...invitesByEmail.values()];
 
   const invite = async (e) => {
     e.preventDefault();
     setBusy(true); setError(null); setSent(null);
+    // Already invited? The new link replaces the old one (the server expires it).
+    const replaced = invitesByEmail.has(email.trim().toLowerCase());
     try {
       const r = await action('member.invite', { email: email.trim(), role });
-      setSent({ email: r.invite.email, role: r.invite.role, joinUrl: r.joinUrl, emailStatus: r.email });
+      setSent({ email: r.invite.email, role: r.invite.role, joinUrl: r.joinUrl, emailStatus: r.email, replaced });
       setEmail('');
       refresh();
     } catch (err) {
@@ -204,17 +239,6 @@ export default function Team() {
       setError(err.message);
     }
   };
-
-  const members = team.data?.members || [];
-  // Newest first; a re-sent invite replaces the older row for that email.
-  const invitesByEmail = new Map();
-  for (const i of team.data?.invites || []) {
-    const key = String(i.email).toLowerCase();
-    const cur = invitesByEmail.get(key);
-    if (cur) cur.ids.push(i.id);
-    else invitesByEmail.set(key, { inv: i, ids: [i.id] });
-  }
-  const invites = [...invitesByEmail.values()];
 
   return (
     <div className="ot-page">
@@ -262,7 +286,8 @@ export default function Team() {
           <h2 className="ot-sec-h">Invited <span className="ot-count">{invites.length}</span></h2>
           <ul className="ot-list">
             {invites.map(({ inv, ids }) => (
-              <InvitedRow key={String(inv.email).toLowerCase()} inv={inv} ids={ids} canCancel={canCancel} onChanged={refresh} />
+              <InvitedRow key={String(inv.email).toLowerCase()} inv={inv} ids={ids} canCancel={canCancel}
+                onChanged={refresh} onLinkGone={linkGone} />
             ))}
           </ul>
         </>

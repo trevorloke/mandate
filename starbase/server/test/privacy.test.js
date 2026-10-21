@@ -49,8 +49,35 @@ test('volunteer brief carries field stats but no money, flags, or filings', asyn
   assert.deepEqual(b.json.flagged, []);
   assert.deepEqual(b.json.filings, []);
   assert.ok(b.json.field, 'field stats still present');
+  assert.deepEqual(Object.keys(b.json.field.mine).sort(), ['calls', 'doors', 'texts'], 'their own counts, numbers only');
   const d = await desk.get('/api/brief');
   assert.equal(d.json.money.totalCents, 120000);
+  assert.equal(d.json.flagged.length, 0, 'under the cap: nothing flagged');
+});
+
+test('volunteer person list: their own note rides along — the row shape is otherwise unchanged', async () => {
+  const db = await getDb();
+  await db.query(
+    `update persons set attrs = jsonb_set(coalesce(attrs, '{}'::jsonb), '{note}', to_jsonb('Call after 6'::text)) where id = $1`,
+    [donor.id],
+  );
+  const row = (await vol.get('/api/persons?has=phone')).json.persons.find((p) => p.id === donor.id);
+  assert.equal(row.note, 'Call after 6');
+  assert.deepEqual(Object.keys(row).sort(), [
+    'address', 'city', 'email', 'id', 'kind', 'lat', 'lng', 'name', 'note', 'phone', 'postal', 'rated_at', 'rating', 'socials', 'tags', 'unit',
+  ], 'no gifts, totals, tiers or other attrs in the list');
+});
+
+test('volunteer brief never carries flagged gifts or their numbers', async () => {
+  // Push the donor over the cap: the desk sees the numbers, the volunteer sees nothing.
+  await desk.action('gift.log', { person_id: donor.id, amount_cents: 20000, date: '2026-04-01' });
+  const d = (await desk.get('/api/brief')).json;
+  assert.equal(d.flagged.length, 1);
+  assert.equal(typeof d.flagged[0].total_cents, 'number');
+  const v = (await vol.get('/api/brief')).json;
+  assert.deepEqual(v.flagged, []);
+  assert.equal(v.money, null);
+  assert.ok(!JSON.stringify(v).includes('total_cents') && !JSON.stringify(v).includes('cap_cents'));
 });
 
 test('volunteer is refused the money ledger, exports, event log, audit, and supporter lists', async () => {

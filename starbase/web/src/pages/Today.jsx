@@ -4,10 +4,13 @@
 //     turf line still opens the walk list) — then ONE shift line: "Your next
 //     shift" only when they're on it, otherwise the next open shift with
 //     "5 spots left" (→ that shift, where they join it). Signs waiting to go
-//     up get one row (→ Signs to put up). One small line of the team's field
-//     numbers. Turfs and the upcoming events (with their RSVP pages) sit
-//     under "More". With no signal, "Start canvassing" opens the walk list
-//     kept on this phone (Turfs.jsx's offline copy), else the turf list.
+//     up get one row (→ Signs to put up). One line of numbers, theirs first:
+//     "You 6 · Team 38 doors this week" (brief field.mine: contacts they
+//     logged; field: everyone's). Calls and texts in the same shape, a quiet
+//     "Signs" row (always — the sign crew's way to /signs and "Add a sign"),
+//     other turfs and the upcoming events (with their RSVP pages) sit under
+//     "More". With no signal, "Start canvassing" opens the walk list kept on
+//     this phone (Turfs.jsx's offline copy), else the turf list.
 //   Desk: three big numbers (doors this week · support · total raised). Doors
 //     and money are taps to their screens (›); support opens its breakdown in
 //     place (+), opposed by candidate ("McCallum 3 · Locke 2"). Then "Needs
@@ -616,6 +619,20 @@ function More({ children }) {
   );
 }
 
+// "You 6 · Team 38 doors this week": their own count first, then everyone's
+// (the brief's field.mine and field). The noun follows the team number.
+function MineLine({ you, team, noun, small }) {
+  const t = Number(team) || 0;
+  return (
+    <p className={`today-mine${small ? ' is-small' : ''}`}>
+      <span className="today-mine__pair">You <strong className="today-mine__n">{num(you)}</strong></span>
+      <span className="today-mine__dot"> · </span>
+      <span className="today-mine__pair">Team <strong className="today-mine__n">{num(t)}</strong></span>
+      {' '}<span className="today-mine__what">{plural(t, noun)} this week</span>
+    </p>
+  );
+}
+
 // ── Volunteer Today ──
 function VolunteerToday({ b, me }) {
   const myTurfs = b.myTurfs ?? [];
@@ -628,6 +645,7 @@ function VolunteerToday({ b, me }) {
   const others = done ? myTurfs : myTurfs.filter((t) => t !== firstOpen);
   const events = b.events ?? [];
   const f = b.field ?? {};
+  const mine = f.mine ?? {};
   const signs = Number(b.signs?.requested) || 0;
 
   return (
@@ -672,13 +690,15 @@ function VolunteerToday({ b, me }) {
         )}
       </ul>
 
-      {/* The whole campaign's numbers, not hers: say so. */}
-      <p className="today-fieldline mono">
-        Team: {num(f.doors)} doors this week · {num(f.calls)} {plural(Number(f.calls) || 0, 'call')}
-      </p>
+      <MineLine you={mine.doors} team={f.doors} noun="door" />
 
       <More>
-        <p className="today-fieldline mono">Team: {num(f.texts)} {plural(Number(f.texts) || 0, 'text')} this week</p>
+        <MineLine you={mine.calls} team={f.calls} noun="call" small />
+        <MineLine you={mine.texts} team={f.texts} noun="text" small />
+        {/* Always here, signs waiting or not: the sign crew's way to Add a sign. */}
+        <ul className="today-rows">
+          <LinkRow to="/signs" main="Signs" />
+        </ul>
         {others.length > 0 && (
           <>
             <h3 className="today-subh">{done ? 'Your turfs' : 'Your other turfs'}</h3>

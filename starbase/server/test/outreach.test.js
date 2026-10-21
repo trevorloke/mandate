@@ -228,3 +228,132 @@ test('volunteer form keeps every ticked role, each role\'s own detail, and the n
   assert.doesNotMatch(page, /name="detail_driver"/);
   assert.match(page, /More ways to help/);
 });
+
+// Stand in for the email provider: RESEND_API_KEY set and fetch answered
+// here, both restored after. `fail` picks addresses the provider rejects.
+const withEmailProvider = async (fn, { fail = () => false } = {}) => {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  const hadKey = Object.hasOwn(process.env, 'RESEND_API_KEY');
+  const oldKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key';
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://api.resend.com/')) {
+      const msg = JSON.parse(init.body);
+      if (fail(msg.to[0])) return new Response('mailbox unavailable', { status: 500 });
+      sent.push(msg);
+      return new Response(JSON.stringify({ id: 'msg' }), { status: 200 });
+    }
+    return realFetch(url, init);
+  };
+  try {
+    return await fn(sent);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (hadKey) process.env.RESEND_API_KEY = oldKey; else delete process.env.RESEND_API_KEY;
+  }
+};
+
+test('send later is real: a saved newsletter goes out with blast.resend once email is connected — once', async () => {
+  const w = new Client();
+  await w.signup({ workspaceName: 'Resend Newsletter' });
+  for (const [email, name] of [['ana.resend@example.org', 'Ana'], ['ben.resend@example.org', 'Ben'], ['cy.resend@example.org', 'Cy']]) {
+    assert.equal((await w.action('subscription.add', { email, name })).status, 200);
+  }
+  delete process.env.RESEND_API_KEY;
+  const saved = await w.action('blast.send', { kind: 'newsletter', subject: 'Saved for later', body: 'Hello neighbours' });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.blast.status, 'queued', 'no provider: saved, not sent');
+  assert.equal(saved.json.blast.audience_count, 3);
+  const id = saved.json.blast.id;
+
+  const refused = await w.action('blast.resend', { id });
+  assert.equal(refused.status, 409, 'still not connected: refused, nothing pretends to send');
+  assert.match(refused.json.error, /isn't connected/);
+  assert.equal((await w.get('/api/blasts')).json.blasts.find((b) => b.id === id).status, 'queued');
+
+  // Cy leaves the list before email is connected: Cy must never get it.
+  const cy = (await w.get('/api/subscriptions')).json.subscriptions.find((s) => s.email === 'cy.resend@example.org');
+  await w.action('subscription.remove', { id: cy.id });
+
+  await withEmailProvider(async (sent) => {
+    const r = await w.action('blast.resend', { id });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(r.json.resent, { sent: 2, failed: 0, skipped: 1 });
+    assert.equal(r.json.blast.status, 'sent');
+    assert.equal(r.json.blast.audience_count, 2, 'the unsubscribed address is off the send');
+    assert.equal(r.json.blast.provider_note, null);
+    assert.ok(r.json.blast.sent_at, 'sent time recorded, as blast.send does');
+    assert.deepEqual(sent.map((m) => m.to[0]).sort(), ['ana.resend@example.org', 'ben.resend@example.org']);
+    const subs = (await w.get('/api/subscriptions')).json.subscriptions;
+    for (const m of sent) {
+      assert.equal(m.subject, 'Saved for later');
+      assert.match(m.text, /^Hello neighbours/);
+      assert.ok(m.text.includes(`/u/${subs.find((s) => s.email === m.to[0]).id}`), 'own unsubscribe link');
+      assert.match(m.text, /Sent by Resend Newsletter/);
+    }
+
+    const again = await w.action('blast.resend', { id });
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.json.resent, { sent: 0, failed: 0, skipped: 0 });
+    assert.equal(sent.length, 2, 'sent rows are never re-sent');
+    assert.equal(again.json.blast.status, 'sent');
+  });
+
+  const listed = (await w.get('/api/blasts')).json.blasts.find((b) => b.id === id);
+  assert.equal(listed.status, 'sent');
+  assert.equal(listed.audience_count, 2);
+  assert.ok(listed.sent_at);
+  const ev = (await w.get('/api/events?since=0&limit=1000')).json.events
+    .filter((e) => e.action === 'blast.resend');
+  assert.equal(ev.length, 1, 'one logged resend; the no-op second run logs nothing');
+  assert.deepEqual(ev[0].payload, { resent: 2, sent: 2, failed: 0, unsubscribed: 1, status: 'sent' });
+  assert.equal((await w.get('/api/audit/verify')).json.ok, true);
+});
+
+test('blast.resend records each result: a rejected address stays failed and is not retried', async () => {
+  const w = new Client();
+  await w.signup({ workspaceName: 'Resend Press' });
+  await w.createPerson('Desk One', { email: 'desk1.resend@news.example', tags: ['media'] });
+  await w.createPerson('Desk Two', { email: 'desk2.resend@news.example', tags: ['media'] });
+  delete process.env.RESEND_API_KEY;
+  const saved = await w.action('blast.send', { kind: 'press', subject: 'Saved release', body: 'FOR IMMEDIATE RELEASE' });
+  assert.equal(saved.json.blast.status, 'queued');
+  const id = saved.json.blast.id;
+
+  await withEmailProvider(async (sent) => {
+    const r = await w.action('blast.resend', { id });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json.resent, { sent: 1, failed: 1, skipped: 0 });
+    assert.equal(r.json.blast.status, 'queued', 'a mix of sent and failed — the same rule as blast.send');
+    assert.match(r.json.blast.provider_note, /email provider 500/);
+    assert.equal(r.json.blast.sent_at, null);
+    assert.deepEqual(sent.map((m) => m.to[0]), ['desk1.resend@news.example']);
+    assert.ok(sent.every((m) => !m.text.includes('/u/')), 'press carries no unsubscribe link');
+    assert.match(sent[0].text, /Resend Press$/);
+
+    const again = await w.action('blast.resend', { id });
+    assert.deepEqual(again.json.resent, { sent: 0, failed: 0, skipped: 0 }, 'only still-queued rows are resent');
+    assert.equal(sent.length, 1);
+  }, { fail: (to) => to === 'desk2.resend@news.example' });
+});
+
+test('blast.resend: desk roles only, own workspace only', async () => {
+  delete process.env.RESEND_API_KEY;
+  const saved = await c.action('blast.send', { kind: 'newsletter', subject: 'Desk only', body: 'b' });
+  const id = saved.json.blast.id;
+  const inv = await c.action('member.invite', { email: 'vol.resend@example.org', role: 'volunteer' });
+  const vol = new Client();
+  await vol.post('/api/auth/join', { token: inv.json.joinUrl.split('/join/')[1], name: 'Resend Vol', password: 'knock-knock-2026' });
+  assert.equal((await vol.action('blast.resend', { id })).status, 403);
+  assert.ok(!(await vol.get('/api/actions')).json.actions.includes('blast.resend'));
+  assert.ok((await c.get('/api/actions')).json.actions.includes('blast.resend'));
+
+  const other = new Client();
+  await other.signup({ workspaceName: 'Someone Else' });
+  await withEmailProvider(async (sent) => {
+    assert.equal((await other.action('blast.resend', { id })).status, 404, 'another campaign cannot send it');
+    assert.equal(sent.length, 0);
+  });
+  assert.equal((await c.action('blast.resend', { id: '99999999-9999-4999-8999-999999999999' })).status, 404);
+});

@@ -9,7 +9,7 @@ import {
 } from '@starbase/shared/canvass';
 import { createHash, randomBytes } from 'node:crypto';
 import { newId } from '../lib/events.js';
-import { sendEmail, sendText, shiftMessage } from '../lib/notify.js';
+import { emailConfigured, sendEmail, sendText, shiftMessage } from '../lib/notify.js';
 import { httpError } from './util.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
@@ -47,6 +47,19 @@ const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
   emit('person', id, 'create', { id, ...person });
   return { id, name: person.name };
 };
+
+// One rule for a send's status, shared by blast.send and blast.resend:
+// everyone sent → 'sent'; everyone failed (or no one left on it) → 'failed';
+// anything else — still saved because email wasn't connected, or a mix of
+// sent and failed — → 'queued'.
+const blastStatus = ({ total, sent, failed }) =>
+  (total > 0 && sent === total ? 'sent' : failed === total ? 'failed' : 'queued');
+
+// Every newsletter identifies the sender and carries the recipient's own
+// one-click unsubscribe link (/u/:subscriptionId); press carries the name.
+const blastText = (ctx, kind, body, subscriptionId) => body + (kind === 'newsletter'
+  ? `\n\n—\nSent by ${ctx.workspace.name}.\nUnsubscribe: ${ctx.publicUrl || ''}/u/${subscriptionId}`
+  : `\n\n—\n${ctx.workspace.name}`);
 
 const ACTIVE_SHIFT_STATUSES = ['assigned', 'confirmed'];
 const activeOnShift = async (tx, workspaceId, shiftId) => (await tx.query(
@@ -359,7 +372,10 @@ export const FIELD_ACTIONS = {
 
   // Notify every assignee by email AND text with time, place, instructions,
   // and the shift link. Provider calls happen inside the handler but each
-  // result is recorded per-assignee; missing providers record 'queued'.
+  // result is recorded per-assignee; missing providers record 'queued' (not
+  // sent, and nothing sends it later). Every run messages everyone on the
+  // shift whatever their last result, so "Notify again" after connecting
+  // email/text is how the 'queued' ones are reached.
   'shift.notify': {
     roles: DESK_ROLES,
     input: z.object({ shift_id: uuid() }),
@@ -510,21 +526,17 @@ export const FIELD_ACTIONS = {
       }
 
       const id = newId();
-      let sent = 0, failed = 0, queued = 0;
+      let sent = 0, failed = 0;
       const recipientRows = [];
-      // Every newsletter identifies the sender and carries the recipient's own
-      // one-click unsubscribe link (/u/:subscriptionId).
-      const footer = (r) => input.kind === 'newsletter'
-        ? `\n\n—\nSent by ${ctx.workspace.name}.\nUnsubscribe: ${ctx.publicUrl || ''}/u/${r.id}`
-        : `\n\n—\n${ctx.workspace.name}`;
+      // Without email connected sendEmail sends nothing and answers 'queued':
+      // the send is saved, and blast.resend sends those rows once it is.
       for (const r of audience) {
-        const res = await sendEmail({ to: r.email, subject: input.subject, text: input.body + footer(r) });
+        const res = await sendEmail({ to: r.email, subject: input.subject, text: blastText(ctx, input.kind, input.body, r.id) });
         if (res.status === 'sent') sent += 1;
         else if (res.status === 'failed') failed += 1;
-        else queued += 1;
         recipientRows.push({ email: r.email, name: r.name, status: res.status, detail: res.detail });
       }
-      const status = sent === audience.length ? 'sent' : failed === audience.length ? 'failed' : 'queued';
+      const status = blastStatus({ total: audience.length, sent, failed });
       const note = recipientRows.find((r) => r.detail)?.detail || null;
       await tx.query(
         `insert into blasts (id, workspace_id, kind, subject, body, status, provider_note, audience_count, sent_at, created_by)
@@ -540,6 +552,77 @@ export const FIELD_ACTIONS = {
       }
       emit('blast', id, 'create', { kind: input.kind, subject: input.subject, audience: audience.length, status });
       return { blast: { id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note } };
+    },
+  },
+
+  // Send one saved blast's still-'queued' recipients — the ones saved while
+  // email wasn't connected — through the same path as blast.send. Sent and
+  // failed rows are never touched, so running it twice sends nothing twice.
+  // A newsletter subscriber who unsubscribed since is taken off the send
+  // (never emailed); its status and sent time follow blast.send's rule.
+  'blast.resend': {
+    roles: DESK_ROLES,
+    input: z.object({ id: uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const blast = (await tx.query(
+        'select id, kind, subject, body, status, provider_note, audience_count, sent_at from blasts where id = $1 and workspace_id = $2',
+        [input.id, ctx.workspaceId],
+      )).rows[0];
+      if (!blast) throw httpError(404, 'send not found');
+      if (!emailConfigured()) throw httpError(409, "email isn't connected yet — connect it, then send");
+      const waiting = (await tx.query(
+        `select id, email, name from blast_recipients
+         where blast_id = $1 and workspace_id = $2 and status = 'queued' order by created_at, id`,
+        [blast.id, ctx.workspaceId],
+      )).rows;
+      const pick = (b) => ({
+        id: b.id, kind: b.kind, subject: b.subject, status: b.status,
+        audience_count: b.audience_count, provider_note: b.provider_note, sent_at: b.sent_at,
+      });
+      if (waiting.length === 0) return { blast: pick(blast), resent: { sent: 0, failed: 0, skipped: 0 } };
+
+      let sent = 0, failed = 0, skipped = 0, note = null;
+      for (const r of waiting) {
+        let subscriptionId = null;
+        if (blast.kind === 'newsletter') {
+          const sub = (await tx.query(
+            'select id, status from subscriptions where workspace_id = $1 and email = $2',
+            [ctx.workspaceId, String(r.email).toLowerCase()],
+          )).rows[0];
+          if (!sub || sub.status !== 'subscribed') {
+            await tx.query('delete from blast_recipients where id = $1 and workspace_id = $2', [r.id, ctx.workspaceId]);
+            skipped += 1;
+            continue;
+          }
+          subscriptionId = sub.id;
+        }
+        const res = await sendEmail({ to: r.email, subject: blast.subject, text: blastText(ctx, blast.kind, blast.body, subscriptionId) });
+        if (res.status === 'sent') sent += 1;
+        else if (res.status === 'failed') failed += 1;
+        if (!note && res.detail) note = res.detail;
+        await tx.query(
+          'update blast_recipients set status = $3 where id = $1 and workspace_id = $2',
+          [r.id, ctx.workspaceId, res.status],
+        );
+      }
+      const counts = (await tx.query(
+        `select count(*)::int as total,
+                (count(*) filter (where status = 'sent'))::int as sent,
+                (count(*) filter (where status = 'failed'))::int as failed
+         from blast_recipients where blast_id = $1 and workspace_id = $2`,
+        [blast.id, ctx.workspaceId],
+      )).rows[0];
+      const status = blastStatus(counts);
+      if (counts.total === 0) note = 'everyone on this send has unsubscribed';
+      const updated = (await tx.query(
+        `update blasts set status = $3, provider_note = $4, audience_count = $5,
+           sent_at = case when $3 = 'sent' then now() else sent_at end
+         where id = $1 and workspace_id = $2
+         returning id, kind, subject, status, provider_note, audience_count, sent_at`,
+        [blast.id, ctx.workspaceId, status, note, counts.total],
+      )).rows[0];
+      emit('blast', blast.id, 'update', { resent: waiting.length - skipped, sent, failed, unsubscribed: skipped, status });
+      return { blast: pick(updated), resent: { sent, failed, skipped } };
     },
   },
 
@@ -560,6 +643,14 @@ export const FIELD_ACTIONS = {
       if (already) throw httpError(409, `${email} is already on the team`);
       const token = randomBytes(24).toString('hex');
       const id = newId();
+      // One live link per email: a new invite ("New link") kills the old one.
+      const replaced = (await tx.query(
+        `update invites set expires_at = now()
+         where workspace_id = $1 and email = $2 and accepted_at is null and expires_at > now()
+         returning id`,
+        [ctx.workspaceId, email],
+      )).rows;
+      for (const r of replaced) emit('invite', r.id, 'void', { email, replaced_by: id });
       await tx.query(
         `insert into invites (id, workspace_id, email, role, token_hash, created_by, expires_at)
          values ($1, $2, $3, $4, $5, $6, now() + interval '14 days')`,
@@ -575,6 +666,23 @@ export const FIELD_ACTIONS = {
       // The token never enters the event log — only who was invited, as what.
       emit('invite', id, 'create', { email, role: input.role });
       return { invite: { id, email, role: input.role }, joinUrl, email: mail.status };
+    },
+  },
+
+  // Cancel a pending invite: its link stops working at once.
+  'member.cancelInvite': {
+    roles: MANAGER_ONLY,
+    input: z.object({ id: uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const row = (await tx.query(
+        `update invites set expires_at = now()
+         where id = $1 and workspace_id = $2 and accepted_at is null and expires_at > now()
+         returning id, email`,
+        [input.id, ctx.workspaceId],
+      )).rows[0];
+      if (!row) throw httpError(404, 'invite not found');
+      emit('invite', row.id, 'void', { email: row.email });
+      return { id: row.id };
     },
   },
 

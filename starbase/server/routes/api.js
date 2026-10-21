@@ -13,6 +13,10 @@ import { emailConfigured, textConfigured } from '../lib/notify.js';
 import { RECORD_TYPES } from '@starbase/shared/registry';
 import dataRoutes from './data.js';
 import { pointInPolygon, groupDoors, walkOrder } from '../lib/geo.js';
+import { checkCap } from '../lib/cap.js';
+
+// A date column as YYYY-MM-DD (both backends hand back a Date at UTC midnight).
+const dateOnly = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
 
 const app = new Hono();
 
@@ -122,9 +126,11 @@ app.get('/persons', async (c) => {
   if (has === 'phone') where += ' and p.phone is not null';
   if (has === 'email') where += ' and p.email is not null';
   if (has === 'location') where += ' and p.lat is not null and p.lng is not null';
+  // note: their own words from the volunteer form (attrs.note), so the call
+  // card needs no per-person fetch. Nothing else from attrs is exposed.
   const { rows } = await c.get('db').query(
     `select p.id, p.kind, p.name, p.email, p.phone, p.address, p.unit, p.city, p.postal,
-            p.lat, p.lng, p.tags, p.socials, p.rating, p.rated_at
+            p.lat, p.lng, p.tags, p.socials, p.rating, p.rated_at, p.attrs->>'note' as note
      from persons p where ${where}
      order by lower(p.name) limit $4`,
     params,
@@ -214,13 +220,16 @@ app.route('/data', dataRoutes); // import · geocode · sample (desk roles; own 
 
 // ── Turfs + walk lists ──
 const parseJ = (v, d) => (typeof v === 'string' ? JSON.parse(v) : (v ?? d));
+// door_knocked: anyone ever knocked on this person's door (a 'door' contact),
+// so a walk list can tell a door reached only by phone or text from a knock.
 const loadLocated = async (db, ws) => (await db.query(
   `select p.id, p.name, p.phone, p.address, p.unit, p.lat, p.lng, p.rating, p.tags,
           (select max(c.created_at) from contacts c where c.person_id = p.id) as last_contact_at,
-          (select c.outcome from contacts c where c.person_id = p.id order by c.created_at desc limit 1) as last_outcome
+          (select c.outcome from contacts c where c.person_id = p.id order by c.created_at desc limit 1) as last_outcome,
+          exists (select 1 from contacts c where c.person_id = p.id and c.channel = 'door') as door_knocked
    from persons p where p.workspace_id = $1 and p.deleted_at is null and p.lat is not null and p.lng is not null`,
   [ws],
-)).rows.map((p) => ({ ...p, tags: parseJ(p.tags, []) }));
+)).rows.map((p) => ({ ...p, tags: parseJ(p.tags, []), door_knocked: !!p.door_knocked }));
 
 const turfStats = (polygon, located) => {
   const inside = located.filter((p) => pointInPolygon(p.lat, p.lng, polygon));
@@ -516,10 +525,24 @@ app.get('/brief', async (c) => {
      from gifts where workspace_id = $1 and deleted_at is null`, [ws],
   )).rows[0];
   const flagged = (await db.query(
-    `select g.id, g.amount_cents, g.date, g.flag_reason, p.name as donor
+    `select g.id, g.person_id, g.amount_cents, g.date, g.flag_reason, p.name as donor
      from gifts g join persons p on p.id = g.person_id
      where g.workspace_id = $1 and g.deleted_at is null and g.flagged order by g.date desc limit 10`, [ws],
   )).rows;
+  // Each flagged gift carries the donor's total for that gift's year (as it
+  // stands now, voids excluded) and the cap — from the same engine that
+  // flagged it — so the desk shows "$150 over the $1,250 limit" without
+  // parsing flag_reason. Null when no cap rule is known for that year.
+  if (ctx.role !== 'volunteer') {
+    for (const g of flagged) {
+      const cap = await checkCap(db, {
+        workspaceId: ws, personId: g.person_id, date: dateOnly(g.date),
+        jurisdiction: ctx.workspace.jurisdiction, settings: ctx.workspace.settings || {},
+      });
+      g.total_cents = cap.checked ? Number(cap.totalCents) : null;
+      g.cap_cents = cap.checked ? Number(cap.capCents) : null;
+    }
+  }
   const filings = (await db.query(
     `select id, name, due_date, status, (due_date - current_date)::int as days_left
      from filings where workspace_id = $1 and deleted_at is null and status = 'upcoming'
@@ -528,13 +551,17 @@ app.get('/brief', async (c) => {
   const people = (await db.query(
     `select count(*)::int as total from persons where workspace_id = $1 and deleted_at is null`, [ws],
   )).rows[0];
-  // Field: touches this week by channel, and the support picture from ratings.
+  // Field: touches this week by channel (the whole campaign), the caller's
+  // own share of them (contacts they logged), and the support picture.
   const field = (await db.query(
     `select count(*) filter (where created_at >= current_date - 7)::int as week,
             count(*) filter (where created_at >= current_date - 7 and channel = 'door')::int as doors,
             count(*) filter (where created_at >= current_date - 7 and channel = 'phone')::int as calls,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'text')::int as texts
-     from contacts where workspace_id = $1`, [ws],
+            count(*) filter (where created_at >= current_date - 7 and channel = 'text')::int as texts,
+            count(*) filter (where created_at >= current_date - 7 and channel = 'door' and created_by = $2)::int as my_doors,
+            count(*) filter (where created_at >= current_date - 7 and channel = 'phone' and created_by = $2)::int as my_calls,
+            count(*) filter (where created_at >= current_date - 7 and channel = 'text' and created_by = $2)::int as my_texts
+     from contacts where workspace_id = $1`, [ws, ctx.user.id],
   )).rows[0];
   const ratings = (await db.query(
     `select rating, count(*)::int as n from persons
@@ -580,7 +607,10 @@ app.get('/brief', async (c) => {
     flagged: desk ? flagged : [],
     filings: desk ? filings : [],
     people,
-    field: { week: field.week, doors: field.doors, calls: field.calls, texts: field.texts },
+    field: {
+      week: field.week, doors: field.doors, calls: field.calls, texts: field.texts,
+      mine: { doors: field.my_doors, calls: field.my_calls, texts: field.my_texts },
+    },
     ratings: Object.fromEntries(ratings.map((r) => [r.rating, r.n])),
     shifts,
     signs: Object.fromEntries(signs.map((r) => [r.status, r.n])),

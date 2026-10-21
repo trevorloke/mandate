@@ -19,7 +19,7 @@
 //               so a reload with no signal still opens them ("Offline copy");
 //               cachedWalkLists(me) lists those copies for the map and Today.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Link, useOutletContext, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet } from '../api.js';
 import { logContact, useOutbox } from '../offline.js';
@@ -326,6 +326,10 @@ function WalkList({ id }) {
   const [local, setLocal] = useState(queuedKnocks);
   const [notes, setNotes] = useState({});      // person id → unsent note
   const [busy, setBusy] = useState({});        // person id | door key → true
+  // Back from a profile opened at a door: that door opens again (Door's
+  // Profile link left its key on this list's history entry).
+  const location = useLocation();
+  const backTo = useRef(location.state?.door ? location.state : null);
   const [openKey, setOpenKey] = useState(null); // the expanded door
   const [picked, setPicked] = useState({});    // door key → selected person id
   const [scrollTo, setScrollTo] = useState(null);
@@ -369,7 +373,9 @@ function WalkList({ id }) {
       if (outbox.pending === 0) {
         // This render's `local` is the latest: the effect runs right after it.
         if (Object.values(local).some((v) => v.queued)) {
-          toast('Sent');
+          // A knock the server refused leaves the outbox too, unsent: then
+          // the error line says so, and nothing says "Sent".
+          if (!outbox.lastError) toast('Sent');
           setLocal((l) => Object.fromEntries(Object.entries(l).map(([k, v]) => [k, { ...v, queued: false }])));
         }
       }
@@ -444,6 +450,17 @@ function WalkList({ id }) {
     }
     setScrollTo(null);
   }, [scrollTo]);
+
+  useEffect(() => {
+    const back = backTo.current;
+    if (!back || !doors.length) return;
+    backTo.current = null;
+    const i = doors.findIndex((d) => d.key === back.door);
+    if (i < 0) return;
+    setOpenKey(back.door);
+    if (back.person) setPicked((m) => ({ ...m, [back.door]: back.person }));
+    setScrollTo(i);
+  }, [doors]);
 
   const goNext = () => {
     if (!target) return;
@@ -763,6 +780,13 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
   const panelId = `walk-panel-${index}`;
   const multi = door.persons.length > 1;
   const sel = door.persons.find((p) => p.id === selectedId) || door.persons[0];
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Profile: the profile's back link reads `from` ("← Walk list"), and this
+  // list's own history entry remembers the door, so coming back opens it again.
+  const here = `${location.pathname}${location.search}`;
+  const fromHere = { from: { to: here, label: 'Walk list' } };
+  const markDoor = () => navigate(here, { replace: true, state: { door: door.key, person: sel?.id } });
   const doorBusy = Boolean(busy[door.key]) || door.persons.some((p) => busy[p.id]);
   const queued = door.persons.some((p) => p.queued);
   const rated = door.persons.filter((p) => p.rating);
@@ -846,7 +870,7 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
                 </button>
               )}
               {sel.phone && <a className="btn walk-act" href={`tel:${dialable(sel.phone)}`}>Call</a>}
-              <Link className="btn btn-quiet walk-act" to={`/people/${sel.id}`}>Profile</Link>
+              <Link className="btn btn-quiet walk-act" to={`/people/${sel.id}`} state={fromHere} onClick={markDoor}>Profile</Link>
             </div>
           </More>
         </div>

@@ -93,3 +93,78 @@ test('only managers manage the team; tokens never enter the event log; expired i
   assert.equal((await staff.get('/api/team')).status, 403);
   assert.equal((await staff.action('member.invite', { email: 'x@example.org', role: 'volunteer' })).status, 403);
 });
+
+// Addresses below are unique to this file: under test:pg users are global.
+const pendingFor = async (email) => (await mgr.get('/api/team')).json.invites.filter((i) => i.email === email);
+
+test('"New link" really kills the old link: a re-invite expires the pending one', async () => {
+  const first = await mgr.action('member.invite', { email: 'Relink.Team@Example.org', role: 'volunteer' });
+  assert.equal(first.status, 200);
+  const old = tokenOf(first.json.joinUrl);
+  assert.equal((await new Client().get(`/api/auth/invite/${old}`)).status, 200);
+
+  const second = await mgr.action('member.invite', { email: 'relink.team@example.org', role: 'staff' });
+  assert.equal(second.status, 200);
+  const fresh = tokenOf(second.json.joinUrl);
+  assert.notEqual(fresh, old);
+  assert.equal((await new Client().get(`/api/auth/invite/${old}`)).status, 404, 'old link is dead');
+  assert.equal((await new Client().post('/api/auth/join', { token: old, name: 'Old Link', password: 'old-link-pass-1' })).status, 404);
+  const look = await new Client().get(`/api/auth/invite/${fresh}`);
+  assert.equal(look.status, 200);
+  assert.equal(look.json.role, 'staff', 'the new link carries the new role');
+
+  const pending = await pendingFor('relink.team@example.org');
+  assert.deepEqual(pending.map((i) => i.id), [second.json.invite.id], 'one live invite per email');
+  const ev = (await mgr.get('/api/events?since=0&limit=1000')).json.events;
+  const voided = ev.find((e) => e.entity_type === 'invite' && e.op === 'void' && e.entity_id === first.json.invite.id);
+  assert.ok(voided, 'the replaced invite is voided in the log');
+  assert.equal(voided.payload.replaced_by, second.json.invite.id);
+  assert.ok(!JSON.stringify(ev).includes(old) && !JSON.stringify(ev).includes(fresh), 'tokens stay out of the log');
+
+  const joined = await new Client().post('/api/auth/join', { token: fresh, name: 'Relink Staff', password: 'relink-pass-1' });
+  assert.equal(joined.status, 200);
+  assert.equal(joined.json.role, 'staff');
+});
+
+test('Cancel kills the link; cancelling twice is not found', async () => {
+  assert.ok((await mgr.get('/api/actions')).json.actions.includes('member.cancelInvite'), 'Team shows Cancel only when offered');
+  const inv = await mgr.action('member.invite', { email: 'cancel.team@example.org', role: 'volunteer' });
+  const t = tokenOf(inv.json.joinUrl);
+  const cancel = await mgr.action('member.cancelInvite', { id: inv.json.invite.id });
+  assert.equal(cancel.status, 200);
+  assert.equal(cancel.json.id, inv.json.invite.id);
+  assert.equal((await new Client().get(`/api/auth/invite/${t}`)).status, 404);
+  assert.equal((await new Client().post('/api/auth/join', { token: t, name: 'Too Late', password: 'too-late-pass-1' })).status, 404);
+  assert.deepEqual(await pendingFor('cancel.team@example.org'), [], 'gone from Invited');
+  assert.equal((await mgr.action('member.cancelInvite', { id: inv.json.invite.id })).status, 404, 'nothing left to cancel');
+  assert.equal((await mgr.action('member.cancelInvite', { id: '99999999-9999-4999-8999-999999999999' })).status, 404);
+  const ev = (await mgr.get('/api/events?since=0&limit=1000')).json.events;
+  assert.ok(ev.some((e) => e.action === 'member.cancelInvite' && e.op === 'void' && e.entity_id === inv.json.invite.id));
+  assert.equal((await mgr.get('/api/audit/verify')).json.ok, true);
+
+  // A cancelled invite can be sent again with a working link.
+  const again = await mgr.action('member.invite', { email: 'cancel.team@example.org', role: 'volunteer' });
+  assert.equal((await new Client().get(`/api/auth/invite/${tokenOf(again.json.joinUrl)}`)).status, 200);
+});
+
+test('only managers cancel invites, and only their own campaign\'s', async () => {
+  const target = await mgr.action('member.invite', { email: 'keep.team@example.org', role: 'volunteer' });
+  const t = tokenOf(target.json.joinUrl);
+  const join = async (email, role, name) => {
+    const inv = await mgr.action('member.invite', { email, role });
+    const cl = new Client();
+    const r = await cl.post('/api/auth/join', { token: tokenOf(inv.json.joinUrl), name, password: `${role}-pass-2026` });
+    assert.equal(r.status, 200);
+    return cl;
+  };
+  const staff = await join('staff.cancel.team@example.org', 'staff', 'Cancel Staff');
+  const vol = await join('vol.cancel.team@example.org', 'volunteer', 'Cancel Vol');
+  for (const cl of [staff, vol]) {
+    assert.equal((await cl.action('member.cancelInvite', { id: target.json.invite.id })).status, 403);
+    assert.ok(!(await cl.get('/api/actions')).json.actions.includes('member.cancelInvite'));
+  }
+  const otherMgr = new Client();
+  await otherMgr.signup({ workspaceName: 'Another Campaign' });
+  assert.equal((await otherMgr.action('member.cancelInvite', { id: target.json.invite.id })).status, 404, 'another campaign cannot touch it');
+  assert.equal((await new Client().get(`/api/auth/invite/${t}`)).status, 200, 'still works');
+});

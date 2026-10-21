@@ -36,7 +36,7 @@
 .map-canvas .leaflet-control-attribution { font: 10px/1.4 var(--font-mono); background: rgba(250, 248, 241, 0.85); color: #3a3834; }
 .map-canvas .leaflet-control-attribution a { color: #0c0c0c; }
 .map-page .map-canvas .leaflet-bar a { width: 48px; height: 48px; line-height: 48px; font-size: 20px; font-family: var(--font-serif); color: #0c0c0c; background: #faf8f1; border-bottom-color: #c9c3aa; }
-.map-page .map-canvas .leaflet-bar a:hover { background: #eeeadc; }
+@media (hover: hover) { .map-page .map-canvas .leaflet-bar a:hover { background: #eeeadc; } }
 .map-canvas .leaflet-marker-icon:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; border-radius: 50%; }
 
 /* ── Pins (L.divIcon): a circle with a tail, colored by the household band.
@@ -105,8 +105,10 @@
   border-color: #faf8f1;
   box-shadow: 0 0 0 3px #0c0c0c, 0 2px 6px rgba(0, 0, 0, 0.5);
 }
-.leaflet-marker-icon:hover .map-pin { transform: scale(1.1); }
-.leaflet-marker-icon:hover .map-pin--selected { transform: scale(1.18); }
+@media (hover: hover) {
+  .leaflet-marker-icon:hover .map-pin { transform: scale(1.1); }
+  .leaflet-marker-icon:hover .map-pin--selected { transform: scale(1.18); }
+}
 
 /* Nearby doors grouped: a white bubble with the door count, ringed by the
    share of support / undecided / opposed / unrated. Tap to zoom in. */
@@ -138,7 +140,7 @@
   font: 700 12px/1 var(--font-mono);
 }
 .map-cluster__n svg { width: 10px; height: 9px; fill: #0c0c0c; }
-.leaflet-marker-icon:hover .map-cluster { transform: scale(1.08); }
+@media (hover: hover) { .leaflet-marker-icon:hover .map-cluster { transform: scale(1.08); } }
 
 /* Sign flag: a little lawn sign, colored like the Signs chips.
    installed = filled green, requested = hollow yellow. On a door pin it sits
@@ -172,7 +174,7 @@
   text-underline-offset: 3px;
   cursor: pointer;
 }
-.fk-link:hover { color: var(--text-1); }
+@media (hover: hover) { .fk-link:hover { color: var(--text-1); } }
 
 /* Person tabs (several people at one door) */
 .fk-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 0 var(--s-3); padding: 2px; }
@@ -269,7 +271,7 @@
 .map-filter-btn__show { color: var(--text-3); }
 /* Quiet map controls beside the pill: Walk list (volunteers), Draw turf (desk) */
 .map-chip { padding: 0 16px 0 14px; text-decoration: none; }
-.map-chip:hover { background: var(--paper-1); color: var(--text-1); }
+@media (hover: hover) { .map-chip:hover { background: var(--paper-1); color: var(--text-1); } }
 .map-filter-btn__n {
   min-width: 28px;
   height: 28px;
@@ -302,6 +304,40 @@
 .btn.map-unloc__btn, .map-unloc .btn.geo-btn { min-height: 48px; padding: 0 16px; border-radius: 999px; display: inline-flex; align-items: center; }
 .map-unloc .geo-live:empty { display: none; }
 .map-unloc .geo-live { font-family: var(--font-mono); font-size: 11px; padding: 0 var(--s-2); }
+
+/* A volunteer's first visit: one slim line under the pill (the same ink as
+   the "Tap the new door" bar), gone once a door opens or ✕ is tapped. It
+   sits in the overlay column, so it never covers the pill or a sheet. */
+.map-hint {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  max-width: 100%;
+  padding: 0 0 0 var(--s-4);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--paper-0);
+  background: var(--ink);
+  border-radius: var(--r-card);
+  box-shadow: 3px 3px 0 rgba(12, 12, 12, 0.18);
+}
+.btn.map-hint__x {
+  flex: 0 0 auto;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: inherit;
+  background: transparent;
+  border-color: transparent;
+}
+@media (hover: hover) { .btn.map-hint__x:hover { background: color-mix(in srgb, currentColor 14%, transparent); border-color: transparent; } }
 
 /* Filter sheet: popover under the button on desktop, bottom sheet on phones */
 .map-scrim { position: absolute; inset: 0; z-index: 4; border: 0; padding: 0; margin: 0; background: rgba(12, 12, 12, 0.12); cursor: default; }
@@ -337,7 +373,7 @@
   cursor: pointer;
   touch-action: manipulation;
 }
-.map-fopt:hover { border-color: var(--ink); }
+@media (hover: hover) { .map-fopt:hover { border-color: var(--ink); } }
 .map-fopt:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .map-fopt__dot { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 50%; background: var(--dot, transparent); border: 1px solid var(--dot-ring, transparent); }
 .map-fopt[data-band='all'] .map-fopt__dot { background: conic-gradient(#2e6b3e 0 33%, #e0990b 0 66%, #8a1414 0); }
@@ -397,10 +433,13 @@
 .map-mode .map-mode__btns { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 /* Quiet light outlines on the dark bar; the yellow is Finish only, once it can finish. */
 .map-mode .btn { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 45%, transparent); min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; justify-content: center; }
-.map-mode .btn:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
 .map-mode .btn.map-mode__go { background: var(--mark); color: var(--mark-ink); border-color: var(--mark); }
-.map-mode .btn.map-mode__go:hover { background: var(--mark-deep); border-color: var(--mark-deep); }
-.map-mode .btn:disabled, .map-mode .btn:disabled:hover { background: transparent; opacity: 0.45; }
+.map-mode .btn:disabled { background: transparent; opacity: 0.45; }
+@media (hover: hover) {
+  .map-mode .btn:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+  .map-mode .btn.map-mode__go:hover { background: var(--mark-deep); border-color: var(--mark-deep); }
+  .map-mode .btn:disabled:hover { background: transparent; }
+}
 /* Drawing: one slim line, only as wide as it needs (taps beside it reach the map) */
 .map-mode--draw { align-self: flex-start; max-width: 100%; flex-wrap: nowrap; gap: var(--s-3); padding: 4px 4px 4px var(--s-4); }
 .map-mode--draw .map-mode__btns { flex-wrap: nowrap; gap: 6px; }
@@ -436,7 +475,7 @@
   touch-action: manipulation;
 }
 .map-fab svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8; }
-.map-fab:hover { background: var(--paper-1); }
+@media (hover: hover) { .map-fab:hover { background: var(--paper-1); } }
 /* "+ Door" (desk roles): a labelled pill, quiet even while active — the
    mode bar on top already says "Tap the new door". */
 .map-fab--add {
@@ -722,7 +761,7 @@
   touch-action: manipulation;
 }
 .door-channel__btn:first-child { border-left: 0; }
-.door-channel__btn:hover { background: var(--paper-1); color: var(--text-1); }
+@media (hover: hover) { .door-channel__btn:hover { background: var(--paper-1); color: var(--text-1); } }
 .door-channel__btn.is-on { background: var(--ink); color: var(--paper-0); }
 .door-channel__btn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
 
@@ -761,19 +800,17 @@
   border-bottom: 1px solid var(--rule);
   cursor: pointer;
 }
-.map-place-row:hover { background: var(--paper-1); }
+@media (hover: hover) { .map-place-row:hover { background: var(--paper-1); } }
 .map-place-row:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
 .map-place-row__name { font-weight: 600; }
 .map-place-row__addr { font-size: 13px; }
 .map-place-empty { padding: var(--s-3) var(--s-2); }
 
 /* Toast: above Leaflet and the phone tabbar, with an optional action. Its
-   button (Change / Undo) is a light outline, not yellow. */
+   button (Change / Undo) is app.css's light outline, not yellow. */
 .toast.map-toast { z-index: 1000; max-width: calc(100vw - 32px); width: max-content; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); min-height: 48px; font-size: 13px; }
 .toast.map-toast:not(:has(button)) { padding-right: var(--s-4); }
 .btn.map-toast__btn { min-height: 48px; white-space: nowrap; display: inline-flex; align-items: center; }
-.toast .btn.map-toast__btn { color: inherit; background: transparent; border-color: color-mix(in srgb, currentColor 55%, transparent); }
-.toast .btn.map-toast__btn:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
 @media (max-width: 720px) {
   .toast.map-toast { bottom: calc(var(--tabbar-h, 0px) + var(--s-3)); }
   /* A card is open along the bottom: the toast goes over the map above it,
@@ -843,12 +880,12 @@
 .turf-invite { color: var(--text-1); text-underline-offset: 3px; display: inline-flex; align-items: center; min-height: 48px; }
 .fk-link.turf-invite-link { align-self: flex-start; margin-left: calc(-1 * var(--s-1)); }
 .btn.turf-delete { color: var(--danger); }
-.btn.turf-delete:hover { color: var(--danger); border-color: var(--danger); }
+@media (hover: hover) { .btn.turf-delete:hover { color: var(--danger); border-color: var(--danger); } }
 .turf-confirm { border: 1px solid var(--danger); border-radius: var(--r-ctrl); padding: var(--s-3); background: color-mix(in srgb, var(--danger) 7%, var(--paper-0)); }
 .turf-confirm p { margin: 0 0 var(--s-2); font-size: 15px; }
 .turf-confirm__btns { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .btn.turf-danger { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
-.btn.turf-danger:hover { background: color-mix(in srgb, var(--danger) 85%, var(--ink)); border-color: var(--danger); }
+@media (hover: hover) { .btn.turf-danger:hover { background: color-mix(in srgb, var(--danger) 85%, var(--ink)); border-color: var(--danger); } }
 .turf-form-error { margin: 0 0 var(--s-2); }
 .turf-crew { margin: 0; font-size: 14px; color: var(--text-2); }
 

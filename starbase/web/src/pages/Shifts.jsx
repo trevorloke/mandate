@@ -8,7 +8,9 @@
 //                  it. Desk: one yellow button under the spots — "+ Add
 //                  volunteer" while spots are open (people holding the shift's
 //                  role float to the top), "Notify everyone" (email + text)
-//                  once it's full; the other sits quiet under the roster. Tap
+//                  once it's full (then "Notify again"); the other sits quiet
+//                  under the roster. Without email/text connected nothing is
+//                  sent and nothing sends later — the screen says so. Tap
 //                  a person for phone, email, status and remove. Volunteers:
 //                  "✓ You're on this shift" in plain green (+ a quiet "Can't
 //                  make it" → "Can't make it? Yes · No" when the server offers
@@ -127,20 +129,22 @@ const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 const ASSIGN_TONE = { assigned: '', confirmed: 'ok', completed: 'ok', declined: 'danger', no_show: 'danger' };
 const NOTIFY_CHIP = { sent: 'chip-ok', queued: 'chip-warn', failed: 'chip-danger', skipped: '' };
-// What happened to one message, in plain words ("Email waiting to send").
+// What happened to one message, in plain words ("Email not sent"). 'queued'
+// means the server sent nothing because that channel isn't connected, and
+// nothing sends it later: connect it, then Notify again.
 const NOTIFY_WORDS = {
-  email: { sent: 'Email sent', queued: 'Email waiting to send', failed: 'Email didn’t send', skipped: 'No email on file' },
-  text: { sent: 'Text sent', queued: 'Text waiting to send', failed: 'Text didn’t send', skipped: 'No phone on file' },
+  email: { sent: 'Email sent', queued: 'Email not sent', failed: 'Email didn’t send', skipped: 'No email on file' },
+  text: { sent: 'Text sent', queued: 'Text not sent', failed: 'Text didn’t send', skipped: 'No phone on file' },
 };
 const NOTIFY_TITLE = {
-  queued: 'Sends once it’s connected',
-  failed: 'Try again, or reach them another way',
+  email: { queued: 'Not sent — email isn’t connected', failed: 'Try again, or reach them another way' },
+  text: { queued: 'Not sent — texting isn’t connected', failed: 'Try again, or reach them another way' },
 };
 
 function NotifyChip({ channel, status }) {
   if (!status) return null;
   return (
-    <span className={`chip ${NOTIFY_CHIP[status] ?? ''}`.trim()} title={NOTIFY_TITLE[status]}>
+    <span className={`chip ${NOTIFY_CHIP[status] ?? ''}`.trim()} title={NOTIFY_TITLE[channel]?.[status]}>
       {NOTIFY_WORDS[channel]?.[status] ?? `${channel} ${status}`}
     </span>
   );
@@ -571,7 +575,10 @@ function AssigneeRow({ a, open, onToggle, canDesk, busy, onStatus, onRemove }) {
           )}
           {a.notified_at && (
             <div className="ops-chips">
-              <span className="ops-meta mono">Notified {fmtStamp(a.notified_at)}</span>
+              {/* "Notified" only when a message actually went out. */}
+              <span className="ops-meta mono">
+                {a.notify_email === 'sent' || a.notify_text === 'sent' ? 'Notified' : 'Tried'} {fmtStamp(a.notified_at)}
+              </span>
               <NotifyChip channel="email" status={a.notify_email} />
               <NotifyChip channel="text" status={a.notify_text} />
             </div>
@@ -695,10 +702,12 @@ function ShiftDetail({ id, canDesk, me }) {
   const providers = brief.data?.providers;
   const missingEmail = providers && !providers.email;
   const missingText = providers && !providers.text;
+  // Said before Send, and literally true: a channel that isn't connected
+  // sends nothing, now or later.
   let providerNote = null;
-  if (missingEmail && missingText) providerNote = 'Will send once email and text are connected.';
-  else if (missingEmail) providerNote = 'Will send once email is connected.';
-  else if (missingText) providerNote = 'Texts will send once texting is connected.';
+  if (missingEmail && missingText) providerNote = 'Not connected — nothing will be sent. Connect email and text, then Notify again.';
+  else if (missingEmail) providerNote = 'Email isn’t connected — no emails will be sent.';
+  else if (missingText) providerNote = 'Texting isn’t connected — no texts will be sent.';
   // Desk: the yellow button is the job at hand. Open spots → fill them
   // ("Add volunteer"); full → tell the crew ("Notify everyone").
   const primary = over ? null : full ? 'notify' : 'add';
@@ -801,13 +810,16 @@ function ShiftDetail({ id, canDesk, me }) {
 
   // Nobody on it yet → nothing to send, so the quiet Notify stays out of the way.
   const showNotify = active.length > 0 || !!results || !!notifyError;
+  // Once tried, the button says what pressing it again does: it messages
+  // everyone on the shift again (the only way a not-sent message goes out).
+  const notifiedBefore = !!results || active.some((a) => a.notified_at);
   const notifyBlock = (isPrimary) => showNotify && (
     <section className="ops-notify" aria-label="Notify volunteers">
       {!confirming ? (
         <button type="button" className={`btn ops-tap${isPrimary ? ' btn-primary ops-wide' : ''}`}
           disabled={active.length === 0}
           onClick={() => { setConfirming(true); setResults(null); setNotifyError(null); }}>
-          Notify everyone
+          {notifiedBefore ? 'Notify again' : 'Notify everyone'}
         </button>
       ) : (
         <div className="ops-confirm" role="group" aria-label="Send notification">
@@ -822,26 +834,30 @@ function ShiftDetail({ id, canDesk, me }) {
         </div>
       )}
       {confirming && providerNote && (
-        <span className="ops-meta">{providerNote} <Link to="/outreach/website">Connect</Link></span>
+        <span className="ops-meta">{providerNote} <Link to="/outreach/website?connect=1">Connect</Link></span>
       )}
       {notifyError && <p className="error">{notifyError}</p>}
       {results && (results.length === 0 ? (
         <span className="ops-meta" role="status">Nobody to notify.</span>
       ) : (
         <>
-          {/* Say "Sent" only when something actually went out; without a
-              provider every message waits until one is connected. */}
+          {/* Say "Sent" only when something actually went out. Without a
+              provider nothing is sent and nothing sends later: say which
+              channel to connect, then Notify again. */}
           {(() => {
             const reached = results.filter((r) => r.email === 'sent' || r.text === 'sent').length;
-            const waiting = results.filter((r) => r.email !== 'sent' && r.text !== 'sent'
-              && (r.email === 'queued' || r.text === 'queued')).length;
+            const notSent = results.filter((r) => r.email !== 'sent' && r.text !== 'sent'
+              && (r.email === 'queued' || r.text === 'queued'));
+            const offEmail = notSent.some((r) => r.email === 'queued');
+            const offText = notSent.some((r) => r.text === 'queued');
+            const connect = offEmail && offText ? 'email and text' : offEmail ? 'email' : 'text';
             // Green only when something actually went out.
             return (
               <p className={reached > 0 ? 'ops-done' : 'ops-done ops-done--wait'} role="status">
                 {reached > 0 && <>✓ Sent to {people(reached)}</>}
-                {reached > 0 && waiting > 0 && ' · '}
-                {waiting > 0 && <>Waiting to send · {people(waiting)}</>}
-                {reached === 0 && waiting === 0 && <>Couldn&apos;t reach anyone — see Details</>}
+                {reached > 0 && notSent.length > 0 && ' · '}
+                {notSent.length > 0 && <>Not sent · {people(notSent.length)} — connect {connect}, then Notify again</>}
+                {reached === 0 && notSent.length === 0 && <>Couldn&apos;t reach anyone — see Details</>}
               </p>
             );
           })()}

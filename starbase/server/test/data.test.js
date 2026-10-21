@@ -160,3 +160,29 @@ test('sample data: loads a full Surrey campaign, safe contacts only, then clears
   assert.equal(gifts, 0);
   void ws;
 });
+
+test('sample data: each rated person’s rated_at is their sample knock’s time, not the load time', async () => {
+  const fresh = new Client();
+  const s = await fresh.signup({ workspaceName: 'Sample Times WS', jurisdiction: 'bc-municipal' });
+  assert.equal((await fresh.post('/api/data/sample', {})).status, 200);
+  const db = await getDb();
+  const rows = (await db.query(
+    `select p.id, p.name, p.rating, p.rated_at,
+            (select max(c.created_at) from contacts c where c.person_id = p.id) as last_contact_at,
+            (select count(*)::int from contacts c where c.person_id = p.id) as contacts
+     from persons p where p.workspace_id = $1`, [s.json.workspace.id],
+  )).rows;
+  const rated = rows.filter((r) => r.rating);
+  assert.ok(rated.length >= 20, 'plenty of rated sample people');
+  for (const r of rated) {
+    assert.ok(r.last_contact_at, `${r.name} has a sample contact`);
+    assert.equal(new Date(r.rated_at).toISOString(), new Date(r.last_contact_at).toISOString(), `${r.name}: rated when last contacted`);
+  }
+  assert.ok(rows.filter((r) => !r.rating).every((r) => r.rated_at === null && r.contacts === 0), 'unrated: no time, no contact');
+  // Spread across the week, never all "now": profiles show different days.
+  assert.ok(new Set(rated.map((r) => new Date(r.rated_at).toISOString().slice(0, 10))).size >= 3);
+  // And the profile agrees with itself: "Rated" and "Last contact" are the same moment.
+  const p = (await fresh.get(`/api/persons/${rated[0].id}`)).json;
+  assert.equal(new Date(p.person.rated_at).toISOString(), new Date(p.contacts[0].created_at).toISOString());
+  assert.equal(p.contacts[0].rating, p.person.rating);
+});

@@ -1,7 +1,9 @@
 // Outbound notifications — email + SMS behind provider-pluggable adapters.
 // No SDKs: plain fetch against provider REST APIs, so there are zero new
-// dependencies and a missing provider degrades to an honest 'queued' status
-// (nothing is lost; configure the provider and resend).
+// dependencies and a missing provider degrades to an honest 'queued' status:
+// nothing was sent and nothing sends by itself. The message is kept, and once
+// the provider is configured a person sends it — blast.resend ("Send now")
+// for newsletters and press, shift.notify again ("Notify again") for shifts.
 //
 //   Email: set RESEND_API_KEY (+ optional MAIL_FROM, default onboarding@resend.dev)
 //   SMS:   set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM

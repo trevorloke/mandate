@@ -112,3 +112,41 @@ test('filing.update flips status and role gates hold', async () => {
   const unknown = await c.action('nope.nothing', {});
   assert.equal(unknown.status, 404);
 });
+
+test('brief: each flagged gift carries the donor’s year total and the cap (desk only)', async () => {
+  const c = new Client();
+  await c.signup({ workspaceName: 'Cap Numbers WS', jurisdiction: 'bc-municipal' });
+  const donor = await c.createPerson('Capped Donor');
+  const year = new Date().getUTCFullYear();
+  await c.action('gift.log', { person_id: donor.id, amount_cents: 50000, date: `${year - 1}-06-01` }); // other year: not counted
+  await c.action('gift.log', { person_id: donor.id, amount_cents: 100000, date: `${year}-01-15` });
+  const over = await c.action('gift.log', { person_id: donor.id, amount_cents: 40000, date: `${year}-02-01` });
+  assert.equal(over.json.gift.flagged, true);
+
+  let flagged = (await c.get('/api/brief')).json.flagged;
+  assert.equal(flagged.length, 1);
+  assert.equal(flagged[0].id, over.json.gift.id);
+  assert.equal(flagged[0].total_cents, 140000, 'this year only');
+  assert.equal(flagged[0].cap_cents, 125000, 'the bc-municipal cap the engine used');
+  assert.equal(flagged[0].person_id, donor.id);
+  assert.match(flagged[0].flag_reason, /\$1400\.00 for \d{4} — over the \$1250\.00 limit/, 'the legal wording is unchanged');
+
+  // A second crossing: both rows carry the donor's total as it stands now.
+  const again = await c.action('gift.log', { person_id: donor.id, amount_cents: 10000, date: `${year}-03-01` });
+  flagged = (await c.get('/api/brief')).json.flagged;
+  assert.equal(flagged.length, 2);
+  assert.ok(flagged.every((f) => f.total_cents === 150000 && f.cap_cents === 125000));
+  // Voiding a gift takes it out of the total.
+  await c.action('gift.void', { id: again.json.gift.id });
+  flagged = (await c.get('/api/brief')).json.flagged;
+  assert.deepEqual(flagged.map((f) => [f.total_cents, f.cap_cents]), [[140000, 125000]]);
+
+  // A workspace override cap is the one reported.
+  const { getDb } = await import('../db/client.js');
+  const me = (await c.get('/api/auth/me')).json;
+  await (await getDb()).query(
+    `update workspaces set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{capCents}', '100000'::jsonb) where id = $1`,
+    [me.workspace.id],
+  );
+  assert.equal((await c.get('/api/brief')).json.flagged[0].cap_cents, 100000);
+});

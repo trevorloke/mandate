@@ -177,7 +177,7 @@ await page.click('.pf-sec__btn:has-text("Details")');
 t = await text();
 check('profile: social handle linked', (await page.$('a[href*="x.com/linreports"]')) !== null, t.slice(0, 120));
 
-// ── 6. Shifts: create, assign, notify (queued without providers) ──
+// ── 6. Shifts: create, assign, notify (nothing sent without providers) ──
 const shift = (await act('shift.create', {
   title: 'Saturday canvass — Newton', role: 'doorknocking', location: 'Newton Rec Centre, 13730 72 Ave',
   starts_at: '2026-11-07T10:00:00-08:00', ends_at: '2026-11-07T13:00:00-08:00',
@@ -192,8 +192,8 @@ await page.click('.ops-confirm button:has-text("Send")');
 await sleep(900);
 await page.click('.ops-notify button:has-text("Details")').catch(() => {});
 t = await text();
-// No provider on the test server: nothing may claim to be sent.
-check('shift notify shows per-channel results', /email waiting to send/i.test(t) && /text waiting to send/i.test(t) && !/✓ Sent/.test(t), (t.match(/Sam Ortiz.{0,80}/) || [''])[0]);
+// No provider on the test server: nothing may claim to be sent, or to send later.
+check('shift notify shows per-channel results', /email not sent/i.test(t) && /text not sent/i.test(t) && /connect email and text, then Notify again/.test(t) && !/✓ Sent/.test(t) && !/waiting to send/i.test(t), (t.match(/Sam Ortiz.{0,80}/) || [''])[0]);
 await shot('5-shift');
 
 // ── 7. Outreach: newsletter, press, petition, website bridge ──
@@ -245,13 +245,14 @@ await page.click('button:has-text("Write newsletter")');
 await page.waitForSelector('#newsletter-subject', { timeout: 5000 });
 await page.fill('#newsletter-subject', 'This week in Surrey');
 await page.fill('#newsletter-body', 'Hello neighbours — here is what we heard at the doors this week.');
-await page.click('button:has-text("Send")');
+// Without email connected the button says what it does ("Save — not sent yet").
+await page.click('form.ot-compose button[type="submit"]');
 await sleep(300);
-const yes = await page.$('button:has-text("Yes, send")');
+const yes = await page.$('button:has-text("Yes, send"), button:has-text("Yes, save")');
 if (yes) await yes.click();
 await sleep(900);
 t = await text();
-check('newsletter blast saved as queued without a provider', /queued/i.test(t) && /connect an email provider/i.test(t));
+check('newsletter blast saved, not sent, without a provider', /Saved for \d+ subscribers? — not sent/.test(t) && /Connect email, then Send now/.test(t) && !/Sent to/.test(t) && !/send later/i.test(t));
 await shot('8-newsletter');
 
 await go('/outreach/press');

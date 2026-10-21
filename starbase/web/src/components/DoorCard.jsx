@@ -20,7 +20,7 @@
 // to another person at the door sends it on its own — the same path as
 // "Save note" — and the toast says "Note saved".
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { action, ApiError } from '../api.js';
 import { logContact } from '../offline.js';
@@ -53,6 +53,8 @@ const CHANNEL_CHIP = { phone: 'By phone', text: 'By text' };
 export const QUEUED_MSG = 'Saved offline';
 // Queued with signal showing: the server didn't answer (dead zone, outage).
 const QUEUED_NO_SERVER_MSG = 'Saved on this phone — sends soon';
+// Queued because the sign-in lapsed: the outbox holds it until they sign in.
+const QUEUED_SIGNED_OUT_MSG = 'Saved on this phone — sign in to send';
 export const OFFLINE_MSG = 'Needs signal — try again';
 const SIGNED_OUT_MSG = 'Signed out — sign in, then try again';
 const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -271,6 +273,10 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
 // call log, note) resets naturally when the user moves to another door.
 export default function DoorCard({ door, selectedId, onSelect, onClose, toast, me, canCreate = true }) {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  // The profile's back link reads this: "← Map", back to this door (the URL
+  // carries ?person=, so the card opens again).
+  const fromHere = { from: { to: `${location.pathname}${location.search}`, label: 'Map' } };
   const refresh = useRefresh();
   const rateRef = useRef(null);
   const [local, setLocal] = useState({});     // optimistic ratings by person id
@@ -350,7 +356,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     try {
       // The outbox: sends now when there's signal, saves on the phone when
       // there isn't (and replays exactly once — the server dedupes on its id).
-      const { queued } = await logContact({
+      const { queued, signedOut } = await logContact({
         person_id: person.id,
         channel: via,
         outcome,
@@ -363,7 +369,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       if (queued) {
         // Keep the optimistic rating; Shell refreshes everything once the
         // outbox sends. Refetching now would only pause (offline) or fail.
-        toast(isOffline() ? QUEUED_MSG : QUEUED_NO_SERVER_MSG, change);
+        toast(isOffline() ? QUEUED_MSG : signedOut ? QUEUED_SIGNED_OUT_MSG : QUEUED_NO_SERVER_MSG, change);
         return;
       }
       const who = multi ? `${firstName(person.name)} · ` : '';
@@ -570,7 +576,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           </div>
 
           <div className="door-more__foot">
-            <Link className="btn btn-quiet door-act" to={`/people/${sel.id}`}>Profile</Link>
+            <Link className="btn btn-quiet door-act" to={`/people/${sel.id}`} state={fromHere}>Profile</Link>
             {sel.rated_at && <span className="muted mono door-more__when">Rated {localDate(sel.rated_at)}</span>}
           </div>
         </More>

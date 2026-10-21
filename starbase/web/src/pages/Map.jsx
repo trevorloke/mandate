@@ -5,7 +5,9 @@
 // its corner) — the only number on the map is a group's door count: doors
 // that would overlap at the current zoom merge into one white bubble with a
 // house and the count — tap it to zoom in. Volunteers open on their own turf
-// ("My turf"). The chrome is one row: the "Show: …" filter pill (its sheet:
+// ("My turf"); on their first visit one slim line under the pill says "Tap a
+// house to start" until they open a door or tap its ✕ (remembered per
+// browser). The chrome is one row: the "Show: …" filter pill (its sheet:
 // which doors, then — desk — the turf outlines switch, walk lists and
 // "Draw turf"), then a volunteer's "Walk list" chip, or for desk roles the
 // "Draw turf" control and the "Not on map" count chip, and two round
@@ -71,6 +73,10 @@ const EMPTY_LIST = [];
 const EMPTY_DRAFT = { points: [], naming: false };
 const readTurfsPref = () => { try { return localStorage.getItem(TURFS_PREF) !== '0'; } catch { return true; } };
 const writeTurfsPref = (on) => { try { localStorage.setItem(TURFS_PREF, on ? '1' : '0'); } catch { /* storage blocked */ } };
+// A volunteer's first-visit hint, once per browser (blocked storage: once per visit).
+const HINT_PREF = 'starbase:map:hint-seen';
+const readHintSeen = () => { try { return localStorage.getItem(HINT_PREF) === '1'; } catch { return false; } };
+const writeHintSeen = () => { try { localStorage.setItem(HINT_PREF, '1'); } catch { /* storage blocked */ } };
 
 const hashIndex = (s, n) => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % n; };
 const isColor = (c) => typeof c === 'string' && c.length <= 20 && typeof CSS !== 'undefined' && CSS.supports?.('color', c);
@@ -803,6 +809,8 @@ export default function MapPage() {
 
   const [filterPick, setFilter] = useState(null); // null: the role's default (below)
   const [showTurfs, setShowTurfs] = useState(readTurfsPref);
+  const [hintSeen, setHintSeen] = useState(readHintSeen);
+  const hideHint = useCallback(() => { setHintSeen(true); writeHintSeen(); }, []);
   const [draft, setDraft] = useState(EMPTY_DRAFT); // turf being drawn: [lat, lng] points
   const [turfBusy, setTurfBusy] = useState(false);
   const [turfError, setTurfError] = useState(null);
@@ -1349,6 +1357,12 @@ export default function MapPage() {
   const signSheetOpen = Boolean(signSel && !mode && !pickerOpen && !addAt && !selectedDoor && !turfSheetOpen);
   const hasSheet = Boolean(pickerOpen || addAt || naming || (selectedDoor && !mode) || turfSheetOpen || signSheetOpen);
   const showEmpty = doorsQ.data && doors.length === 0 && !hasSheet && !mode;
+  // First visit (volunteers): "Tap a house to start" under the pill, only on
+  // the plain map with houses to tap — never over a card, sheet or mode bar.
+  // Opening any door counts as having started.
+  useEffect(() => { if (selectedKey && !hintSeen) hideHint(); }, [selectedKey, hintSeen, hideHint]);
+  const showHint = !canCreate && !hintSeen && !hasSheet && !mode && !filterOpen && !noSignal
+    && !personParam && !turfParam && visible.length > 0;
 
   // Fit a turf: desk roles see the whole shape; a volunteer sees its doors
   // close enough that each is its own pin (the shape runs past the edges).
@@ -1538,6 +1552,12 @@ export default function MapPage() {
                 )}
               </div>
             )}
+          </div>
+        )}
+        {showHint && (
+          <div className="map-hint" role="status">
+            <span className="map-hint__text">Tap a house to start</span>
+            <button type="button" className="btn map-hint__x" onClick={hideHint} aria-label="Dismiss" title="Dismiss">✕</button>
           </div>
         )}
       </div>

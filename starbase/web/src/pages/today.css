@@ -357,3 +357,27 @@ h2.today-h {
   .today-morebox__tools .btn,
   .today-sample-clear .btn { flex: 1 1 140px; }
 }
+
+/* ── Volunteer: "You 6 · Team 38 doors this week" — one line, numbers big ── */
+.today-mine {
+  margin: var(--s-4) 0 0;
+  font-size: 15px;
+  line-height: 1.25;
+  color: var(--text-2);
+}
+.today-mine__pair { white-space: nowrap; }
+.today-mine__n {
+  font-family: var(--font-serif);
+  font-size: clamp(28px, 8vw, 40px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--text-1);
+}
+.today-mine__dot { color: var(--text-3); }
+.today-mine__what { white-space: nowrap; }
+/* Calls and texts under More: the same shape, smaller. */
+.today-mine.is-small { margin: var(--s-2) 0; font-size: 14px; }
+.today-mine.is-small .today-mine__n { font-size: 22px; }
+.today-morebox__body > .today-mine.is-small:first-child { margin-top: var(--s-3); }

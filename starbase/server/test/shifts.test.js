@@ -133,3 +133,50 @@ test('a volunteer books and leaves a shift themselves, and sees no one else\'s c
   assert.equal((await vol.action('shift.join', { shift_id: past.id })).status, 409, 'past shifts cannot be joined');
   assert.equal((await vol.action('shift.assign', { shift_id: s.id, person_id: third.id })).status, 403, 'volunteers still cannot book other people');
 });
+
+test('nothing sends by itself: "Notify again" after connecting reaches the people whose last result was queued', async () => {
+  const s = (await c.action('shift.create', {
+    title: 'Notify again — Fleetwood', starts_at: '2030-06-01T10:00:00-07:00', location: 'Fleetwood Park',
+  })).json.shift;
+  const both = await c.createPerson('Notify Both', { email: 'notify.both@example.org', phone: '604-555-0123' });
+  const textOnly = await c.createPerson('Notify Text', { phone: '604-555-0124' });
+  for (const p of [both, textOnly]) await c.action('shift.assign', { shift_id: s.id, person_id: p.id });
+
+  const ENV = ['RESEND_API_KEY', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM'];
+  const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
+  for (const k of ENV) delete process.env[k];
+  const first = await c.action('shift.notify', { shift_id: s.id });
+  const byName1 = Object.fromEntries(first.json.notified.map((r) => [r.name, r]));
+  assert.deepEqual([byName1['Notify Both'].email, byName1['Notify Both'].text], ['queued', 'queued'], 'not connected: not sent');
+  assert.deepEqual([byName1['Notify Text'].email, byName1['Notify Text'].text], ['skipped', 'queued']);
+
+  const emails = [], texts = [];
+  const realFetch = globalThis.fetch;
+  Object.assign(process.env, {
+    RESEND_API_KEY: 'test-key', TWILIO_ACCOUNT_SID: 'AC-test', TWILIO_AUTH_TOKEN: 'tok', TWILIO_FROM: '+16045550100',
+  });
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('https://api.resend.com/')) { emails.push(JSON.parse(init.body)); return new Response('{}', { status: 200 }); }
+    if (u.startsWith('https://api.twilio.com/')) { texts.push(Object.fromEntries(new URLSearchParams(init.body))); return new Response('{}', { status: 201 }); }
+    return realFetch(url, init);
+  };
+  try {
+    const again = await c.action('shift.notify', { shift_id: s.id });
+    assert.equal(again.status, 200);
+    const byName = Object.fromEntries(again.json.notified.map((r) => [r.name, r]));
+    assert.deepEqual([byName['Notify Both'].email, byName['Notify Both'].text], ['sent', 'sent']);
+    assert.deepEqual([byName['Notify Text'].email, byName['Notify Text'].text], ['skipped', 'sent']);
+    assert.deepEqual(emails.map((m) => m.to[0]), ['notify.both@example.org']);
+    assert.deepEqual(texts.map((m) => m.To).sort(), ['604-555-0123', '604-555-0124']);
+    assert.match(emails[0].text, /Notify again — Fleetwood/);
+    assert.match(texts[0].Body, /Where: Fleetwood Park/);
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+  const detail = (await c.get(`/api/shifts/${s.id}`)).json.assignees;
+  const row = detail.find((a) => a.name === 'Notify Both');
+  assert.equal(row.notify_email, 'sent', 'the latest result replaces "queued"');
+  assert.equal(row.notify_text, 'sent');
+});

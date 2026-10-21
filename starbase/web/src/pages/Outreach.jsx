@@ -215,36 +215,50 @@ function LinkItem({ label, sub, href, onCopied }) {
 
 const copiedToast = (toast, what) => (ok) => toast(ok ? `${what} copied` : 'Could not copy — open the link and copy it from there');
 
-function StatusChip({ status }) {
+function StatusChip({ status, label }) {
   const cls = status === 'sent' || status === 'subscribed' || status === 'active' ? 'chip chip-ok'
     : status === 'queued' ? 'chip ot-chip-queued'
     : status === 'failed' ? 'chip chip-danger'
     : 'chip ot-chip-ghost';
-  return <span className={cls}>{status}</span>;
+  return <span className={cls}>{label || status}</span>;
 }
 
-// The one place a send's outcome is said. Server rule (blast.send): every
-// message sent → 'sent'; every message failed → 'failed'; anything else →
-// 'queued'. With no provider every message is queued; WITH a provider,
-// 'queued' means a mix of sent + failed, so the line has to say which.
+// The one place a send's outcome is said. Server rule (blast.send and
+// blast.resend): everyone sent → 'sent'; everyone failed → 'failed';
+// anything else → 'queued'. 'queued' with the no-provider note means nothing
+// went out — email wasn't connected. It is saved, never sent by itself; once
+// email is connected "Send now" (blast.resend) sends it. 'queued' with any
+// other note is a mix of sent + failed.
 const noProviderNote = (note) => /no email provider/i.test(note || '');
+const savedUnsent = (b) => b?.status === 'queued' && noProviderNote(b.provider_note);
+const KIND_NOUN = { newsletter: ['subscriber', 'subscribers'], press: ['media contact', 'media contacts'] };
+const audienceWords = (kind, n) => `${n} ${plural(n, ...(KIND_NOUN[kind] || ['recipient', 'recipients']))}`;
 // Where "Connect" goes: the Website tab, with its More open on Email & texting.
 const CONNECT_TO = '/outreach/website?connect=1';
 const ConnectLink = () => <Link className="ot-connect" to={CONNECT_TO}>Connect</Link>;
+// `blast.resent` is set after "Send now": { sent, failed, skipped }.
 function BlastResult({ blast, emailConfigured, onDismiss }) {
   if (!blast) return null;
   const n = blast.audience_count ?? 0;
-  const who = `${n} ${plural(n, 'recipient', 'recipients')}`;
-  const partial = blast.status === 'queued' && emailConfigured === true && !noProviderNote(blast.provider_note);
+  const who = audienceWords(blast.kind, n);
+  const unsent = savedUnsent(blast);
+  const partial = blast.status === 'queued' && !unsent;
+  const gone = blast.resent?.skipped || 0;
   const line = blast.status === 'sent' ? `Sent to ${who}.`
-    : blast.status === 'failed' ? `Failed — ${who} not reached.`
+    : blast.status === 'failed' ? (n === 0 ? 'Not sent — everyone on it unsubscribed.' : `Failed — ${who} not reached.`)
     : partial ? `Partly sent to ${who}.`
-    : `Queued for ${who} — connect an email provider to send.`;
+    : `Saved for ${who} — not sent.`;
   return (
     <div className="ot-result" data-status={blast.status} role="status">
       <div className="ot-result-head">
         <span className="ot-status-dot" data-status={blast.status} aria-hidden="true" />
-        <strong>{line}</strong>
+        <strong>
+          {line}
+          {gone > 0 && n > 0 && <span className="ot-result-next"> {gone} unsubscribed first.</span>}
+          {unsent && emailConfigured !== true && (
+            <span className="ot-result-next"> <Link to={CONNECT_TO}>Connect email</Link>, then Send now.</span>
+          )}
+        </strong>
         {onDismiss && <button type="button" className="btn btn-quiet ot-btn-tap" onClick={onDismiss}>OK</button>}
       </div>
       {(partial || blast.status === 'failed') && blast.provider_note && <div className="provider">{blast.provider_note}</div>}
@@ -302,16 +316,16 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
           <div className="ot-confirm" role="group" aria-label="Confirm send">
             <span>{offline ? 'Save for' : 'Send to'} <strong>{audienceCount}</strong> {noun(audienceCount)}?</span>
             <button type="button" className="btn btn-primary ot-btn-tap" disabled={act.busy} onClick={send}>
-              {act.busy ? (offline ? 'Saving…' : 'Sending…') : offline ? 'Yes, send later' : 'Yes, send'}
+              {act.busy ? (offline ? 'Saving…' : 'Sending…') : offline ? 'Yes, save' : 'Yes, send'}
             </button>
             <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setConfirming(false)}>No</button>
             {/* No Connect link here: leaving would drop the draft. */}
-            {offline && <span className="ot-confirm-note">Email not connected yet</span>}
+            {offline && <span className="ot-confirm-note">Email isn’t connected — nothing is sent.</span>}
           </div>
         ) : (
           <>
             <button type="submit" className="btn btn-primary ot-btn-tap" disabled={!ready || empty || act.busy}>
-              {offline ? 'Save to send later' : 'Send'}
+              {offline ? 'Save — not sent yet' : 'Send'}
             </button>
             <span className="ot-audience">
               {audienceCount == null ? '…' : `${audienceCount} ${noun(audienceCount)}`}
@@ -326,9 +340,10 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
   );
 }
 
-// Past newsletters and press releases, newest first.
+// Past newsletters and press releases, newest first. Saves that never went
+// out are not "sent": they sit on the first look under "Not sent".
 function SentList({ blasts, loading, kindFilter }) {
-  const rows = (blasts || []).filter((b) => !kindFilter || b.kind === kindFilter);
+  const rows = (blasts || []).filter((b) => (!kindFilter || b.kind === kindFilter) && !savedUnsent(b));
   if (loading) return <p className="ot-note">Loading…</p>;
   if (rows.length === 0) return <p className="ot-empty">Nothing sent yet.</p>;
   return (
@@ -343,15 +358,81 @@ function SentList({ blasts, loading, kindFilter }) {
                 <span>{b.audience_count} {plural(b.audience_count, 'recipient', 'recipients')}</span>
                 <span>{fmtWhen(b.sent_at || b.created_at)}</span>
               </span>
-              {b.status !== 'sent' && b.provider_note && (
-                <span className="ot-row-note">{noProviderNote(b.provider_note) ? 'Email not connected' : b.provider_note}</span>
-              )}
+              {b.status !== 'sent' && b.provider_note && <span className="ot-row-note">{b.provider_note}</span>}
             </span>
-            <StatusChip status={b.status} />
+            <StatusChip status={b.status} label={b.status === 'queued' ? 'partly sent' : undefined} />
           </div>
         </li>
       ))}
     </ul>
+  );
+}
+
+// Saved while email wasn't connected: nothing went out, and nothing goes out
+// by itself. Once email is connected each row offers a quiet "Send now · N"
+// (blast.resend sends only the ones still waiting), asked once in place.
+function UnsentRow({ b, emailConfigured, canWrite, onResent }) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const act = useAction(() => {
+    queryClient.invalidateQueries({ queryKey: ['blasts'] });
+  });
+  const n = b.audience_count ?? 0;
+  const canSend = canWrite && emailConfigured === true;
+  const sendNow = async () => {
+    const res = await act.run('blast.resend', { id: b.id });
+    setConfirming(false);
+    if (res) onResent?.({ ...res.blast, resent: res.resent });
+  };
+  return (
+    <li className="ot-item">
+      <div className="ot-row ot-row--static ot-row--wrap">
+        <span className="ot-row__main">
+          <span className="ot-row__name">{b.subject}</span>
+          <span className="ot-row__sub">
+            <span>{audienceWords(b.kind, n)}</span>
+            <span>saved {fmtWhen(b.created_at)}</span>
+          </span>
+          <span className="ot-row-note">{emailConfigured ? 'Not sent' : 'Not sent — email isn’t connected'}</span>
+        </span>
+        {canSend && !confirming && (
+          <span className="ot-row__acts">
+            <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => { setConfirming(true); act.clearError(); }}>
+              Send now · {n}
+            </button>
+          </span>
+        )}
+      </div>
+      {(confirming || act.error) && (
+        <div className="ot-body">
+          {confirming && (
+            <div className="ot-confirm" role="group" aria-label="Confirm send">
+              <span>Send to <strong>{n}</strong> {plural(n, ...(KIND_NOUN[b.kind] || ['recipient', 'recipients']))} now?</span>
+              <button type="button" className="btn ot-solid ot-btn-tap" disabled={act.busy} onClick={sendNow}>
+                {act.busy ? 'Sending…' : 'Yes, send'}
+              </button>
+              <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setConfirming(false)}>No</button>
+            </div>
+          )}
+          {act.error && <p className="error">{act.error}</p>}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function UnsentList({ blasts, kind, emailConfigured, canWrite, onResent }) {
+  const rows = (blasts || []).filter((b) => b.kind === kind && savedUnsent(b));
+  if (rows.length === 0) return null;
+  return (
+    <section className="ot-sec" aria-label="Not sent">
+      <h2 className="ot-sec-h">Not sent <span className="ot-count">{rows.length}</span></h2>
+      <ul className="ot-list">
+        {rows.map((b) => (
+          <UnsentRow key={b.id} b={b} emailConfigured={emailConfigured} canWrite={canWrite} onResent={onResent} />
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -429,6 +510,8 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
           <ul className="ot-list">
             <LinkItem label="Signup page" href={signupUrl} onCopied={copiedToast(toast, 'Signup link')} />
           </ul>
+          <UnsentList blasts={blasts.data?.blasts} kind="newsletter" emailConfigured={emailConfigured}
+            canWrite={canWrite} onResent={setResult} />
         </>
       )}
 
@@ -523,6 +606,8 @@ function PressTab({ canWrite, creating, onClose }) {
           <div className="ot-actions">
             <Link className="btn ot-btn-tap" to="/people?tag=media">Media list</Link>
           </div>
+          <UnsentList blasts={blasts.data?.blasts} kind="press" emailConfigured={emailConfigured}
+            canWrite={canWrite} onResent={setResult} />
         </>
       )}
 

@@ -121,11 +121,16 @@ h2 { font-size: 18px; }
   display: inline-block;
   line-height: 1.3;
 }
-.btn:hover { border-color: var(--ink); background: var(--paper-1); }
 .btn-primary { background: var(--mark); color: var(--mark-ink); border: 1px solid var(--mark-deep); }
-.btn-primary:hover { background: var(--mark-deep); border-color: var(--mark-deep); }
 .btn-quiet { border-color: transparent; background: transparent; color: var(--text-3); }
-.btn-quiet:hover { color: var(--text-1); border-color: var(--rule-2); background: transparent; }
+/* Hover only where a pointer hovers. On a phone a tapped button keeps
+   :hover until the next tap, so it would still look pressed on the next
+   screen. Every :hover that changes a fill or edge sits in (hover: hover). */
+@media (hover: hover) {
+  .btn:hover { border-color: var(--ink); background: var(--paper-1); }
+  .btn-primary:hover { background: var(--mark-deep); border-color: var(--mark-deep); }
+  .btn-quiet:hover { color: var(--text-1); border-color: var(--rule-2); background: transparent; }
+}
 .btn:focus-visible, .input:focus-visible, a:focus-visible, [role='option']:focus-visible {
   outline: 2px solid var(--mark-deep);
   outline-offset: 1px;
@@ -184,7 +189,7 @@ h2 { font-size: 18px; }
   vertical-align: baseline;
 }
 .table tr.rowlink { cursor: pointer; }
-.table tr.rowlink:hover td { background: var(--paper-1); }
+@media (hover: hover) { .table tr.rowlink:hover td { background: var(--paper-1); } }
 .table .num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .table th.num { text-align: right; }
 
@@ -235,8 +240,17 @@ h2 { font-size: 18px; }
   font-size: 12px;
   z-index: 50;
 }
-.toast .btn { background: transparent; color: var(--mark); border-color: var(--mark-deep); }
-.toast .btn:hover { background: var(--mark); color: var(--mark-ink); }
+/* The toast's button (Change, Undo, OK): a light outline in the toast's own
+   ink — never the brand yellow, which is the screen's one primary button. */
+.toast .btn {
+  color: inherit;
+  background: transparent;
+  border-color: currentColor;
+  border-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+@media (hover: hover) {
+  .toast .btn:hover { color: inherit; background: color-mix(in srgb, currentColor 14%, transparent); border-color: currentColor; }
+}
 
 /* ── 10. Nav / shell ── */
 .nav {
@@ -276,7 +290,7 @@ h2 { font-size: 18px; }
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
-.nav .links a:hover { color: var(--text-1); }
+@media (hover: hover) { .nav .links a:hover { color: var(--text-1); } }
 .nav .links a.active { color: var(--text-1); border-bottom-color: var(--mark); }
 .spacer { flex: 1; }
 .nav .ws { font-size: 13px; color: var(--text-3); font-style: italic; }
@@ -288,7 +302,8 @@ h2 { font-size: 18px; }
   width: 44px; height: 44px; padding: 0; margin: 0 calc(-1 * var(--s-2));
   background: none; border: 0; border-radius: 50%; cursor: pointer; color: inherit;
 }
-.acct-btn:hover .avatar, .acct-btn[aria-expanded='true'] .avatar { background: var(--mark); color: var(--mark-ink); border-color: var(--mark-deep); }
+.acct-btn[aria-expanded='true'] .avatar { background: var(--mark); color: var(--mark-ink); border-color: var(--mark-deep); }
+@media (hover: hover) { .acct-btn:hover .avatar { background: var(--mark); color: var(--mark-ink); border-color: var(--mark-deep); } }
 .acct-btn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
 .acct-panel {
   position: absolute; right: calc(-1 * var(--s-2)); top: calc(100% + 4px); z-index: 960;
@@ -308,7 +323,7 @@ h2 { font-size: 18px; }
   background: none; border: 0; cursor: pointer;
 }
 .acct-item + .acct-item { border-top: 1px solid var(--rule); }
-.acct-item:hover { background: var(--paper-1); }
+@media (hover: hover) { .acct-item:hover { background: var(--paper-1); } }
 .acct-item.active { box-shadow: inset 3px 0 0 var(--mark); }
 .acct-item:disabled { opacity: 0.5; cursor: default; }
 .acct-item:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
@@ -316,7 +331,7 @@ h2 { font-size: 18px; }
 .acct-confirm p { margin: 0 0 var(--s-3); font-size: 14px; }
 .acct-confirm__row { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .btn.acct-danger { color: var(--danger); border-color: var(--danger); }
-.btn.acct-danger:hover { background: var(--danger); color: var(--paper-0); }
+@media (hover: hover) { .btn.acct-danger:hover { background: var(--danger); color: var(--paper-0); } }
 
 .avatar {
   font-family: var(--font-mono);

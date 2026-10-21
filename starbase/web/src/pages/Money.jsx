@@ -47,6 +47,15 @@ const parseOver = (reason) => {
   const cents = (v) => Math.round(Number(v.replace(/,/g, '')) * 100);
   return { totalCents: cents(m[1]), capCents: cents(m[3]) };
 };
+// The brief's flagged rows carry the numbers (total_cents: the donor's total
+// for that year as it stands; cap_cents: the limit); a ledger row, or a brief
+// without them, falls back to reading flag_reason.
+const centsOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const overOf = (g) => {
+  const totalCents = centsOrNull(g?.total_cents);
+  const capCents = centsOrNull(g?.cap_cents);
+  return totalCents != null && capCents != null ? { totalCents, capCents } : parseOver(g?.flag_reason);
+};
 const overLine = (c) => (c && Number.isFinite(c.totalCents) && Number.isFinite(c.capCents) && c.totalCents > c.capCents
   ? `${fmtBig(c.totalCents - c.capCents)} over the ${fmtBig(c.capCents)} limit`
   : 'Over limit');
@@ -440,7 +449,7 @@ function FlaggedRow({ f, personId, onVoid }) {
       </button>
       {open && (
         <div className="ops-body" id={bodyId}>
-          <p className="ops-over" title={f.flag_reason || undefined}>{overLine(parseOver(f.flag_reason))}</p>
+          <p className="ops-over" title={f.flag_reason || undefined}>{overLine(overOf(f))}</p>
           {f.flag_reason && (
             <>
               <button type="button" className="ops-more disclose disclose--inline" aria-expanded={why}
@@ -481,7 +490,7 @@ function GiftRow({ g, open, onToggle, onVoid }) {
               {shownNote(g.note) && <span className="ops-meta">{shownNote(g.note)}</span>}
             </p>
           )}
-          {g.flagged && <p className="ops-over" title={g.flag_reason || undefined}>{overLine(parseOver(g.flag_reason))}</p>}
+          {g.flagged && <p className="ops-over" title={g.flag_reason || undefined}>{overLine(overOf(g))}</p>}
           <GiftActions personId={g.person_id} onVoid={onVoid} />
         </div>
       )}
@@ -704,7 +713,7 @@ export default function Money() {
               <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onPledgeChanged} />
             ))}
             {flagged.map((f) => (
-              <FlaggedRow key={f.id} f={f} personId={personOf[f.id]} onVoid={() => voidGift(f.id)} />
+              <FlaggedRow key={f.id} f={f} personId={f.person_id ?? personOf[f.id]} onVoid={() => voidGift(f.id)} />
             ))}
           </ul>
         </section>

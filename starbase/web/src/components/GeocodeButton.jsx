@@ -4,9 +4,10 @@
 //   does nothing, or the lookup fails twice running), with live progress and a
 //   Stop button. Desk roles only: renders nothing for volunteers.
 //   summary = { located, missed, errored, remaining, unmatched, stopped, error }
-// compact: one pill-sized button + a short status line (the map's
-// "not on the map yet" pill). Full: one primary button, a progress bar, and
-// a one-line summary; once pins are placed, "See the map" takes its place.
+// compact: one pill-sized button ("Look up addresses") + a short status line,
+// beside "Drop pins by hand" in the map's "Not on map" pill. Full: one
+// primary button, a progress bar, and a one-line summary; once pins are
+// placed, "See the map" takes its place.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -110,7 +111,7 @@ function Geocoder({ onDone, compact = false }) {
     let error = requestError;
     if (!error && stalled) {
       error = /turned off/i.test(lastError || '')
-        ? 'Address lookup is turned off on this server. Place people by hand from the map.'
+        ? 'Address lookup is turned off. Drop pins by hand on the map.'
         : `Address lookup isn’t answering${lastError ? ` (${lastError})` : ''}. Nothing is lost — try again later.`;
     }
     const result = {
@@ -134,18 +135,20 @@ function Geocoder({ onDone, compact = false }) {
 
   const running = phase === 'running';
   const s = summary;
-  // Another run only helps if lookups are still waiting (stopped, failed, or never run).
-  const canRun = !running && (!s || s.remaining > 0 || s.error);
-  const runLabel = compact ? 'Find on map' : s?.error ? 'Try again' : s?.stopped ? 'Carry on' : 'Place on map';
+  // Another run only helps if lookups are still waiting (stopped, failed, or
+  // never run) — and never while the server has lookup turned off.
+  const off = Boolean(s?.error?.startsWith('Address lookup is turned off'));
+  const canRun = !running && !off && (!s || s.remaining > 0 || s.error);
+  const runLabel = compact ? 'Look up addresses' : s?.error ? 'Try again' : s?.stopped ? 'Carry on' : 'Place on map';
 
-  // ── Compact: fits inside the map's "not on the map yet" pill ──
+  // ── Compact: fits inside the map's "Not on map" pill ──
   if (compact) {
     let text = null;
     if (running) text = progress?.remaining == null ? 'Looking up addresses…' : liveText(progress, true);
-    else if (s?.error) text = s.error.startsWith('Address lookup is turned off') ? 'Address lookup is off — use Place' : 'Lookup isn’t answering — try later';
+    else if (s?.error) text = off ? 'Address lookup is off — drop pins by hand' : 'Lookup isn’t answering — try later';
     else if (s?.stopped) text = `Stopped · ${fmtN(s.remaining)} left`;
-    else if (s?.nothingToDo) text = s.unmatched ? `${fmtN(s.unmatched)} need Place` : 'All placed';
-    else if (s) text = `Placed ${fmtN(s.located)}${s.unmatched ? ` · ${fmtN(s.unmatched)} need Place` : ''}`;
+    else if (s?.nothingToDo) text = s.unmatched ? `${fmtN(s.unmatched)} need a pin by hand` : 'All placed';
+    else if (s) text = `Placed ${fmtN(s.located)}${s.unmatched ? ` · ${fmtN(s.unmatched)} need a pin by hand` : ''}`;
     return (
       <span className="geo geo--compact">
         <span className="geo-live" role="status" aria-live="polite" title={s?.error || undefined}>{text}</span>
@@ -203,9 +206,9 @@ function Geocoder({ onDone, compact = false }) {
           ) : (
             <p className="geo-summary__lead">Placed {people(s.located)} on the map.</p>
           )}
-          {s.unmatched > 0 && !s.error?.startsWith('Address lookup is turned off') && (
+          {s.unmatched > 0 && !off && (
             <p className="geo-summary__note">
-              {people(s.unmatched)} not found — tap <strong>Place</strong> on the map to pin them by hand.
+              {people(s.unmatched)} not found — on the map, tap <strong>Not on map</strong> to drop their pins by hand.
             </p>
           )}
         </div>
@@ -218,7 +221,7 @@ function Geocoder({ onDone, compact = false }) {
           </button>
         ) : canRun ? (
           <button type="button" className="btn btn-primary imp-tap" onClick={run}>{runLabel}</button>
-        ) : s && (s.located > 0 || s.unmatched > 0) ? (
+        ) : s && (s.located > 0 || s.unmatched > 0 || off) ? (
           <Link className="btn imp-tap" to="/map">See the map</Link>
         ) : null}
       </div>

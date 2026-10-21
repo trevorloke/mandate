@@ -258,3 +258,103 @@ test('the gift ledger carries donor names (no per-row lookups)', async () => {
     assert.ok(page2.json.records.every((r) => !ids.has(r.id)), 'no overlap across pages');
   }
 });
+
+// A second member by the real path (invite → join). Emails are unique per
+// call: under test:pg every file shares one database and users are global.
+const joinAs = async (mgr, role, name) => {
+  const email = `${name.toLowerCase().replace(/\W+/g, '-')}-${Math.random().toString(36).slice(2, 8)}@example.org`;
+  const inv = await mgr.action('member.invite', { email, role });
+  assert.equal(inv.status, 200);
+  const cl = new Client();
+  const j = await cl.post('/api/auth/join', { token: inv.json.joinUrl.split('/join/')[1], name, password: 'join-pass-2026' });
+  assert.equal(j.status, 200);
+  return { client: cl, userId: j.json.user.id };
+};
+
+test('brief: field.mine is this week’s contacts the caller logged; the team numbers are everyone’s', async () => {
+  const mgr = new Client();
+  await mgr.signup({ workspaceName: 'Mine WS', jurisdiction: 'bc-municipal' });
+  const { client: vol } = await joinAs(mgr, 'volunteer', 'Mine Volunteer');
+  const people = [];
+  for (let i = 0; i < 4; i++) people.push(await mgr.createPerson(`Mine Door ${i}`, { phone: `604-555-01${60 + i}` }));
+  const log = (who, p, channel, rating) => who.action('contact.log', { person_id: p.id, channel, outcome: 'contacted', rating });
+  // The volunteer: 3 knocks + 1 call. The manager: 2 knocks + 1 text.
+  const volKnocks = [];
+  for (const p of people.slice(0, 3)) volKnocks.push((await log(vol, p, 'door', '1')).json.contact.id);
+  assert.equal((await log(vol, people[3], 'phone', '2')).status, 200);
+  await log(mgr, people[0], 'door', '3');
+  await log(mgr, people[3], 'door');
+  await log(mgr, people[3], 'text', '2');
+
+  const vf = (await vol.get('/api/brief')).json.field;
+  assert.deepEqual(vf.mine, { doors: 3, calls: 1, texts: 0 }, 'the volunteer sees their own');
+  assert.deepEqual([vf.doors, vf.calls, vf.texts, vf.week], [5, 1, 1, 7], 'team numbers count everyone');
+  const mf = (await mgr.get('/api/brief')).json.field;
+  assert.deepEqual(mf.mine, { doors: 2, calls: 0, texts: 1 }, 'the manager sees theirs');
+  assert.deepEqual([mf.doors, mf.calls, mf.texts], [5, 1, 1]);
+
+  // Same week boundary as the team count: a knock from last week drops out of both.
+  const db = await (await import('../db/client.js')).getDb();
+  await db.query(`update contacts set created_at = now() - interval '8 days' where id = $1`, [volKnocks[0]]);
+  const vf2 = (await vol.get('/api/brief')).json.field;
+  assert.equal(vf2.mine.doors, 2);
+  assert.equal(vf2.doors, 4);
+
+  // Another campaign's knocks never count.
+  const other = new Client();
+  await other.signup({ workspaceName: 'Mine Other WS' });
+  const op = await other.createPerson('Elsewhere');
+  await other.action('contact.log', { person_id: op.id, channel: 'door', outcome: 'contacted' });
+  assert.equal((await vol.get('/api/brief')).json.field.doors, 4);
+  assert.deepEqual((await other.get('/api/brief')).json.field.mine, { doors: 1, calls: 0, texts: 0 });
+});
+
+test('walk list: door_knocked tells a knocked door from one reached only by phone or text', async () => {
+  const mgr = new Client();
+  await mgr.signup({ workspaceName: 'Knock WS', jurisdiction: 'bc-municipal' });
+  const lat = 49.1102; const lng = -122.8301;
+  const mk = (name, address, dLng) => mgr.createPerson(name, { address, lat, lng: lng + dLng, phone: '604-555-0170' });
+  const knocked = await mk('Knocked Door', '6001 140 St', 0);
+  const called = await mk('Called Only', '6003 140 St', 0.0002);
+  const texted = await mk('Texted Only', '6005 140 St', 0.0004);
+  const both = await mk('Called Then Knocked', '6007 140 St', 0.0006);
+  await mk('Not Yet', '6009 140 St', 0.0008);
+  const t = await mgr.action('turf.create', {
+    name: 'Knock block', polygon: [[lat + 0.001, lng - 0.001], [lat + 0.001, lng + 0.002], [lat - 0.001, lng + 0.002], [lat - 0.001, lng - 0.001]],
+  });
+  const log = (p, channel, outcome = 'contacted') => mgr.action('contact.log', { person_id: p.id, channel, outcome });
+  await log(knocked, 'door', 'no_answer');
+  await log(called, 'phone');
+  await log(texted, 'text');
+  await log(both, 'phone');
+  await log(both, 'door');
+
+  const walk = (await mgr.get(`/api/turfs/${t.json.turf.id}/walk`)).json;
+  const byName = Object.fromEntries(walk.doors.flatMap((d) => d.persons).map((p) => [p.name, p]));
+  assert.equal(Object.keys(byName).length, 5);
+  assert.equal(byName['Knocked Door'].door_knocked, true, 'a no-answer knock is still a knock');
+  assert.equal(byName['Called Only'].door_knocked, false);
+  assert.equal(byName['Texted Only'].door_knocked, false);
+  assert.equal(byName['Called Then Knocked'].door_knocked, true);
+  assert.equal(byName['Not Yet'].door_knocked, false);
+  assert.equal(byName['Not Yet'].last_contact_at, null, 'never reached: not done either');
+  assert.ok(byName['Called Only'].last_contact_at, 'reached by phone still counts as done');
+});
+
+test('person list carries their own note (no per-card fetch); nothing else from attrs', async () => {
+  const p = await c.createPerson('Noted Person', { phone: '604-555-0180' });
+  const db = await (await import('../db/client.js')).getDb();
+  await db.query(
+    `update persons set attrs = jsonb_set(jsonb_set(coalesce(attrs, '{}'::jsonb), '{note}', to_jsonb($2::text)), '{geocode}', '{"status":"ok"}'::jsonb)
+     where id = $1`,
+    [p.id, 'Free after 6pm\nAsk about transit'],
+  );
+  const plain = await c.createPerson('No Note Person', { phone: '604-555-0181' });
+  const list = (await c.get('/api/persons?q=Note&has=phone')).json.persons;
+  const row = list.find((x) => x.id === p.id);
+  assert.equal(row.note, 'Free after 6pm\nAsk about transit');
+  assert.equal(list.find((x) => x.id === plain.id).note, null);
+  assert.equal(row.attrs, undefined, 'attrs itself is not sent');
+  assert.equal(row.geocode, undefined);
+  assert.equal((await c.get(`/api/persons/${p.id}`)).json.person.note, row.note, 'same note as the profile');
+});

@@ -249,6 +249,9 @@ a.ot-row:hover, button.ot-row:hover { background: var(--paper-1); }
 .ot-result[data-status='queued'] { border-color: var(--warn); }
 .ot-result[data-status='failed'] { border-color: var(--danger); }
 .ot-result .provider { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; padding: 0 var(--s-2) var(--s-2) 0; }
+/* The next step after the outcome ("Connect email, then Send now.") — same line, not bold */
+.ot-result-next { font-weight: 400; }
+.ot-result-next a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .ot-status-dot {
   display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%;
   background: var(--text-4);
