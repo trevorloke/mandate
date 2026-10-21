@@ -1,11 +1,22 @@
-// Shifts — volunteer scheduling. /shifts lists upcoming shifts grouped by day
-// (past ones folded away); ?new=1 opens the create form. /shifts/:id is the
-// roster: assignees with status, notification receipts, a type-ahead to add
-// volunteers (people already holding the shift's role float to the top), and
-// one big button to notify everyone by email + text.
+// Shifts — volunteer scheduling.
+//   /shifts        rows: title, day/time, "5 spots left". Volunteers see their
+//                  own shifts first ("Your shifts", marked "You're on"), then
+//                  the open ones. Past shifts fold away under one quiet toggle.
+//   /shifts?new=1  new shift: what, when, where, how many. Role, end time,
+//                  instructions and link sit under "More details".
+//   /shifts/:id    the shift in plain lines, the spots left, then who's on
+//                  it. Desk: one yellow button under the spots — "+ Add
+//                  volunteer" while spots are open (people holding the shift's
+//                  role float to the top), "Notify everyone" (email + text)
+//                  once it's full; the other sits quiet under the roster. Tap
+//                  a person for phone, email, status and remove. Volunteers:
+//                  "You're on this shift" (+ a quiet "Can't make it" when the
+//                  server offers shift.leave), or one "Count me in" when it
+//                  offers shift.join (else "Ask your organizer to add you");
+//                  the roster is names only — no contact details.
 //
-// Also exports two small building blocks reused by Signs and Today:
-//   <PersonPicker onPick={(person) => …} />   type-ahead over /api/persons?q=
+// Also exports two small building blocks:
+//   <PersonPicker onPick={(person) => …} />   type-ahead over /api/persons?q= (Signs uses it)
 //   <FillBar filled={n} capacity={m} />       filled / capacity meter
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
@@ -33,31 +44,57 @@ const localToISO = (value) => {
     + `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
 };
 
-const dayKey = (iso) => {
-  const d = new Date(iso);
+const dayKey = (when) => {
+  const d = new Date(when);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
-const fmtShortDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
-const fmtLongDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-
-const dayLabel = (iso) => {
-  const today = new Date();
-  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-  if (dayKey(iso) === dayKey(today.toISOString())) return 'Today';
-  if (dayKey(iso) === dayKey(tomorrow.toISOString())) return 'Tomorrow';
-  return new Date(iso).toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' });
+// "10am", "6:30pm"
+const clock = (iso) => {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  return `${h % 12 || 12}${m ? `:${pad(m)}` : ''}${h < 12 ? 'am' : 'pm'}`;
 };
-
-const fmtRange = (starts, ends) => {
-  if (!ends) return fmtTime(starts);
-  if (dayKey(starts) === dayKey(ends)) return `${fmtTime(starts)} – ${fmtTime(ends)}`;
-  return `${fmtTime(starts)} – ${fmtShortDay(ends)} ${fmtTime(ends)}`;
+const shortDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
+const longDay = (iso) => new Date(iso).toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' });
+const dayName = (iso) => {
+  const now = new Date();
+  if (dayKey(iso) === dayKey(now)) return 'Today';
+  if (dayKey(iso) === dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))) return 'Tomorrow';
+  return shortDay(iso);
 };
-const fmtWhen = (starts, ends) => `${fmtShortDay(starts)} · ${fmtRange(starts, ends)}`;
+const timeRange = (starts, ends) => {
+  if (!ends) return clock(starts);
+  if (dayKey(starts) === dayKey(ends)) return `${clock(starts)}–${clock(ends)}`;
+  return `${clock(starts)} – ${shortDay(ends)} ${clock(ends)}`;
+};
+const isLive = (s, now) => new Date(s.starts_at) <= now && now < new Date(s.ends_at || s.starts_at);
+const whenLine = (s, now) => (isLive(s, now)
+  ? `Now · until ${clock(s.ends_at)}`
+  : `${dayName(s.starts_at)} · ${timeRange(s.starts_at, s.ends_at)}`);
 const fmtStamp = (iso) => (iso
   ? new Date(iso).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   : '');
+
+// "5 spots left", "1 spot left", "Full", or "3 going" when there's no cap.
+const spotsLeft = (filled, capacity) => Math.max(0, capacity - (Number(filled) || 0));
+const spotsText = (filled, capacity) => {
+  const n = Number(filled) || 0;
+  if (!capacity) return `${n} going`;
+  const left = spotsLeft(n, capacity);
+  if (left === 0) return 'Full';
+  return `${left} ${left === 1 ? 'spot' : 'spots'} left`;
+};
+function SpotsBar({ filled, capacity }) {
+  if (!capacity) return null;
+  const n = Number(filled) || 0;
+  const pct = Math.min(100, Math.round((n / capacity) * 100));
+  return (
+    <span className="ops-row__bar" data-full={n >= capacity ? '' : undefined} aria-hidden="true">
+      <span style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
 
 // Only http(s) links become clickable; bare domains get https:// in front.
 const BARE_DOMAIN = /^[\w-]+(\.[\w-]+)+([/?#]|$)/;
@@ -122,8 +159,8 @@ export function FillBar({ filled = 0, capacity }) {
 }
 
 // ── Person picker: type-ahead over /api/persons?q=, arrow keys, inline create ──
-// roleHint: a VOLUNTEER_ROLES code; people holding it are listed first with a
-// 'matching role' chip. excludeIds: shown but not pickable (already on it).
+// roleHint: a VOLUNTEER_ROLES code; people holding it are listed first with
+// that role as a chip. excludeIds: shown but not pickable (already on it).
 export function PersonPicker({
   id,
   onPick,
@@ -134,6 +171,7 @@ export function PersonPicker({
   placeholder = 'Start typing a name…',
   meta = (p) => p.email || p.phone || p.address,
   disabled = false,
+  autoFocus = false,
 }) {
   const queryClient = useQueryClient();
   const [q, setQ] = useState('');
@@ -229,6 +267,7 @@ export function PersonPicker({
         aria-autocomplete="list"
         aria-activedescendant={open && items[active] ? `${listId}-${active}` : undefined}
         autoComplete="off"
+        autoFocus={autoFocus}
         placeholder={placeholder}
         value={q}
         disabled={disabled || busy}
@@ -254,7 +293,7 @@ export function PersonPicker({
               ) : (
                 <>
                   <span>{item.name}</span>
-                  {item._match && <span className="chip chip-ok">matching role</span>}
+                  {item._match && <span className="chip chip-ok">{roleLabel(roleHint)}</span>}
                   {item._taken && <span className="chip">{excludeLabel}</span>}
                   {meta(item) && <span className="meta">{meta(item)}</span>}
                 </>
@@ -266,23 +305,19 @@ export function PersonPicker({
       {open && items.length === 0 && q.trim() && general.isSuccess && !general.isPlaceholderData && (
         <div className="ops-picker-hint" role="status">No one matches “{q.trim()}”.</div>
       )}
-      {roleHint && (
-        <div className="ops-picker-hint">
-          <span className="chip chip-ok">matching role</span> people with the {roleLabel(roleHint)} role are listed first
-        </div>
-      )}
       {error && <p className="error">{error}</p>}
     </div>
   );
 }
 
-// ── New shift form ──
+// ── New shift form: four fields, the rest under "More details" ──
 function ShiftForm({ onClose }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [f, setF] = useState({
     title: '', role: '', location: '', starts: '', ends: '', capacity: '', link: '', instructions: '',
   });
+  const [more, setMore] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((cur) => ({ ...cur, [k]: e.target.value }));
@@ -292,13 +327,13 @@ function ShiftForm({ onClose }) {
     setError(null);
     const starts_at = localToISO(f.starts);
     const ends_at = localToISO(f.ends);
-    if (!f.title.trim()) { setError('give the shift a title'); return; }
-    if (!starts_at) { setError('pick when the shift starts'); return; }
-    if (ends_at && new Date(ends_at) <= new Date(starts_at)) { setError('the end has to be after the start'); return; }
+    if (!f.title.trim()) { setError('Give the shift a name'); return; }
+    if (!starts_at) { setError('Pick when it starts'); return; }
+    if (ends_at && new Date(ends_at) <= new Date(starts_at)) { setMore(true); setError('The end has to be after the start'); return; }
     let capacity;
     if (f.capacity.trim()) {
       capacity = Number(f.capacity);
-      if (!Number.isInteger(capacity) || capacity < 1) { setError('capacity is a whole number of people, 1 or more'); return; }
+      if (!Number.isInteger(capacity) || capacity < 1) { setError('How many: a whole number, 1 or more'); return; }
     }
     setBusy(true);
     try {
@@ -322,58 +357,63 @@ function ShiftForm({ onClose }) {
   };
 
   return (
-    <form className="card" onSubmit={submit}>
-      <span className="eyebrow">New shift</span>
+    <form className="card ops-form" onSubmit={submit} aria-label="New shift">
       <div className="field">
-        <label htmlFor="shift-title">Title</label>
+        <label htmlFor="shift-title">What</label>
         <input id="shift-title" className="input" required autoFocus placeholder="Saturday doorknock — Fleetwood"
           value={f.title} onChange={set('title')} />
       </div>
-      <div className="form-row">
-        <div className="field">
-          <label htmlFor="shift-role">Role</label>
-          <select id="shift-role" className="input" value={f.role} onChange={set('role')}>
-            <option value="">Any role</option>
-            {VOLUNTEER_ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="shift-capacity">Capacity</label>
-          <input id="shift-capacity" className="input mono" type="number" min="1" step="1" inputMode="numeric"
-            placeholder="no cap" value={f.capacity} onChange={set('capacity')} />
-        </div>
+      <div className="field">
+        <label htmlFor="shift-starts">When</label>
+        <input id="shift-starts" className="input mono" type="datetime-local" required
+          value={f.starts} onChange={set('starts')} />
       </div>
       <div className="field">
-        <label htmlFor="shift-location">Location</label>
-        <input id="shift-location" className="input" placeholder="Meet at the campaign office"
+        <label htmlFor="shift-location">Where</label>
+        <input id="shift-location" className="input" placeholder="Campaign office"
           value={f.location} onChange={set('location')} />
       </div>
-      <div className="form-row">
-        <div className="field">
-          <label htmlFor="shift-starts">Starts</label>
-          <input id="shift-starts" className="input mono" type="datetime-local" required
-            value={f.starts} onChange={set('starts')} />
-        </div>
-        <div className="field">
-          <label htmlFor="shift-ends">Ends</label>
-          <input id="shift-ends" className="input mono" type="datetime-local" min={f.starts || undefined}
-            value={f.ends} onChange={set('ends')} />
-        </div>
-      </div>
       <div className="field">
-        <label htmlFor="shift-link">Link</label>
-        {/* type=text + inputMode=url: native type=url would refuse a bare "bit.ly/turf". */}
-        <input id="shift-link" className="input" type="text" inputMode="url" autoCapitalize="none"
-          autoCorrect="off" spellCheck={false} placeholder="https://… (turf map, sign-up doc, call script)"
-          value={f.link} onChange={set('link')} />
+        <label htmlFor="shift-capacity">How many people</label>
+        <input id="shift-capacity" className="input mono" type="number" min="1" step="1" inputMode="numeric"
+          placeholder="No limit" value={f.capacity} onChange={set('capacity')} />
       </div>
-      <div className="field">
-        <label htmlFor="shift-instructions">Instructions</label>
-        <textarea id="shift-instructions" className="input" rows={4}
-          placeholder="What to bring, who to ask for, parking…"
-          value={f.instructions} onChange={set('instructions')} />
-      </div>
-      {error && <p className="error">{error}</p>}
+
+      <button type="button" className="ops-more" aria-expanded={more} aria-controls="shift-more"
+        onClick={() => setMore((v) => !v)}>
+        More details
+      </button>
+      {more && (
+        <div id="shift-more" className="ops-more-body">
+          <div className="field">
+            <label htmlFor="shift-role">Role</label>
+            <select id="shift-role" className="input" value={f.role} onChange={set('role')}>
+              <option value="">Any role</option>
+              {VOLUNTEER_ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="shift-ends">Ends</label>
+            <input id="shift-ends" className="input mono" type="datetime-local" min={f.starts || undefined}
+              value={f.ends} onChange={set('ends')} />
+          </div>
+          <div className="field">
+            <label htmlFor="shift-instructions">Instructions</label>
+            <textarea id="shift-instructions" className="input" rows={3}
+              placeholder="What to bring, who to ask for, parking…"
+              value={f.instructions} onChange={set('instructions')} />
+          </div>
+          <div className="field">
+            <label htmlFor="shift-link">Link</label>
+            {/* type=text + inputMode=url: native type=url would refuse a bare "bit.ly/turf". */}
+            <input id="shift-link" className="input" type="text" inputMode="url" autoCapitalize="none"
+              autoCorrect="off" spellCheck={false} placeholder="Turf map, sign-up doc, call script"
+              value={f.link} onChange={set('link')} />
+          </div>
+        </div>
+      )}
+
+      {error && <p className="error" role="alert">{error}</p>}
       <div className="ops-actions">
         <button type="submit" className="btn btn-primary ops-tap" disabled={busy}>{busy ? 'Saving…' : 'Create shift'}</button>
         <button type="button" className="btn btn-quiet ops-tap" onClick={onClose}>Cancel</button>
@@ -382,56 +422,71 @@ function ShiftForm({ onClose }) {
   );
 }
 
+// ── Which shifts am I on? (volunteers) ──
+// A volunteer's login and their supporter record share an email; their
+// person record lists the shifts they're assigned to.
+function useMyShifts(me, enabled) {
+  const email = String(me?.user?.email || '').trim().toLowerCase();
+  const search = useQuery({
+    queryKey: ['persons', 'search', email],
+    queryFn: () => apiGet(`/persons?q=${encodeURIComponent(email)}&limit=8`),
+    enabled: enabled && !!email,
+  });
+  const self = (search.data?.persons ?? []).find((p) => String(p.email || '').toLowerCase() === email);
+  const person = useQuery({
+    queryKey: ['person', self?.id],
+    queryFn: () => apiGet(`/persons/${self.id}`),
+    enabled: enabled && !!self,
+  });
+  return useMemo(() => {
+    const mine = new Map();
+    for (const a of person.data?.shifts ?? []) if (a.status !== 'declined') mine.set(a.id, a.status);
+    return mine;
+  }, [person.data]);
+}
+
 // ── List ──
-function ShiftRow({ s, now }) {
-  const live = new Date(s.starts_at) <= now && now < new Date(s.ends_at || s.starts_at);
+function ShiftRow({ s, now, past = false, mine = false }) {
+  const full = s.capacity && Number(s.filled) >= s.capacity;
   return (
-    <li>
-      <Link to={`/shifts/${s.id}`} className="ops-shift">
-        <span className="t">
-          {s.title}
-          {s.role && <span className="chip">{roleLabel(s.role)}</span>}
-          {live && <span className="chip chip-warn">on now</span>}
+    <li className="ops-item" data-tone={past ? 'past' : undefined}>
+      <Link to={`/shifts/${s.id}`} className="ops-row">
+        <span className="ops-row__main">
+          <span className="ops-row__name">{s.title}</span>
+          <span className="ops-row__sub">{whenLine(s, now)}</span>
         </span>
-        <span className="when">
-          {fmtWhen(s.starts_at, s.ends_at)}
-          {s.location && <span className="where"> · {s.location}</span>}
+        <span className="ops-row__end">
+          {mine
+            ? <span className="chip chip-ok ops-chip-lg">You’re on ✓</span>
+            : <span className={`chip ops-chip-lg${full ? ' chip-ok' : ''}`}>{spotsText(s.filled, s.capacity)}</span>}
         </span>
-        <span className="right"><FillBar filled={s.filled} capacity={s.capacity} /></span>
       </Link>
+      {!past && <SpotsBar filled={s.filled} capacity={s.capacity} />}
     </li>
   );
 }
 
-function ShiftList({ canDesk }) {
+function ShiftList({ canDesk, me }) {
   const [params, setParams] = useSearchParams();
-  const showNew = params.get('new') === '1';
+  const showNew = canDesk && params.get('new') === '1';
+  const [showPast, setShowPast] = useState(false);
   const shifts = useQuery({ queryKey: ['shifts'], queryFn: () => apiGet('/shifts') });
+  const mine = useMyShifts(me, !canDesk);
 
   const now = new Date();
   const all = shifts.data?.shifts ?? [];
   const isPast = (s) => new Date(s.ends_at || s.starts_at) < now;
   const upcoming = all.filter((s) => !isPast(s));
   const past = all.filter(isPast).reverse(); // most recent first
-
-  const groups = [];
-  for (const s of upcoming) {
-    const key = dayKey(s.starts_at);
-    let g = groups[groups.length - 1];
-    if (!g || g.key !== key) {
-      g = { key, label: dayLabel(s.starts_at), items: [] };
-      groups.push(g);
-    }
-    g.items.push(s);
-  }
+  // Newer servers mark the viewer's shifts (s.mine); else look them up.
+  const isMineShift = (s) => s.mine === true || mine.has(s.id);
+  const yours = upcoming.filter(isMineShift);
+  const others = upcoming.filter((s) => !isMineShift(s));
 
   return (
-    <>
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">Volunteers</span>
-          <h1>Shifts</h1>
-        </div>
+    <div className="ops-page">
+      <div className="ops-head">
+        <h1>Shifts</h1>
         {canDesk && !showNew && (
           <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>
             New shift
@@ -439,55 +494,141 @@ function ShiftList({ canDesk }) {
         )}
       </div>
 
-      {showNew && canDesk && <ShiftForm onClose={() => setParams({})} />}
+      {showNew && <ShiftForm onClose={() => setParams({})} />}
 
-      {shifts.isPending && <p className="muted">Loading shifts…</p>}
+      {shifts.isPending && <p className="muted">Loading…</p>}
       {shifts.isError && <p className="error">{shifts.error.message}</p>}
+      {shifts.isSuccess && upcoming.length === 0 && <p className="ops-empty">No shifts coming up.</p>}
 
-      {shifts.isSuccess && upcoming.length === 0 && (
-        <p className="ops-empty">
-          No upcoming shifts.{' '}
-          {canDesk && !showNew && <Link to="/shifts?new=1">Plan the next doorknock →</Link>}
-        </p>
+      {yours.length > 0 && (
+        <>
+          <span className="eyebrow ops-label">Your shifts</span>
+          <ul className="ops-rows">{yours.map((s) => <ShiftRow key={s.id} s={s} now={now} mine />)}</ul>
+          {others.length > 0 && <span className="eyebrow ops-label">Open shifts</span>}
+        </>
       )}
-
-      {groups.map((g) => (
-        <section key={g.key} aria-label={g.label}>
-          <span className="eyebrow ops-day">{g.label}</span>
-          <ul className="ops-shift-list">
-            {g.items.map((s) => <ShiftRow key={s.id} s={s} now={now} />)}
-          </ul>
-        </section>
-      ))}
+      {others.length > 0 && (
+        <ul className="ops-rows">{others.map((s) => <ShiftRow key={s.id} s={s} now={now} />)}</ul>
+      )}
 
       {past.length > 0 && (
-        <details className="ops-past">
-          <summary><span className="eyebrow">Past shifts · {past.length}</span></summary>
-          <ul className="ops-shift-list">
-            {past.map((s) => <ShiftRow key={s.id} s={s} now={now} />)}
-          </ul>
-        </details>
+        <div className="ops-foot">
+          <button type="button" className="ops-more" aria-expanded={showPast} aria-controls="ops-past"
+            onClick={() => setShowPast((v) => !v)}>
+            Past shifts · {past.length}
+          </button>
+          {showPast && (
+            <ul id="ops-past" className="ops-rows ops-more-body">
+              {past.map((s) => <ShiftRow key={s.id} s={s} now={now} past mine={isMineShift(s)} />)}
+            </ul>
+          )}
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
-// ── Detail ──
-function ShiftDetail({ id, canDesk }) {
+// ── Detail: one person on the shift; tap to open ──
+function AssigneeRow({ a, open, onToggle, canDesk, busy, onStatus, onRemove }) {
+  const [confirm, setConfirm] = useState(false);
+  const bodyId = `as-${a.assignment_id}`;
+  const tone = ASSIGN_TONE[a.status];
+  return (
+    <li className="ops-item" data-open={open ? '' : undefined}>
+      <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId}
+        onClick={() => { setConfirm(false); onToggle(); }}>
+        <span className="ops-row__main"><span className="ops-row__name">{a.name}</span></span>
+        <span className="ops-row__end">
+          <span className={`chip${tone ? ` chip-${tone}` : ''}`}>{statusLabel(a.status)}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="ops-body" id={bodyId}>
+          {(a.phone || a.email) && (
+            <div className="ops-contact">
+              {a.phone && <a href={`tel:${a.phone}`}>{a.phone}</a>}
+              {a.email && <a href={`mailto:${a.email}`}>{a.email}</a>}
+            </div>
+          )}
+          {canDesk && (
+            <div className="field">
+              <label htmlFor={`${bodyId}-status`}>Status</label>
+              <select id={`${bodyId}-status`} className="ops-status" value={a.status} disabled={busy}
+                onChange={(e) => onStatus(e.target.value)}>
+                {SHIFT_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
+              </select>
+            </div>
+          )}
+          {a.notified_at && (
+            <div className="ops-chips">
+              <span className="ops-meta mono">Notified {fmtStamp(a.notified_at)}</span>
+              <NotifyChip channel="email" status={a.notify_email} />
+              <NotifyChip channel="text" status={a.notify_text} />
+            </div>
+          )}
+          <div className="ops-actions">
+            <Link className="btn btn-quiet ops-tap ops-link" to={`/people/${a.id}`}>Profile</Link>
+            {canDesk && !confirm && (
+              <button type="button" className="btn btn-quiet ops-tap" aria-label={`Remove ${a.name} from this shift`}
+                disabled={busy} onClick={() => setConfirm(true)}>
+                Remove
+              </button>
+            )}
+          </div>
+          {canDesk && confirm && (
+            <div className="ops-confirm" role="group" aria-label={`Remove ${a.name}`}>
+              <span>Remove {a.name}?</span>
+              <button type="button" className="btn ops-danger ops-tap" disabled={busy} onClick={onRemove}>Yes</button>
+              <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={() => setConfirm(false)}>No</button>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Volunteers see who else is coming — names only, never contact details.
+function NameRow({ a, isMe }) {
+  return (
+    <li className="ops-item">
+      <div className="ops-row ops-row--static">
+        <span className="ops-row__main"><span className="ops-row__name">{a.name}</span></span>
+        {isMe && <span className="ops-row__end"><span className="chip chip-ok">You</span></span>}
+      </div>
+    </li>
+  );
+}
+
+function ShiftDetail({ id, canDesk, me }) {
   const queryClient = useQueryClient();
   const validId = isUuid(id);
   const shiftQ = useQuery({ queryKey: ['shift', id], queryFn: () => apiGet(`/shifts/${id}`), enabled: validId });
   // Providers are read once; the brief is shared with Today so it is usually cached.
   const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity });
+  // Which actions this login may run. A volunteer gets "Count me in" only
+  // when the server offers shift.join; otherwise "Ask your organizer".
+  const allowed = useQuery({
+    queryKey: ['actions'],
+    queryFn: () => apiGet('/actions'),
+    enabled: !canDesk,
+    staleTime: Infinity,
+  });
 
+  const [openId, setOpenId] = useState(null);
   const [rowBusy, setRowBusy] = useState(null);
   const [error, setError] = useState(null);
+  const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(null);
   const [addError, setAddError] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState(null);
+  const [showResults, setShowResults] = useState(false);
   const [notifyError, setNotifyError] = useState(null);
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState(null);
+  const [leaving, setLeaving] = useState(false); // "Can't make it? Yes · No"
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['shift', id] });
@@ -495,32 +636,63 @@ function ShiftDetail({ id, canDesk }) {
     queryClient.invalidateQueries({ queryKey: ['brief'] });
     queryClient.invalidateQueries({ queryKey: ['person'] });
   };
+  // Volunteer books or drops their own spot (shift.join / shift.leave).
+  const selfAction = async (name) => {
+    setJoinError(null);
+    setJoining(true);
+    try {
+      await action(name, { shift_id: id });
+      // Joining may create the volunteer's supporter record; the "Your
+      // shifts" lookup searches persons by email, so refresh that too.
+      queryClient.invalidateQueries({ queryKey: ['persons'] });
+      setLeaving(false);
+      refresh();
+    } catch (e) {
+      setJoinError(e.message);
+    } finally {
+      setJoining(false);
+    }
+  };
 
   if (!validId || shiftQ.isError) {
     return (
-      <>
-        <Link to="/shifts" className="ops-back">← All shifts</Link>
-        <p className="error">
-          {!validId || shiftQ.error.status === 404 ? 'That shift does not exist (or was removed).' : shiftQ.error.message}
+      <div className="ops-page">
+        <Link to="/shifts" className="ops-back">← Shifts</Link>
+        <p className="ops-empty">
+          {!validId || shiftQ.error.status === 404 ? 'That shift is gone.' : shiftQ.error.message}
         </p>
-      </>
+      </div>
     );
   }
   // isPending, not isLoading: a query paused offline is pending but not
   // fetching, and reading shiftQ.data below would throw.
-  if (shiftQ.isPending) return <p className="muted">Loading the shift…</p>;
+  if (shiftQ.isPending) return <p className="muted">Loading…</p>;
 
   const { shift, assignees } = shiftQ.data;
   const active = assignees.filter((a) => a.status === 'assigned' || a.status === 'confirmed');
-  const full = shift.capacity && active.length >= shift.capacity;
+  const full = !!shift.capacity && active.length >= shift.capacity;
   const href = safeHref(shift.link);
+  const myEmail = String(me?.user?.email || '').toLowerCase();
+  // The server marks the viewer's own row (is_me); older servers don't, so
+  // fall back to matching the login email.
+  const isMine = (a) => (typeof a.is_me === 'boolean'
+    ? a.is_me
+    : !!myEmail && String(a.email || '').toLowerCase() === myEmail);
+  const onIt = !canDesk && active.some(isMine);
+  const over = new Date(shift.ends_at || shift.starts_at) < new Date();
+  const offered = allowed.data?.actions ?? [];
+  const canJoin = offered.includes('shift.join');
+  const canLeave = offered.includes('shift.leave');
   const providers = brief.data?.providers;
   const missingEmail = providers && !providers.email;
   const missingText = providers && !providers.text;
   let providerNote = null;
-  if (missingEmail && missingText) providerNote = 'Email/SMS providers not connected — notifications are saved as queued';
-  else if (missingEmail) providerNote = 'Email provider not connected — emails are saved as queued';
-  else if (missingText) providerNote = 'SMS provider not connected — texts are saved as queued';
+  if (missingEmail && missingText) providerNote = 'Email and text not connected — saved as queued.';
+  else if (missingEmail) providerNote = 'Email not connected — saved as queued.';
+  else if (missingText) providerNote = 'Text not connected — saved as queued.';
+  // Desk: the yellow button is the job at hand. Open spots → fill them
+  // ("Add volunteer"); full → tell the crew ("Notify everyone").
+  const primary = over ? null : full ? 'notify' : 'add';
 
   const setStatus = async (a, status) => {
     setError(null);
@@ -545,6 +717,7 @@ function ShiftDetail({ id, canDesk }) {
     try {
       await action('shift.unassign', { id: a.assignment_id });
       setAdded(null);
+      setOpenId(null);
     } catch (e) {
       setError(`${a.name}: ${e.message}`);
     } finally {
@@ -571,6 +744,7 @@ function ShiftDetail({ id, canDesk }) {
     try {
       const res = await action('shift.notify', { shift_id: shift.id });
       setResults(res.notified ?? []);
+      setShowResults(false);
       setConfirming(false);
       refresh();
     } catch (e) {
@@ -580,203 +754,208 @@ function ShiftDetail({ id, canDesk }) {
     }
   };
 
-  return (
-    <>
-      <Link to="/shifts" className="ops-back">← All shifts</Link>
-      <span className="eyebrow" style={{ display: 'block' }}>
-        Shift{shift.role ? ` · ${roleLabel(shift.role)}` : ''}
-      </span>
-      <h1>{shift.title}</h1>
+  const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
 
-      <div className="ops-facts">
-        <div>
-          <span className="eyebrow">When</span>
-          <span className="v">{fmtLongDay(shift.starts_at)}</span>
-          <span className="v mono">{fmtRange(shift.starts_at, shift.ends_at)}</span>
-        </div>
-        <div>
-          <span className="eyebrow">Where</span>
-          <span className="v">{shift.location || <span className="muted">—</span>}</span>
-        </div>
-        <div>
-          <span className="eyebrow">Spots</span>
-          <span className="v"><FillBar filled={active.length} capacity={shift.capacity} /></span>
-        </div>
-        {shift.link && (
-          <div>
-            <span className="eyebrow">Link</span>
-            <span className="v">
-              {href
-                ? <a href={href} target="_blank" rel="noopener noreferrer">{shift.link.replace(/^https?:\/\//i, '')}</a>
-                : shift.link}
-            </span>
+  // ── Desk blocks: whichever is `primary` sits under the spots number in
+  // yellow; the other waits, quiet, under the roster. ──
+  const addBlock = (isPrimary) => (
+    <div className="ops-add" data-primary={isPrimary ? '' : undefined}>
+      {!adding ? (
+        <button type="button" className={`btn ops-tap${isPrimary ? ' btn-primary ops-wide' : ''}`}
+          onClick={() => { setAdding(true); setAdded(null); setAddError(null); }}>
+          + Add volunteer
+        </button>
+      ) : (
+        <>
+          <label htmlFor="shift-add-person" className="eyebrow">Add volunteer</label>
+          <PersonPicker
+            id="shift-add-person"
+            autoFocus
+            roleHint={shift.role || null}
+            excludeIds={assignees.map((a) => a.id)}
+            excludeLabel="on this shift"
+            placeholder="Name, email or phone…"
+            onPick={assign}
+          />
+          {full && <span className="ops-meta">Full — mark someone declined to open a spot.</span>}
+          <div className="ops-actions">
+            <button type="button" className="btn btn-quiet ops-tap" onClick={() => setAdding(false)}>Done</button>
           </div>
+        </>
+      )}
+      {addError && <p className="error">{addError}</p>}
+      {added && <p className="ops-done" role="status">✓ {added} added</p>}
+    </div>
+  );
+
+  // Nobody on it yet → nothing to send, so the quiet Notify stays out of the way.
+  const showNotify = active.length > 0 || !!results || !!notifyError;
+  const notifyBlock = (isPrimary) => showNotify && (
+    <section className="ops-notify" aria-label="Notify volunteers">
+      {!confirming ? (
+        <button type="button" className={`btn ops-tap${isPrimary ? ' btn-primary ops-wide' : ''}`}
+          disabled={active.length === 0}
+          onClick={() => { setConfirming(true); setResults(null); setNotifyError(null); }}>
+          Notify everyone
+        </button>
+      ) : (
+        <div className="ops-confirm" role="group" aria-label="Send notification">
+          <span>Email + text {people(active.length)}?</span>
+          <button type="button" className={`btn ops-tap ${isPrimary ? 'btn-primary' : 'ops-solid'}`}
+            onClick={notify} disabled={sending}>
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+          <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirming(false)} disabled={sending}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {confirming && providerNote && (
+        <span className="ops-meta">{providerNote} <Link to="/outreach/website">Connect</Link></span>
+      )}
+      {notifyError && <p className="error">{notifyError}</p>}
+      {results && (results.length === 0 ? (
+        <span className="ops-meta" role="status">Nobody to notify.</span>
+      ) : (
+        <>
+          {/* Say "Sent" only when something actually went out; without a
+              provider every message is saved as queued. */}
+          {(() => {
+            const reached = results.filter((r) => r.email === 'sent' || r.text === 'sent').length;
+            const waiting = results.filter((r) => r.email !== 'sent' && r.text !== 'sent'
+              && (r.email === 'queued' || r.text === 'queued')).length;
+            return (
+              <p className="ops-done" role="status">
+                {reached > 0 && <>✓ Sent to {people(reached)}</>}
+                {reached > 0 && waiting > 0 && ' · '}
+                {waiting > 0 && <>Saved for {people(waiting)} — sends once email and text are connected</>}
+                {reached === 0 && waiting === 0 && <>Couldn&apos;t reach anyone — see Details</>}
+              </p>
+            );
+          })()}
+          <button type="button" className="ops-more" aria-expanded={showResults} aria-controls="notify-results"
+            onClick={() => setShowResults((v) => !v)}>
+            Details
+          </button>
+          {showResults && (
+          <ul className="ops-results" id="notify-results" aria-label="Notification results">
+            {results.map((r) => (
+              <li key={r.person_id}>
+                <span>{r.name}</span>
+                <span className="chips">
+                  <NotifyChip channel="email" status={r.email} />
+                  <NotifyChip channel="text" status={r.text} />
+                </span>
+              </li>
+            ))}
+          </ul>
+          )}
+        </>
+      ))}
+    </section>
+  );
+
+  return (
+    <div className="ops-page">
+      <Link to="/shifts" className="ops-back">← Shifts</Link>
+      <h1>{shift.title}</h1>
+      <div className="ops-lines">
+        {shift.role && (
+          <span className="ops-chips"><span className="chip">{roleLabel(shift.role)}</span></span>
         )}
+        <span className="when">{longDay(shift.starts_at)} · {timeRange(shift.starts_at, shift.ends_at)}</span>
+        {shift.location && <span>{shift.location}</span>}
+        {shift.instructions && <span className="note">{shift.instructions}</span>}
+        {shift.link && (href
+          ? <a href={href} target="_blank" rel="noopener noreferrer">{shift.link.replace(/^https?:\/\//i, '')}</a>
+          : <span>{shift.link}</span>)}
       </div>
 
-      {shift.instructions && (
-        <section className="card">
-          <span className="eyebrow">Instructions</span>
-          <p className="ops-instructions">{shift.instructions}</p>
-        </section>
-      )}
+      <div className="ops-spots" aria-label={shift.capacity ? `${active.length} of ${shift.capacity} spots filled` : `${active.length} going`}>
+        <span className="n">{spotsText(active.length, shift.capacity)}</span>
+        <SpotsBar filled={active.length} capacity={shift.capacity} />
+      </div>
 
-      {canDesk && (
-        <section className="ops-notify" aria-label="Notify volunteers">
-          {!confirming ? (
-            <button
-              type="button"
-              className="btn btn-primary ops-notify-btn"
-              disabled={active.length === 0}
-              onClick={() => { setConfirming(true); setResults(null); setNotifyError(null); }}
-            >
-              Notify everyone (email + text)
-            </button>
-          ) : (
-            <div className="ops-actions">
-              <button type="button" className="btn btn-primary ops-tap" onClick={notify} disabled={sending}>
-                {sending ? 'Sending…' : `Send to ${active.length} ${active.length === 1 ? 'person' : 'people'}`}
-              </button>
-              <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirming(false)} disabled={sending}>
-                Cancel
-              </button>
-            </div>
-          )}
-          <div className="sub">
-            {active.length === 0
-              ? 'Add volunteers first — assigned and confirmed people get the message.'
-              : 'Time, place, instructions and link go to everyone assigned or confirmed.'}
-          </div>
-          {providerNote && (
-            <div className="ops-quiet-note">
-              <span>{providerNote}</span>
-              <Link to="/outreach/website">Connect →</Link>
-            </div>
-          )}
-          {notifyError && <p className="error">{notifyError}</p>}
-          {results && (
-            results.length === 0 ? (
-              <p className="ops-empty">Nobody was assigned or confirmed, so nothing was sent.</p>
-            ) : (
-              <ul className="ops-results" aria-label="Notification results">
-                {results.map((r) => (
-                  <li key={r.person_id}>
-                    <span>{r.name}</span>
-                    <span className="chips">
-                      <NotifyChip channel="email" status={r.email} />
-                      <NotifyChip channel="text" status={r.text} />
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )
-          )}
-        </section>
-      )}
-
-      <section className="card">
-        <span className="eyebrow">Volunteers · {assignees.length}</span>
-        {error && <p className="error">{error}</p>}
-        {assignees.length === 0 ? (
-          <p className="ops-empty">Nobody on this shift yet.</p>
-        ) : (
-          <table className="table ops-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Notified</th>
-                {canDesk && <th><span className="ops-sr">Remove</span></th>}
-              </tr>
-            </thead>
-            <tbody>
-              {assignees.map((a) => (
-                <tr key={a.assignment_id}>
-                  <td className="name"><Link to={`/people/${a.id}`}>{a.name}</Link></td>
-                  <td data-label="Phone">
-                    {a.phone ? <a className="ops-tel" href={`tel:${a.phone}`}>{a.phone}</a> : <span className="muted">—</span>}
-                  </td>
-                  <td data-label="Email" className="wrap-any">
-                    {a.email ? <a href={`mailto:${a.email}`}>{a.email}</a> : <span className="muted">—</span>}
-                  </td>
-                  <td data-label="Status">
-                    {canDesk ? (
-                      <select
-                        className="ops-status"
-                        data-tone={ASSIGN_TONE[a.status] || undefined}
-                        aria-label={`Status for ${a.name}`}
-                        value={a.status}
-                        disabled={rowBusy === a.assignment_id}
-                        onChange={(e) => setStatus(a, e.target.value)}
-                      >
-                        {SHIFT_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
-                      </select>
-                    ) : (
-                      <span className={`chip ${ASSIGN_TONE[a.status] ? `chip-${ASSIGN_TONE[a.status]}` : ''}`.trim()}>
-                        {statusLabel(a.status)}
-                      </span>
-                    )}
-                  </td>
-                  <td data-label="Notified">
-                    {a.notified_at ? (
-                      <span className="chips">
-                        <span className="mono ops-meta">{fmtStamp(a.notified_at)}</span>
-                        <NotifyChip channel="email" status={a.notify_email} />
-                        <NotifyChip channel="text" status={a.notify_text} />
-                      </span>
-                    ) : <span className="muted">not yet</span>}
-                  </td>
-                  {canDesk && (
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-quiet ops-tap"
-                        aria-label={`Remove ${a.name} from this shift`}
-                        disabled={rowBusy === a.assignment_id}
-                        onClick={() => unassign(a)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  )}
-                </tr>
+      {!canDesk && (
+        <section className="ops-notify" aria-label="Your spot">
+          {onIt ? (
+            <>
+              <span className="ops-onit" role="status">✓ You’re on this shift</span>
+              {canLeave && !over && (!leaving ? (
+                <button type="button" className="btn btn-quiet ops-tap" disabled={joining}
+                  onClick={() => { setLeaving(true); setJoinError(null); }}>
+                  Can’t make it
+                </button>
+              ) : (
+                <div className="ops-confirm" role="group" aria-label="Drop this shift">
+                  <span>Drop this shift?</span>
+                  <button type="button" className="btn ops-danger ops-tap" disabled={joining}
+                    onClick={() => selfAction('shift.leave')}>
+                    {joining ? 'Saving…' : 'Yes'}
+                  </button>
+                  <button type="button" className="btn btn-quiet ops-tap" disabled={joining}
+                    onClick={() => setLeaving(false)}>
+                    No
+                  </button>
+                </div>
               ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {canDesk && (
-        <section className="card">
-          <span className="eyebrow">Add volunteer</span>
-          <div className="field">
-            <label htmlFor="shift-add-person">Person</label>
-            <PersonPicker
-              id="shift-add-person"
-              roleHint={shift.role || null}
-              excludeIds={assignees.map((a) => a.id)}
-              excludeLabel="on this shift"
-              placeholder="Type a name, email or phone…"
-              onPick={assign}
-            />
-          </div>
-          {full && <p className="ops-meta">This shift is full — mark someone declined to open a spot.</p>}
-          {addError && <p className="error">{addError}</p>}
-          {added && <p className="ok-text mono" role="status">✓ {added} added</p>}
+            </>
+          ) : over || full ? null : canJoin ? (
+            <button type="button" className="btn btn-primary ops-tap ops-wide" disabled={joining}
+              onClick={() => selfAction('shift.join')}>
+              {joining ? 'Saving…' : 'Count me in'}
+            </button>
+          ) : !allowed.isPending ? (
+            <p className="ops-empty">Ask your organizer to add you.</p>
+          ) : null}
+          {joinError && <p className="error" role="alert">{joinError}</p>}
         </section>
       )}
-    </>
+
+      {canDesk && primary === 'add' && addBlock(true)}
+      {canDesk && primary === 'notify' && notifyBlock(true)}
+
+      <span className="eyebrow ops-label">On this shift · {canDesk ? assignees.length : active.length}</span>
+      {error && <p className="error">{error}</p>}
+      {(canDesk ? assignees : active).length === 0 ? (
+        <p className="ops-empty">Nobody yet.</p>
+      ) : !canDesk ? (
+        <ul className="ops-rows">
+          {active.map((a) => <NameRow key={a.assignment_id} a={a} isMe={isMine(a)} />)}
+        </ul>
+      ) : (
+        <ul className="ops-rows">
+          {assignees.map((a) => (
+            <AssigneeRow
+              key={a.assignment_id}
+              a={a}
+              open={openId === a.assignment_id}
+              onToggle={() => setOpenId((cur) => (cur === a.assignment_id ? null : a.assignment_id))}
+              canDesk={canDesk}
+              busy={rowBusy === a.assignment_id}
+              onStatus={(status) => setStatus(a, status)}
+              onRemove={() => unassign(a)}
+            />
+          ))}
+        </ul>
+      )}
+
+      {canDesk && (
+        <div className="ops-after">
+          {primary !== 'add' && addBlock(false)}
+          {primary !== 'notify' && notifyBlock(false)}
+        </div>
+      )}
+    </div>
   );
 }
 
 export default function Shifts() {
   const { id } = useParams();
-  const { me } = useOutletContext();
+  const { me } = useOutletContext() ?? {};
   // Shift writes are desk work (manager / treasurer / staff); volunteers can read.
   const canDesk = me?.role !== 'volunteer';
   return id
-    ? <ShiftDetail key={id} id={id} canDesk={canDesk} />
-    : <ShiftList canDesk={canDesk} />;
+    ? <ShiftDetail key={id} id={id} canDesk={canDesk} me={me} />
+    : <ShiftList canDesk={canDesk} me={me} />;
 }

@@ -2,11 +2,13 @@
 // selected door, and preselected donor lives in the address bar. Screens past
 // Today load on demand — the map (Leaflet) is the heaviest and phones in the
 // field shouldn't pay for it until they open it.
+// Desk-only screens sit under one role guard: a volunteer who types one of
+// those URLs lands back on Today (the server refuses their data anyway).
 import { lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from './api.js';
-import Shell from './Shell.jsx';
+import Shell, { isDesk } from './Shell.jsx';
 import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
 import Today from './pages/Today.jsx';
@@ -35,6 +37,14 @@ function RequireAuth() {
   return <Shell me={me.data} />;
 }
 
+// Staff, treasurers and managers only. The Shell's outlet context is passed
+// straight through, so pages keep reading { me } from useOutletContext().
+function DeskOnly() {
+  const ctx = useOutletContext();
+  if (!isDesk(ctx?.me)) return <Navigate to="/" replace />;
+  return <Outlet context={ctx} />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -44,19 +54,23 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Today />} />
         <Route path="/map" element={<MapPage />} />
+        <Route path="/calls" element={<People key="calls" mode="calls" />} />
         <Route path="/people" element={<People />} />
-        <Route path="/people/import" element={<ImportPeople />} />
         <Route path="/people/:id" element={<Person />} />
         <Route path="/shifts" element={<Shifts />} />
         <Route path="/shifts/:id" element={<Shifts />} />
-        <Route path="/money" element={<Money />} />
-        <Route path="/signs" element={<Signs />} />
-        <Route path="/outreach" element={<Outreach />} />
-        <Route path="/outreach/:tab" element={<Outreach />} />
-        <Route path="/filings" element={<Filings />} />
-        <Route path="/team" element={<Team />} />
         <Route path="/turfs" element={<Turfs />} />
         <Route path="/turfs/:id" element={<Turfs />} />
+        {/* Volunteers get the sign crew's "Signs to put up" view. */}
+        <Route path="/signs" element={<Signs />} />
+        <Route element={<DeskOnly />}>
+          <Route path="/people/import" element={<ImportPeople />} />
+          <Route path="/money" element={<Money />} />
+          <Route path="/outreach" element={<Outreach />} />
+          <Route path="/outreach/:tab" element={<Outreach />} />
+          <Route path="/filings" element={<Filings />} />
+          <Route path="/team" element={<Team />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

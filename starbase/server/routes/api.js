@@ -149,7 +149,8 @@ app.get('/persons/:id', async (c) => {
   const ctx = c.get('ctx');
   const db = c.get('db');
   const person = (await db.query(
-    `select id, kind, name, email, phone, address, unit, city, postal, lat, lng, tags, socials, rating, rated_at, created_at
+    `select id, kind, name, email, phone, address, unit, city, postal, lat, lng, tags, socials, rating, rated_at, created_at,
+            attrs->>'note' as note
      from persons where id = $1 and workspace_id = $2 and deleted_at is null`,
     [c.req.param('id'), ctx.workspaceId],
   )).rows[0];

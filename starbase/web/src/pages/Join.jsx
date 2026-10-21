@@ -7,6 +7,10 @@ import { apiGet, apiPost } from '../api.js';
 
 const ROLE_LABEL = { manager: 'a manager', treasurer: 'the treasurer', staff: 'staff', volunteer: 'a volunteer' };
 
+// Big, thumb-sized controls (auth pages load before any page stylesheet).
+const AUTH_INPUT = { minHeight: 48, fontSize: 16 };
+const AUTH_BUTTON = { width: '100%', minHeight: 52, fontSize: 13, marginTop: 'var(--s-2)' };
+
 export default function Join() {
   const { token } = useParams();
   const navigate = useNavigate();
@@ -38,8 +42,8 @@ export default function Join() {
     return (
       <div className="auth-page">
         <span className="brand">Starbase</span>
-        <h1>Invite not found</h1>
-        <p className="muted">{inv.error.message}. Ask your campaign for a new link.</p>
+        <h1>{inv.error.status === 404 ? 'Invite not found' : 'Can’t open this invite'}</h1>
+        <p className="muted">{inv.error.status === 404 ? 'Ask your campaign for a new link.' : inv.error.message}</p>
       </div>
     );
   }
@@ -49,24 +53,25 @@ export default function Join() {
     <div className="auth-page">
       <span className="brand">Starbase</span>
       <h1>Join {workspaceName}</h1>
-      <p className="muted">You’re invited as {ROLE_LABEL[role] || role}, as <strong>{email}</strong>.</p>
+      <p className="muted">As {ROLE_LABEL[role] || role} · <strong>{email}</strong></p>
       <form onSubmit={submit}>
         {!hasAccount && (
           <div className="field">
             <label htmlFor="join-name">Your name</label>
-            <input id="join-name" className="input" required autoFocus autoComplete="name" maxLength={200}
+            <input id="join-name" className="input" required autoFocus autoComplete="name" maxLength={200} style={AUTH_INPUT}
               value={name} onChange={(e) => setName(e.target.value)} />
           </div>
         )}
         <div className="field">
           <label htmlFor="join-password">{hasAccount ? 'Your Starbase password' : 'Choose a password'}</label>
-          <input id="join-password" className="input" type="password" required minLength={8} maxLength={200}
+          <input id="join-password" className="input" type="password" required minLength={8} maxLength={200} style={AUTH_INPUT}
             autoFocus={hasAccount} autoComplete={hasAccount ? 'current-password' : 'new-password'}
+            placeholder={hasAccount ? undefined : '8 or more characters'}
             value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         {error && <p className="error">{error}</p>}
-        <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Joining…' : `Join ${workspaceName}`}
+        <button type="submit" className="btn btn-primary" style={AUTH_BUTTON} disabled={busy}>
+          {busy ? 'Joining…' : 'Join'}
         </button>
       </form>
     </div>

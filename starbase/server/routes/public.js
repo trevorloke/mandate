@@ -35,29 +35,63 @@ const ipOf = (c) => c.req.header('x-forwarded-for')?.split(',')[0].trim() || c.r
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const settingsOf = (ws) => (typeof ws.settings === 'string' ? JSON.parse(ws.settings) : (ws.settings || {}));
 
+// One plain page for every public form: the campaign name big at the top,
+// one column, thumb-sized inputs and one big button.
 const page = (ws, title, inner) => {
   const site = settingsOf(ws).website;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · ${esc(ws.name)}</title>
 <style>
-  :root{--paper:#f8f6ef;--ink:#171410;--ink2:#5d5749;--rule:#e2ddd0;--mark:#f2c40f}
-  @media(prefers-color-scheme:dark){:root{--paper:#15120c;--ink:#ece7da;--ink2:#a59e8c;--rule:#2d2a20;--mark:#d9b60e}}
-  body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.5 Georgia,'Times New Roman',serif}
-  main{max-width:560px;margin:0 auto;padding:40px 20px 64px}
-  .eyebrow{font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--ink2)}
-  h1{font-size:34px;line-height:1.1;margin:10px 0 14px}
-  p{color:var(--ink2)}
-  label{display:block;font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2);margin:16px 0 6px}
-  input,textarea,select{width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid var(--rule);background:transparent;color:var(--ink);border-radius:2px}
-  button{margin-top:20px;font:600 13px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;background:var(--mark);color:#171410;border:0;padding:14px 22px;border-radius:2px;cursor:pointer}
-  .done{border:1px solid var(--rule);padding:18px;margin-top:20px}
-  .roles{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-top:6px}
-  .roles label{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font:15px Georgia,serif;margin:0}
-  .roles input{width:auto}
-  footer{margin-top:40px;border-top:1px solid var(--rule);padding-top:12px;font:11px/1.6 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:var(--ink2)}
+  :root{--paper:#f8f6ef;--card:#fffdf7;--ink:#171410;--ink2:#5d5749;--rule:#d6d0bf;--mark:#f2c40f;--bad:#a83a2c}
+  @media(prefers-color-scheme:dark){:root{--paper:#15120c;--card:#1d1a13;--ink:#ece7da;--ink2:#a59e8c;--rule:#3a362a;--mark:#d9b60e;--bad:#e08a8a}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font:18px/1.5 Georgia,'Times New Roman',serif}
+  main{max-width:520px;margin:0 auto;padding:28px 16px 56px}
+  .camp{font-size:30px;font-weight:700;line-height:1.1;margin:0 0 24px;padding-bottom:12px;border-bottom:4px solid var(--mark);overflow-wrap:anywhere}
+  h1{font-size:26px;line-height:1.2;margin:0 0 12px}
+  p{color:var(--ink2);margin:0 0 14px}
+  .big{font-size:20px;font-weight:700;color:var(--ink)}
+  .when{font-size:19px;font-weight:700;color:var(--ink);margin:0 0 4px}
+  form{margin-top:8px}
+  label,legend{display:block;font-size:16px;font-weight:700;color:var(--ink);margin:18px 0 6px;padding:0}
+  fieldset{border:0;margin:18px 0 0;padding:0;min-width:0}
+  legend{margin:0 0 6px}
+  input,textarea,select{display:block;width:100%;min-height:52px;font:inherit;font-size:18px;padding:12px 14px;border:1px solid var(--rule);background:var(--card);color:var(--ink);border-radius:4px}
+  textarea{min-height:100px}
+  input:focus,textarea:focus,select:focus{outline:3px solid var(--mark);outline-offset:1px;border-color:var(--ink)}
+  .checks{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .amounts{grid-template-columns:1fr 1fr 1fr}
+  @media(max-width:360px){.checks{grid-template-columns:1fr}.amounts{grid-template-columns:1fr 1fr}}
+  .check{display:flex;gap:12px;align-items:center;min-height:52px;margin:8px 0;padding:10px 14px;border:1px solid var(--rule);border-radius:4px;background:var(--card);font-size:17px;font-weight:400;line-height:1.3;cursor:pointer}
+  .checks .check{margin:0}
+  .check input{width:24px;height:24px;min-height:0;flex:none;margin:0;padding:0;accent-color:var(--ink)}
+  .check:has(input:checked){border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+  .amounts .check{font-size:19px;font-weight:700}
+  .attest{align-items:flex-start}
+  .attest input{margin-top:1px}
+  .roles{display:grid;gap:8px}
+  .role .check{margin:0}
+  .gl{display:block;font-size:14px;color:var(--ink2)}
+  .rd{display:none;margin:6px 0 4px 38px}
+  .rd label{margin:0 0 4px;font-size:15px}
+  .role:has(input[name=roles]:checked) .rd{display:block}
+  @supports not selector(:has(a)){.rd{display:block}}
+  details{margin-top:8px}
+  summary{display:flex;align-items:center;min-height:52px;padding:10px 14px;border:1px dashed var(--rule);border-radius:4px;font-size:17px;font-weight:700;cursor:pointer;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'+';font:700 20px/1 ui-monospace,Menlo,monospace;margin-right:12px}
+  details[open] summary::before{content:'−'}
+  details[open] summary{margin-bottom:8px}
+  summary:focus-visible{outline:3px solid var(--mark);outline-offset:1px}
+  button{display:block;width:100%;min-height:56px;margin-top:24px;font:700 15px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;background:var(--mark);color:#171410;border:0;padding:16px 22px;border-radius:4px;cursor:pointer}
+  button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+  .done{border:1px solid var(--rule);border-left:4px solid var(--mark);background:var(--card);padding:18px;margin-top:16px}
+  .err{border-left-color:var(--bad);margin:0 0 8px}
+  .note{font-size:15px;margin:16px 0 0}
+  footer{margin-top:40px;border-top:1px solid var(--rule);padding-top:12px;font:13px/1.6 ui-monospace,Menlo,monospace;color:var(--ink2)}
   a{color:inherit}
 </style></head><body><main>
-<div class="eyebrow">${esc(ws.name)}</div>
+<div class="camp">${esc(ws.name)}</div>
 ${inner}
 <footer>${site ? `<a href="${esc(site)}">← ${esc(site.replace(/^https?:\/\//, ''))}</a> · ` : ''}Powered by Starbase</footer>
 </main></body></html>`;
@@ -116,7 +150,8 @@ const emailOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 const readBody = async (c) => {
   const ct = c.req.header('content-type') || '';
   if (ct.includes('application/json')) return c.req.json().catch(() => ({}));
-  const form = await c.req.parseBody().catch(() => ({}));
+  // all: a form with several ticked roles posts roles=a&roles=b — keep them all.
+  const form = await c.req.parseBody({ all: true }).catch(() => ({}));
   return form;
 };
 
@@ -131,13 +166,13 @@ app.get('/p/:ws/:slug', async (c) => {
   return c.html(page(ws, pet.title, `
 <h1>${esc(pet.title)}</h1>
 ${pet.body ? `<p>${esc(pet.body).replace(/\n/g, '<br>')}</p>` : ''}
-<p class="eyebrow">${n} ${n === 1 ? 'signature' : 'signatures'}</p>
+<p class="big">${n} ${n === 1 ? 'signature' : 'signatures'}</p>
 <form method="post">
-  <label for="name">Your name</label><input id="name" name="name" required>
-  <label for="email">Email</label><input id="email" name="email" type="email">
-  <label for="phone">Phone</label><input id="phone" name="phone">
-  <label for="address">Address</label><input id="address" name="address">
-  <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font:15px Georgia,serif"><input type="checkbox" name="subscribe" value="1" style="width:auto"> Keep me updated by email</label>
+  <label for="name">Your name</label><input id="name" name="name" required autocomplete="name">
+  <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email">
+  <label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel">
+  <label for="address">Address</label><input id="address" name="address" autocomplete="street-address">
+  <label class="check"><input type="checkbox" name="subscribe" value="1"> Email me updates</label>
   <button type="submit">Sign the petition</button>
 </form>`));
 });
@@ -171,10 +206,10 @@ app.get('/n/:ws', async (c) => {
   const ws = await loadWs(db, c.req.param('ws'));
   if (!ws) return c.text('not found', 404);
   return c.html(page(ws, 'Stay in the loop', `
-<h1>Stay in the loop.</h1><p>News from ${esc(ws.name)}, straight to your inbox.</p>
+<h1>Stay in the loop.</h1>
 <form method="post">
-  <label for="name">Your name</label><input id="name" name="name">
-  <label for="email">Email</label><input id="email" name="email" type="email" required>
+  <label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="email">
+  <label for="name">Your name</label><input id="name" name="name" autocomplete="name">
   <button type="submit">Subscribe</button>
 </form>`));
 });
@@ -202,27 +237,70 @@ app.get('/u/:id', async (c) => {
 });
 
 // ── Volunteer signup ──
-const roleBoxes = () => VOLUNTEER_ROLES.map((r) =>
-  `<label><input type="checkbox" name="roles" value="${r.code}"> ${esc(r.label)}</label>`).join('');
+// Six plain choices up front; the rest under "More ways to help". Campaign
+// words get a short gloss. A role with a detail (building, language,
+// community) shows one line for it once it's ticked.
+const FIRST_ROLES = ['doorknocking', 'phoning', 'highrise_captain', 'zone_house_captain', 'translation', 'driver'];
+const GLOSS = {
+  driver: 'drive voters to vote',
+  scrutineer: 'watch the vote count',
+  mainstreeting: 'meet people on the street',
+  zone_house_captain: 'look after your street',
+  highrise_captain: 'look after your building',
+  burmashave: 'roadside sign waving',
+};
+const roleBox = (r) => `<div class="role"><label class="check"><input type="checkbox" name="roles" value="${r.code}"><span>${esc(r.label)}${GLOSS[r.code] ? `<span class="gl">${esc(GLOSS[r.code])}</span>` : ''}</span></label>${r.detail
+  ? `<div class="rd"><label for="detail_${r.code}">${esc(r.detail)}</label><input id="detail_${r.code}" name="detail_${r.code}" maxlength="200"></div>` : ''}</div>`;
+const roleBoxes = () => {
+  const first = FIRST_ROLES.map((c) => VOLUNTEER_ROLES.find((r) => r.code === c)).filter(Boolean);
+  const rest = VOLUNTEER_ROLES.filter((r) => !FIRST_ROLES.includes(r.code));
+  return `<div class="roles">${first.map(roleBox).join('')}</div>
+  <details><summary>More ways to help</summary><div class="roles">${rest.map(roleBox).join('')}</div></details>`;
+};
 
 app.get('/v/:ws', async (c) => {
   const db = await getDb();
   const ws = await loadWs(db, c.req.param('ws'));
   if (!ws) return c.text('not found', 404);
   return c.html(page(ws, 'Volunteer', `
-<h1>Volunteer with ${esc(ws.name)}.</h1><p>Tell us how you'd like to help and we'll be in touch.</p>
+<h1>Volunteer with us.</h1>
 <form method="post">
-  <label for="name">Your name</label><input id="name" name="name" required>
-  <label for="email">Email</label><input id="email" name="email" type="email">
-  <label for="phone">Phone</label><input id="phone" name="phone">
-  <label for="address">Address</label><input id="address" name="address">
-  <label>How can you help?</label><div class="roles">${roleBoxes()}</div>
-  <label for="note">Anything else (languages, availability)</label><textarea id="note" name="note" rows="3"></textarea>
+  <label for="name">Your name</label><input id="name" name="name" required autocomplete="name">
+  <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email">
+  <label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel">
+  <label for="address">Address</label><input id="address" name="address" autocomplete="street-address">
+  <fieldset><legend>How can you help?</legend>${roleBoxes()}</fieldset>
+  <label for="note">Anything else?</label><textarea id="note" name="note" rows="3" placeholder="When you're free"></textarea>
   <button type="submit">Sign me up</button>
 </form>`));
 });
 
-const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(String).filter((r) => VOLUNTEER_ROLE_CODES.includes(r));
+const asList = (v) => Array.from(new Set((Array.isArray(v) ? v : v ? [v] : []).map(String).filter((r) => VOLUNTEER_ROLE_CODES.includes(r))));
+const ROLE_HAS_DETAIL = new Set(VOLUNTEER_ROLES.filter((r) => r.detail).map((r) => r.code));
+
+// Each ticked role keeps its own detail (detail_<code>: building, language,
+// community); the free "Anything else?" note is kept once, on the person.
+const saveVolunteer = async (db, ws, personId, b) => {
+  const roles = asList(b.roles);
+  for (const role of roles) {
+    const detail = ROLE_HAS_DETAIL.has(role) ? str(b[`detail_${role}`], 200) : '';
+    await db.query(
+      'insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
+      [newId(), ws.id, personId, role, detail || null],
+    );
+  }
+  const note = str(b.note, 2000);
+  if (note) {
+    await db.query(
+      `update persons set attrs = jsonb_set(coalesce(attrs, '{}'::jsonb), '{note}',
+         to_jsonb(case when coalesce(attrs->>'note', '') = '' then $3::text else (attrs->>'note') || chr(10) || $3::text end)),
+         updated_at = now()
+       where id = $1 and workspace_id = $2`,
+      [personId, ws.id, note],
+    );
+  }
+  return roles;
+};
 
 app.post('/v/:ws', async (c) => {
   if (limited(ipOf(c))) return c.text('too many requests', 429);
@@ -233,14 +311,8 @@ app.post('/v/:ws', async (c) => {
   const name = str(b.name); const email = str(b.email, 320); const phone = str(b.phone, 40); const address = str(b.address, 400);
   if (!name) return c.text('name required', 400);
   if (email && !emailOk(email)) return c.text('invalid email', 400);
-  const roles = asList(b.roles);
   const { id } = await upsertPersonFromPublic(db, ws, { name, email, phone, address }, ['volunteer-prospect']);
-  for (const role of roles) {
-    await db.query(
-      'insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
-      [newId(), ws.id, id, role, str(b.note, 200) || null],
-    );
-  }
+  const roles = await saveVolunteer(db, ws, id, b);
   if ((c.req.header('accept') || '').includes('application/json')) return c.json({ ok: true });
   return c.html(page(ws, 'Thank you', `<h1>Thank you, ${esc(name.split(' ')[0])}.</h1><div class="done">We'll be in touch about ${roles.length ? roles.length + ' way' + (roles.length > 1 ? 's' : '') + ' to help' : 'volunteering'}.</div>`));
 });
@@ -277,14 +349,15 @@ app.get('/e/:ws/:slug', async (c) => {
   const past = new Date(ev.starts_at) < new Date();
   return c.html(page(ws, ev.title, `
 <h1>${esc(ev.title)}</h1>
-<p class="eyebrow">${esc(fmtWhen(ev.starts_at, tz))}${ev.location ? ` · ${esc(ev.location)}` : ''}</p>
+<p class="when">${esc(fmtWhen(ev.starts_at, tz))}</p>
+${ev.location ? `<p>${esc(ev.location)}</p>` : ''}
 ${ev.description ? `<p>${esc(ev.description).replace(/\n/g, '<br>')}</p>` : ''}
 ${past ? '<div class="done">This event has already happened.</div>'
   : full ? '<div class="done">This event is full.</div>'
   : `<form method="post">
-  <label for="name">Your name</label><input id="name" name="name" required>
-  <label for="email">Email</label><input id="email" name="email" type="email">
-  <label for="phone">Phone</label><input id="phone" name="phone">
+  <label for="name">Your name</label><input id="name" name="name" required autocomplete="name">
+  <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email">
+  <label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel">
   <label for="guests">Bringing guests?</label>
   <select id="guests" name="guests">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n === 0 ? 'Just me' : `+${n}`}</option>`).join('')}</select>
   <button type="submit">RSVP</button>
@@ -325,21 +398,23 @@ const publicBase = (c) => (process.env.STARBASE_PUBLIC_URL || new URL(c.req.url)
 const donateForm = (ws, cap, err = '', v = {}) => {
   const card = stripeConfigured();
   return `
-<h1>Contribute to ${esc(ws.name)}.</h1>
+<h1>Donate</h1>
 <p>${card ? 'Secure card payment by Stripe.' : esc(ws.settings.donateInstructions || 'Pledge now and the campaign will contact you to complete your contribution by e-transfer or cheque.')}</p>
-${err ? `<div class="done" role="alert" style="border-color:#a83a2c">${esc(err)}</div>` : ''}
+${err ? `<div class="done err" role="alert">${esc(err)}</div>` : ''}
 <form method="post">
-  <label>Amount</label>
-  <div class="roles">${PRESETS.map((a) => `<label><input type="radio" name="amount" value="${a / 100}" ${String(v.amount) === String(a / 100) ? 'checked' : ''}> ${dollars(a)}</label>`).join('')}</div>
+  <fieldset><legend>Amount</legend>
+  <div class="checks amounts">${PRESETS.map((a) => `<label class="check"><input type="radio" name="amount" value="${a / 100}" ${String(v.amount) === String(a / 100) ? 'checked' : ''}> ${dollars(a)}</label>`).join('')}</div>
+  </fieldset>
   <label for="other">Other amount ($)</label><input id="other" name="other" inputmode="decimal" value="${esc(v.other || '')}">
-  <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font:15px Georgia,serif"><input type="checkbox" name="monthly" value="1" style="width:auto" ${v.monthly ? 'checked' : ''}> Make it monthly</label>
-  <label for="name">Full name</label><input id="name" name="name" required value="${esc(v.name || '')}">
-  <label for="email">Email</label><input id="email" name="email" type="email" required value="${esc(v.email || '')}">
-  <label for="phone">Phone</label><input id="phone" name="phone" value="${esc(v.phone || '')}">
-  <label for="address">Home address</label><input id="address" name="address" required value="${esc(v.address || '')}">
-  <label>Eligibility</label>
-  ${ATTESTATIONS.map(([k, t]) => `<label style="display:flex;gap:8px;align-items:flex-start;text-transform:none;letter-spacing:0;font:15px Georgia,serif;margin:8px 0"><input type="checkbox" name="attest_${k}" value="1" style="width:auto;margin-top:4px" required> ${esc(t)}</label>`).join('')}
-  ${cap ? `<p class="eyebrow" style="margin-top:14px">The annual limit is ${dollars(cap)} per contributor, including monthly gifts.</p>` : ''}
+  <label class="check"><input type="checkbox" name="monthly" value="1" ${v.monthly ? 'checked' : ''}> Make it monthly</label>
+  <label for="name">Full name</label><input id="name" name="name" required autocomplete="name" value="${esc(v.name || '')}">
+  <label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="email" value="${esc(v.email || '')}">
+  <label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel" value="${esc(v.phone || '')}">
+  <label for="address">Home address</label><input id="address" name="address" required autocomplete="street-address" value="${esc(v.address || '')}">
+  <fieldset><legend>Eligibility</legend>
+  ${ATTESTATIONS.map(([k, t]) => `<label class="check attest"><input type="checkbox" name="attest_${k}" value="1" required> ${esc(t)}</label>`).join('')}
+  </fieldset>
+  ${cap ? `<p class="note">The annual limit is ${dollars(cap)} per contributor, including monthly gifts.</p>` : ''}
   <button type="submit">${card ? 'Continue to payment' : 'Pledge my contribution'}</button>
 </form>`;
 };
@@ -506,10 +581,7 @@ app.post('/api/public/:ws/signup', async (c) => {
   if (kind === 'volunteer') {
     if (!name) return c.json({ error: 'name required' }, 400);
     const { id } = await upsertPersonFromPublic(db, ws, { name, email, phone, address }, ['volunteer-prospect']);
-    for (const role of asList(b.roles)) {
-      await db.query('insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
-        [newId(), ws.id, id, role, str(b.note, 200) || null]);
-    }
+    await saveVolunteer(db, ws, id, b);
     return c.json({ ok: true, kind });
   }
   if (kind === 'petition') {

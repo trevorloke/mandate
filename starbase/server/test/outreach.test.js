@@ -189,3 +189,42 @@ test('with a provider: every newsletter carries the recipient’s own unsubscrib
     delete process.env.RESEND_API_KEY;
   }
 });
+
+test('volunteer form keeps every ticked role, each role\'s own detail, and the note once on the person', async () => {
+  const form = new URLSearchParams();
+  form.append('name', 'Hira Captain'); form.append('email', 'hira@example.org');
+  for (const role of ['driver', 'highrise_captain', 'translation', 'community_committee']) form.append('roles', role);
+  form.append('detail_highrise_captain', 'The Residences, 10333 133 St');
+  form.append('detail_translation', 'Punjabi');
+  form.append('detail_driver', 'ignored: drivers carry no detail');
+  form.append('note', 'Weekends only');
+  const post = (f) => app.request(`/v/${slug}`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: f.toString(),
+  });
+  const res = await post(form);
+  assert.equal(res.status, 200);
+  const id = (await c.get('/api/persons?q=Hira')).json.persons[0].id;
+  let prof = (await c.get(`/api/persons/${id}`)).json;
+  assert.deepEqual(Object.fromEntries(prof.roles.map((x) => [x.role, x.detail])), {
+    driver: null, highrise_captain: 'The Residences, 10333 133 St', translation: 'Punjabi', community_committee: null,
+  });
+  assert.equal(prof.person.note, 'Weekends only', 'the note sits on the person, not on every role');
+
+  await post(new URLSearchParams({ name: 'Hira Captain', email: 'hira@example.org', roles: 'phoning', note: 'Evenings too' }));
+  prof = (await c.get(`/api/persons/${id}`)).json;
+  assert.equal(prof.person.note, 'Weekends only\nEvenings too', 'a repeat signup adds to the note');
+
+  const j = await pub('POST', `/api/public/${slug}/signup`, {
+    kind: 'volunteer', name: 'Bridge Vol', roles: ['translation', 'food'], detail_translation: 'Tagalog', note: 'Saturdays',
+  });
+  assert.equal(j.status, 200);
+  const bv = (await c.get('/api/persons?q=Bridge Vol')).json.persons[0];
+  const bp = (await c.get(`/api/persons/${bv.id}`)).json;
+  assert.deepEqual(Object.fromEntries(bp.roles.map((x) => [x.role, x.detail])), { translation: 'Tagalog', food: null });
+
+  const page = (await pub('GET', `/v/${slug}`)).text;
+  assert.match(page, /name="detail_highrise_captain"/);
+  assert.match(page, /Building \(name or address\)/);
+  assert.doesNotMatch(page, /name="detail_driver"/);
+  assert.match(page, /More ways to help/);
+});

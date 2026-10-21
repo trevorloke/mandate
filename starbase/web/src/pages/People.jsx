@@ -1,12 +1,15 @@
-// People — the list, the filters, and the phone/text bank.
-// Search + filters live in the URL (?q=&tag=&rating=&role=&has=) so any list
-// is shareable. ?bank=phone|text turns the table into a calling view where a
-// volunteer taps Call/Text, then logs the outcome with one more tap.
-// Shared rating/tag widgets are exported from here for Person.jsx.
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams, Link, useOutletContext } from 'react-router-dom';
+// People — search, one Filter sheet, and the list (rows on phones, a compact
+// table on desks). Calls (mode="calls", the /calls tab): one person at a
+// time — Call or Text, then one tap logs the answer and the next person comes
+// up. Filters live in the URL (?q=&tag=&rating=&role=&has=) so any list is
+// shareable; People's "More" opens the same filters as a call or text list.
+// People is a desk screen: volunteers' /people opens Calls.
+// Shared widgets + helpers are exported from here for Person.jsx.
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useNavigate, useSearchParams, useLocation, Link, Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
+import RatingButtons, { ratingWord } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
 import { apiGet, action } from '../api.js';
 import './people.css';
@@ -35,9 +38,11 @@ export const invalidatePersonData = (queryClient) =>
 export const TAG_MAX_LEN = 40;
 export const TAG_MAX_COUNT = 50;
 
-export const telHref = (phone) => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
-export const smsHref = (phone, body) =>
-  `sms:${String(phone || '').replace(/[^\d+]/g, '')}${body ? `?&body=${encodeURIComponent(body)}` : ''}`;
+// Drop any extension ("604-555-0101 ext 2", "x2", "#2") before stripping to
+// digits, or it gets glued onto the number and dials the wrong line.
+const dialable = (phone) => String(phone || '').replace(/\s*(?:ext\.?|x|#).*$/i, '').replace(/[^\d+]/g, '');
+export const telHref = (phone) => `tel:${dialable(phone)}`;
+export const smsHref = (phone, body) => `sms:${dialable(phone)}${body ? `?&body=${encodeURIComponent(body)}` : ''}`;
 
 export const fmtWhen = (ts) => {
   if (!ts) return '';
@@ -51,6 +56,46 @@ export const fmtDay = (ts) => {
   if (Number.isNaN(d.getTime())) return String(ts);
   return d.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
 };
+
+export const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
+export const isDnc = (p) => Array.isArray(p?.tags) && p.tags.includes('do-not-contact');
+export const streetLine = (p) => [p.unit ? `${p.unit} –` : null, p.address].filter(Boolean).join(' ');
+// The opening line of a text: "Hi Aisha, it's Trevor with Imagine Surrey."
+export const textBody = (p, me) =>
+  `Hi ${firstName(p.name)}, it's ${firstName(me?.user?.name)} with ${me?.workspace?.name || 'the campaign'}.`;
+
+// Phones get rows, desks get the table. Same breakpoint as the tab bar.
+const PHONE_MQ = '(max-width: 720px)';
+const subscribeMq = (cb) => {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+  const m = window.matchMedia(PHONE_MQ);
+  m.addEventListener?.('change', cb);
+  return () => m.removeEventListener?.('change', cb);
+};
+const readMq = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PHONE_MQ).matches : false);
+export const useIsPhone = () => useSyncExternalStore(subscribeMq, readMq, () => false);
+
+// Line icons (24×24, stroke = currentColor).
+const ICONS = {
+  phone: <path d="M6.5 3.5h3l1.6 4.3-2.1 1.4a10.5 10.5 0 0 0 5.8 5.8l1.4-2.1 4.3 1.6v3a2 2 0 0 1-2.1 2A15.5 15.5 0 0 1 4.5 5.6a2 2 0 0 1 2-2.1z" />,
+  text: <path d="M4 5h16v11H10l-5 4v-4H4z" />,
+  email: <><rect x="3.5" y="5.5" width="17" height="13" rx="1.5" /><path d="m4 7 8 6 8-6" /></>,
+  map: <><path d="M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.4" /></>,
+  filter: <path d="M4 7h16M7 12h10M10 17h4" />,
+  more: <><circle cx="5.5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="18.5" cy="12" r="1.4" /></>,
+  search: <><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></>,
+  next: <path d="M5 12h13M13 6l6 6-6 6" />,
+  x: <path d="M6 6l12 12M18 6 6 18" />,
+  upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v4.5h16V15" /></>,
+};
+export function Icon({ name, size = 20 }) {
+  return (
+    <svg className="pp-icon" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      {ICONS[name]}
+    </svg>
+  );
+}
 
 // Run an action with busy/error state; `onDone` gets the result (invalidate here).
 export function useAction(onDone) {
@@ -89,7 +134,8 @@ export function RatingChip({ code, size, title }) {
   );
 }
 
-// 1 2 3 4 | 4D 4B 4F 4N 4C — real buttons, ≥44px (40px compact).
+// 1 2 3 4 | 4D 4B 4F 4N 4C — real buttons, ≥48px. (Profiles and Calls use
+// the field's RatingButtons; this stays for anything that wants one row.)
 export function RatingRow({ value, onPick, compact, disabled }) {
   const base = RATINGS.filter((r) => r.code.length === 1);
   const sub = RATINGS.filter((r) => r.code.length > 1);
@@ -115,6 +161,11 @@ export function RatingRow({ value, onPick, compact, disabled }) {
       {sub.map(btn)}
     </div>
   );
+}
+
+// One line that makes the scale readable to a first-timer.
+export function ScaleKey() {
+  return <p className="pp-scale" aria-hidden="true">1–2 support · 3 undecided · 4 opposed</p>;
 }
 
 // Tag chips with × remove, a type-to-add input (Enter / comma), and suggested chips.
@@ -164,23 +215,28 @@ export function TagEditor({ tags = [], onChange, suggestions = SUGGESTED_TAGS, a
   const left = suggestions.filter((s) => !tags.includes(s));
   return (
     <div className="tag-editor">
+      {tags.length > 0 && (
+        <div className="row">
+          <span className="tag-chips">
+            {tags.map((t) => (
+              <span key={t} className="chip removable">
+                {t}
+                <button type="button" className="chip-x" aria-label={`Remove tag ${t}`} disabled={disabled} onClick={() => remove(t)}>×</button>
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
       <div className="row">
-        <span className="tag-chips">
-          {tags.map((t) => (
-            <span key={t} className="chip removable">
-              {t}
-              <button type="button" className="chip-x" aria-label={`Remove tag ${t}`} disabled={disabled} onClick={() => remove(t)}>×</button>
-            </span>
-          ))}
-        </span>
         <input
           ref={inputRef}
           id={inputId}
           className="input"
-          placeholder="Add a tag, Enter to save"
+          placeholder="Add a tag"
           value={draft}
           autoFocus={autoFocus}
           disabled={disabled}
+          enterKeyHint="done"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKey}
           onBlur={() => draft.trim() && commitDraft(false)}
@@ -190,7 +246,6 @@ export function TagEditor({ tags = [], onChange, suggestions = SUGGESTED_TAGS, a
       </div>
       {left.length > 0 && (
         <div className="row">
-          <span className="eyebrow">Suggested</span>
           {left.map((s) => (
             <button key={s} type="button" className="chip-btn" disabled={disabled} onClick={() => add(s)}>+ {s}</button>
           ))}
@@ -209,7 +264,202 @@ export function TagChips({ tags }) {
   );
 }
 
-const addrLine = (p) => [p.address, p.unit ? `#${p.unit}` : null, p.city].filter(Boolean).join(', ');
+// A disclosure panel that closes on Escape, an outside tap, or a new screen.
+function useDismiss(open, setOpen, wrapRef, btnRef) {
+  const location = useLocation();
+  useEffect(() => { setOpen(false); }, [location.pathname, location.search, setOpen]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (!wrapRef.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); btnRef.current?.focus(); } };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, setOpen, wrapRef, btnRef]);
+}
+
+// "More" menu: a quiet button and a short list of links.
+export function MoreMenu({ items, label = 'More' }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const wrapRef = useRef(null);
+  const btnRef = useRef(null);
+  const firstRef = useRef(null);
+  useDismiss(open, setOpen, wrapRef, btnRef);
+  useEffect(() => { if (open) firstRef.current?.focus(); }, [open]);
+  const shown = items.filter(Boolean);
+  if (!shown.length) return null;
+  return (
+    <div className="pp-menu" ref={wrapRef}>
+      <button type="button" ref={btnRef} className="btn pp-btn" aria-expanded={open} aria-controls={id}
+        onClick={() => setOpen((v) => !v)}>
+        <Icon name="more" /> {label}
+      </button>
+      {open && (
+        <div className="pp-menu__panel" id={id}>
+          {shown.map((it, i) => (
+            <Link key={it.to} ref={i === 0 ? firstRef : undefined} className="pp-menu__item" to={it.to}>
+              {it.icon && <Icon name={it.icon} />}
+              {it.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Filters: read from / write to the URL
+// ─────────────────────────────────────────────────────────────────────────────
+const HAS_LABEL = { phone: 'Has phone', email: 'Has email', location: 'On map' };
+const FILTER_KEYS = ['q', 'tag', 'rating', 'role'];
+
+function useFilters() {
+  const [params, setParams] = useSearchParams();
+  const f = {
+    q: params.get('q') || '',
+    tag: params.get('tag') || '',
+    rating: params.get('rating') || '',
+    role: params.get('role') || '',
+    has: params.get('has') || '',
+  };
+  // Patch the URL in place; empty values drop the key.
+  const update = (patch, { replace = true } = {}) => {
+    const next = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === undefined || v === '' || v === false) next.delete(k);
+      else next.set(k, String(v));
+    }
+    setParams(next, { replace });
+  };
+  return { params, f, update };
+}
+
+// The same filters, carried to another screen (People → Calls).
+const carry = (f, extra = {}) => {
+  const out = new URLSearchParams();
+  for (const k of FILTER_KEYS) if (f[k]) out.set(k, f[k]);
+  for (const [k, v] of Object.entries(extra)) if (v) out.set(k, v);
+  const s = out.toString();
+  return s ? `?${s}` : '';
+};
+
+// Active filters as removable chips (search lives in its own box).
+function FilterChips({ f, update, keys = ['rating', 'tag', 'role', 'has'], extra = null }) {
+  const roleLabel = VOLUNTEER_ROLES.find((r) => r.code === f.role)?.label || f.role;
+  const chips = [
+    keys.includes('rating') && f.rating && { key: 'rating', label: <>Rated <RatingChip code={f.rating} size="sm" /></>, name: `rating ${f.rating}` },
+    keys.includes('tag') && f.tag && { key: 'tag', label: f.tag, name: `tag ${f.tag}` },
+    keys.includes('role') && f.role && { key: 'role', label: roleLabel, name: roleLabel },
+    keys.includes('has') && f.has && HAS_LABEL[f.has] && { key: 'has', label: HAS_LABEL[f.has], name: HAS_LABEL[f.has] },
+    keys.includes('q') && f.q && { key: 'q', label: `“${f.q}”`, name: `search ${f.q}` },
+  ].filter(Boolean);
+  if (!chips.length && !extra) return null;
+  return (
+    <div className="pp-chips" aria-label="Filters">
+      {chips.map((c) => (
+        <button key={c.key} type="button" className="pp-fchip" aria-label={`Remove filter: ${c.name}`}
+          onClick={() => update({ [c.key]: null })}>
+          {c.label}<Icon name="x" size={14} />
+        </button>
+      ))}
+      {extra}
+    </div>
+  );
+}
+
+function FilterSheet({ f, update, tagOptions, onClose, phone }) {
+  const titleId = useId();
+  const titleRef = useRef(null);
+  const sheetRef = useRef(null);
+  useEffect(() => {
+    titleRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      // On phones the sheet is modal: Tab cycles inside it.
+      if (e.key !== 'Tab' || !phone || !sheetRef.current) return;
+      const els = [...sheetRef.current.querySelectorAll('button:not([disabled])')];
+      if (!els.length) return;
+      const firstEl = els[0];
+      const lastEl = els[els.length - 1];
+      if (e.shiftKey && (document.activeElement === firstEl || document.activeElement === titleRef.current)) { e.preventDefault(); lastEl.focus(); }
+      else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); firstEl.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, phone]);
+  const pick = (key, value) => update({ [key]: f[key] === value ? null : value });
+  const anyPicked = Boolean(f.rating || f.tag || f.role || f.has);
+  // Tags and roles are the long lists: one tap away, open if one is picked.
+  const [moreOpen, setMoreOpen] = useState(Boolean(f.tag || f.role));
+  const moreId = useId();
+  const chip = (key, value, label) => (
+    <button key={value} type="button" className={`chip-btn pp-pick${f[key] === value ? ' on' : ''}`}
+      aria-pressed={f[key] === value} onClick={() => pick(key, value)}>
+      {label}
+    </button>
+  );
+  return (
+    <>
+      {phone && <div className="pp-scrim" onClick={onClose} aria-hidden="true" />}
+      <section ref={sheetRef} className={`pp-sheet${phone ? ' is-phone' : ''}`} role="dialog" aria-modal={phone || undefined} aria-labelledby={titleId}>
+        <div className="pp-sheet__head">
+          <h2 id={titleId} ref={titleRef} tabIndex={-1}>Filter</h2>
+          {anyPicked && (
+            <button type="button" className="btn btn-quiet pp-btn"
+              onClick={() => update({ rating: null, tag: null, role: null, has: null })}>
+              Clear
+            </button>
+          )}
+          <button type="button" className="btn pp-btn" onClick={onClose}>Done</button>
+        </div>
+        <div className="pp-sheet__body">
+          <fieldset className="pp-group">
+            <legend className="eyebrow">Rating</legend>
+            <div className={`pp-group__opts${f.rating ? ' has-pick' : ''}`}>
+              {RATINGS.map((r) => (
+                <button key={r.code} type="button" className={`rating-chip pp-rate${f.rating === r.code ? ' on' : ''}`}
+                  data-band={r.band} title={r.label} aria-label={r.label} aria-pressed={f.rating === r.code}
+                  onClick={() => pick('rating', r.code)}>
+                  {r.short}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="pp-group">
+            <legend className="eyebrow">Has</legend>
+            <div className="pp-group__opts">
+              {chip('has', 'phone', 'Phone')}
+              {chip('has', 'email', 'Email')}
+              {chip('has', 'location', 'Map pin')}
+            </div>
+          </fieldset>
+          <button type="button" className="btn btn-quiet pp-btn pp-morefilters" aria-expanded={moreOpen} aria-controls={moreId}
+            onClick={() => setMoreOpen((v) => !v)}>
+            {moreOpen ? '− Fewer filters' : '+ More filters'}
+            {!moreOpen && (f.tag || f.role) ? <span className="pp-badge">{[f.tag, f.role].filter(Boolean).length}</span> : null}
+          </button>
+          {moreOpen && (
+            <div className="pp-sheet__more" id={moreId}>
+              <fieldset className="pp-group">
+                <legend className="eyebrow">Tag</legend>
+                <div className="pp-group__opts">{tagOptions.map((t) => chip('tag', t, t))}</div>
+              </fieldset>
+              <fieldset className="pp-group">
+                <legend className="eyebrow">Volunteer role</legend>
+                <div className="pp-group__opts">{VOLUNTEER_ROLES.map((r) => chip('role', r.code, r.label))}</div>
+              </fieldset>
+            </div>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Add person (inline, ?new=1)
@@ -221,6 +471,7 @@ function AddPersonForm({ onClose }) {
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY);
   const [tags, setTags] = useState([]);
+  const [more, setMore] = useState(false);
   const act = useAction();
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const opt = (v) => (v && v.trim() ? v.trim() : undefined);
@@ -247,20 +498,11 @@ function AddPersonForm({ onClose }) {
   };
 
   return (
-    <form className="card inline-form" onSubmit={submit}>
-      <span className="eyebrow">Add person</span>
-      <div className="form-row">
-        <div className="field">
-          <label htmlFor="np-name">Name (required)</label>
-          <input id="np-name" className="input" required autoFocus maxLength={300} value={form.name} onChange={set('name')} />
-        </div>
-        <div className="field" style={{ flex: '0 1 160px' }}>
-          <label htmlFor="np-kind">Kind</label>
-          <select id="np-kind" className="input" value={form.kind} onChange={set('kind')}>
-            <option value="person">Person</option>
-            <option value="org">Organization</option>
-          </select>
-        </div>
+    <form className="card inline-form pp-add" onSubmit={submit}>
+      <h2>Add person</h2>
+      <div className="field">
+        <label htmlFor="np-name">Name</label>
+        <input id="np-name" className="input" required autoFocus maxLength={300} value={form.name} onChange={set('name')} />
       </div>
       <div className="form-row">
         <div className="field">
@@ -272,326 +514,445 @@ function AddPersonForm({ onClose }) {
           <input id="np-email" className="input" type="email" maxLength={320} value={form.email} onChange={set('email')} />
         </div>
       </div>
-      <div className="form-row">
-        <div className="field" style={{ flex: '2 1 220px' }}>
-          <label htmlFor="np-address">Street address</label>
-          <input id="np-address" className="input" maxLength={1000} value={form.address} onChange={set('address')} placeholder="13450 104 Ave" />
-        </div>
-        <div className="field" style={{ flex: '0 1 90px' }}>
-          <label htmlFor="np-unit">Unit</label>
-          <input id="np-unit" className="input" maxLength={40} value={form.unit} onChange={set('unit')} />
-        </div>
-        <div className="field">
-          <label htmlFor="np-city">City</label>
-          <input id="np-city" className="input" maxLength={120} value={form.city} onChange={set('city')} />
-        </div>
-        <div className="field" style={{ flex: '0 1 120px' }}>
-          <label htmlFor="np-postal">Postal</label>
-          <input id="np-postal" className="input mono" maxLength={20} value={form.postal} onChange={set('postal')} placeholder="V3T 1V8" />
-        </div>
-      </div>
       <div className="field">
-        <label htmlFor="np-tags">Tags</label>
-        <TagEditor inputId="np-tags" tags={tags} onChange={setTags} />
+        <label htmlFor="np-address">Street address</label>
+        <input id="np-address" className="input" maxLength={1000} value={form.address} onChange={set('address')} placeholder="13450 104 Ave" />
       </div>
+      <button type="button" className="btn btn-quiet pp-btn pp-moredetails" aria-expanded={more} onClick={() => setMore((v) => !v)}>
+        {more ? '− Fewer details' : '+ More details'}
+      </button>
+      {more && (
+        <>
+          <div className="form-row">
+            <div className="field" style={{ flex: '0 1 90px' }}>
+              <label htmlFor="np-unit">Unit</label>
+              <input id="np-unit" className="input" maxLength={40} value={form.unit} onChange={set('unit')} />
+            </div>
+            <div className="field">
+              <label htmlFor="np-city">City</label>
+              <input id="np-city" className="input" maxLength={120} value={form.city} onChange={set('city')} />
+            </div>
+            <div className="field" style={{ flex: '0 1 120px' }}>
+              <label htmlFor="np-postal">Postal</label>
+              <input id="np-postal" className="input mono" maxLength={20} value={form.postal} onChange={set('postal')} placeholder="V3T 1V8" />
+            </div>
+          </div>
+          <div className="field" style={{ maxWidth: 220 }}>
+            <label htmlFor="np-kind">Kind</label>
+            <select id="np-kind" className="input" value={form.kind} onChange={set('kind')}>
+              <option value="person">Person</option>
+              <option value="org">Organization</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="np-tags">Tags</label>
+            <TagEditor inputId="np-tags" tags={tags} onChange={setTags} />
+          </div>
+        </>
+      )}
       {act.error && <p className="error">{act.error}</p>}
       <div className="form-actions">
-        <button type="submit" className="btn btn-primary" disabled={act.busy}>Save person</button>
-        <button type="button" className="btn btn-quiet" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn btn-primary pp-btn" disabled={act.busy}>Save person</button>
+        <button type="button" className="btn btn-quiet pp-btn" onClick={onClose}>Cancel</button>
       </div>
     </form>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bank view — one card per person: Call/Text, then log it.
+// People list
 // ─────────────────────────────────────────────────────────────────────────────
-function BankRow({ p, channel, me }) {
+const PAGE = 25;
+const LIMIT = 300;
+
+// Tags worth a glance in a row: never 'sample' (Today already says so), at most two.
+const HIDDEN_TAGS = new Set(['sample']);
+const rowTags = (tags) => {
+  const shown = (tags || []).filter((t) => !HIDDEN_TAGS.has(t));
+  return shown.length > 2 ? `${shown.slice(0, 2).join(' · ')} +${shown.length - 2}` : shown.join(' · ');
+};
+
+// /people is the desk's list. Volunteers work from the walk list, the map and
+// Calls, so their /people (and old ?bank= links) opens Calls with the same filters.
+function PeopleScreen() {
+  const { me } = useOutletContext() ?? {};
+  const [params] = useSearchParams();
+  if (canDesk(me)) return <PeopleList />;
+  const f = Object.fromEntries(FILTER_KEYS.map((k) => [k, params.get(k) || '']));
+  const text = params.get('bank') === 'text' || params.get('channel') === 'text';
+  return <Navigate replace to={`/calls${carry(f, { channel: text ? 'text' : null })}`} />;
+}
+
+function PeopleList() {
+  const navigate = useNavigate();
+  const { me } = useOutletContext() ?? {};
+  const desk = canDesk(me); // person.create is desk-only
+  const phone = useIsPhone();
+  const { params, f, update } = useFilters();
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterBtn = useRef(null);
+  const [page, setPage] = useState({ key: '', n: PAGE });
+  const showNew = params.get('new') === '1' && desk;
+
+  const qs = new URLSearchParams({ q: f.q, limit: String(LIMIT) });
+  if (f.tag) qs.set('tag', f.tag);
+  if (f.rating) qs.set('rating', f.rating);
+  if (f.role) qs.set('role', f.role);
+  if (f.has) qs.set('has', f.has);
+  const qsKey = qs.toString();
+
+  const persons = useQuery({
+    queryKey: ['persons', 'list', qsKey],
+    queryFn: () => apiGet(`/persons?${qs}`),
+    placeholderData: keepPreviousData,
+  });
+  const rows = persons.data?.persons ?? [];
+  const n = page.key === qsKey ? page.n : PAGE;
+  const shown = rows.slice(0, n);
+
+  // Tag vocabulary: suggested first, then anything seen in the results.
+  const seen = new Set(rows.flatMap((p) => p.tags || []));
+  if (f.tag) seen.add(f.tag);
+  const tagOptions = [...SUGGESTED_TAGS, ...[...seen].filter((t) => !SUGGESTED_TAGS.includes(t)).sort()];
+
+  const picked = [f.rating, f.tag, f.role, f.has].filter(Boolean).length;
+  const anyFilter = Boolean(picked || f.q);
+  const closeFilter = useCallback(() => { setFilterOpen(false); filterBtn.current?.focus(); }, []);
+
+  // Old phone/text bank links (?bank=phone|text) now open Calls.
+  const bank = params.get('bank');
+  if (bank === 'phone' || bank === 'text') {
+    return <Navigate replace to={`/calls${carry(f, { channel: bank === 'text' ? 'text' : null })}`} />;
+  }
+
+  const count = persons.isLoading ? '…' : rows.length >= LIMIT ? `${LIMIT}+` : String(rows.length);
+  // The profile's back link returns to this list, filters and all.
+  const back = { from: { to: `/people${carry(f, { has: f.has })}`, label: 'People' } };
+
+  return (
+    <>
+      <div className="page-head pp-head">
+        <h1>People</h1>
+        <div className="head-actions">
+          <MoreMenu
+            items={[
+              { to: `/calls${carry(f)}`, label: 'Call list', icon: 'phone' },
+              { to: `/calls${carry(f, { channel: 'text' })}`, label: 'Text list', icon: 'text' },
+              desk && { to: '/people/import', label: 'Import', icon: 'upload' },
+            ]}
+          />
+          {desk && !showNew && (
+            <button type="button" className="btn btn-primary pp-btn" onClick={() => update({ new: '1' }, { replace: false })}>
+              Add person
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showNew && <AddPersonForm onClose={() => update({ new: null })} />}
+
+      <div className="pp-bar">
+        <label className="pp-search">
+          <Icon name="search" />
+          <span className="pp-sr">Search people</span>
+          <input
+            className="input" type="search" placeholder="Search"
+            value={f.q} onChange={(e) => update({ q: e.target.value })}
+          />
+        </label>
+        <button type="button" ref={filterBtn} className={`btn pp-btn pp-filterbtn${picked ? ' is-on' : ''}`}
+          aria-expanded={filterOpen} onClick={() => setFilterOpen((v) => !v)}>
+          <Icon name="filter" /> Filter{picked ? <span className="pp-badge">{picked}</span> : null}
+        </button>
+      </div>
+
+      {filterOpen && <FilterSheet f={f} update={update} tagOptions={tagOptions} onClose={closeFilter} phone={phone} />}
+
+      <FilterChips f={f} update={update} />
+
+      <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}</p>
+
+      {persons.isError && <p className="error">{persons.error.message}</p>}
+
+      {rows.length === 0 && !persons.isLoading ? (
+        <div className="pp-empty">
+          <p>{anyFilter ? 'No one matches.' : 'No people yet.'}</p>
+          {anyFilter ? (
+            <button type="button" className="btn pp-btn" onClick={() => update({ q: null, tag: null, rating: null, role: null, has: null })}>
+              Clear filters
+            </button>
+          ) : desk && !showNew ? (
+            <Link className="btn pp-btn" to="/people/import">Import a list</Link>
+          ) : null}
+        </div>
+      ) : phone ? (
+        <ul className="pp-list">
+          {shown.map((p) => (
+            <li key={p.id}>
+              <Link className="pp-row" to={`/people/${p.id}`} state={back}>
+                <span className="pp-row__main">
+                  <span className="pp-row__name">{p.name}</span>
+                  <span className="pp-row__fact">{p.phone || streetLine(p) || p.email || ''}</span>
+                </span>
+                <RatingChip code={p.rating} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <table className="table pp-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Rating</th>
+              <th>Phone</th>
+              <th>Address</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((p) => {
+              const second = rowTags(p.tags);
+              return (
+                <tr key={p.id} className="rowlink" onClick={() => navigate(`/people/${p.id}`, { state: back })}>
+                  <td className="pp-table__name">
+                    <Link to={`/people/${p.id}`} state={back} onClick={(e) => e.stopPropagation()}>{p.name}</Link>
+                    {p.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
+                    {second && <span className="pp-table__second">{second}</span>}
+                  </td>
+                  <td><RatingChip code={p.rating} /></td>
+                  <td>
+                    {p.phone
+                      ? <a className="tel" href={telHref(p.phone)} onClick={(e) => e.stopPropagation()}>{p.phone}</a>
+                      : <span className="muted">—</span>}
+                  </td>
+                  <td>{streetLine(p) || <span className="muted">—</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {rows.length > n && (
+        <div className="pp-more">
+          <button type="button" className="btn pp-btn" onClick={() => setPage({ key: qsKey, n: n + PAGE })}>
+            Show more
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calls — one person at a time
+// ─────────────────────────────────────────────────────────────────────────────
+// Who has been called or texted in this sitting (this tab only), so the queue
+// moves on and a reload doesn't start over. A convenience: never required.
+const DONE_KEY = 'starbase.calls.done';
+const readDone = () => {
+  try { return JSON.parse(sessionStorage.getItem(DONE_KEY) || '{}') || {}; } catch { return {}; }
+};
+const writeDone = (map) => {
+  try { sessionStorage.setItem(DONE_KEY, JSON.stringify(map)); } catch { /* private mode: memory only */ }
+};
+const OUTCOME_WORD = { no_answer: 'No answer', refused: 'Refused' };
+const outcomeWord = (outcome, channel) => (outcome === 'no_answer' && channel === 'text' ? 'No reply' : OUTCOME_WORD[outcome] || outcome);
+
+function CallsScreen() {
+  const { me } = useOutletContext() ?? {};
+  const location = useLocation();
+  const desk = canDesk(me);
   const queryClient = useQueryClient();
-  const [reached, setReached] = useState(false); // tapped Call/Text → prompt to log
-  const [logged, setLogged] = useState(null);
-  // Not awaited: the next row should be tappable while the list refetches.
+  const { params, f, update } = useFilters();
+  // contact.log's channel is an enum — never pass a hand-edited value through.
+  const channel = params.get('channel') === 'text' ? 'text' : 'phone';
+  const noun = channel === 'text' ? 'text' : 'call';
+
+  const qs = new URLSearchParams({ q: f.q, limit: String(LIMIT), has: 'phone' });
+  if (f.tag) qs.set('tag', f.tag);
+  if (f.rating) qs.set('rating', f.rating);
+  if (f.role) qs.set('role', f.role);
+  const persons = useQuery({
+    queryKey: ['persons', 'list', qs.toString()],
+    queryFn: () => apiGet(`/persons?${qs}`),
+    placeholderData: keepPreviousData,
+  });
+  const rows = (persons.data?.persons ?? []).filter((p) => p.phone && !isDnc(p));
+
+  const [done, setDone] = useState(readDone);
+  const [currentId, setCurrentId] = useState(null);
+  const [listOpen, setListOpen] = useState(false);
+  const [toast, setToast] = useState(null); // { text, person }
+  const toastTimer = useRef(null);
+  const cardRef = useRef(null);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  const markDone = (id, entry) => setDone((d) => { const next = { ...d }; if (entry) next[id] = entry; else delete next[id]; writeDone(next); return next; });
+
+  // Not awaited: the next person should be tappable while the list refetches.
   // A rating moves the map pin colour and the housemates' household lists.
   const act = useAction(() => { invalidatePersonData(queryClient); });
 
-  const log = async (outcome, rating) => {
-    const res = await act.run('contact.log', {
-      person_id: p.id, channel, outcome, rating: rating || undefined,
-    });
-    if (res) { setLogged({ outcome, rating, queued: !!res.queued }); setReached(false); }
+  const queue = rows.filter((p) => !done[p.id]);
+  const current = queue.find((p) => p.id === currentId) || queue[0] || null;
+  const at = current ? queue.indexOf(current) : -1;
+  const calledHere = rows.length - queue.length;
+  const after = (i) => (queue.length > 1 ? queue[(i + 1) % queue.length] : null);
+
+  const showToast = (text, person) => {
+    setToast({ text, person });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
   };
 
-  const first = (p.name || '').split(/\s+/)[0];
-  const mine = (me?.user?.name || '').split(/\s+/)[0];
-  const body = `Hi ${first}, it's ${mine} with ${me?.workspace?.name || 'the campaign'}.`;
-  const noun = channel === 'text' ? 'text' : 'call';
-  const current = logged?.rating ?? p.rating;
+  const log = async (outcome, rating) => {
+    const p = current;
+    if (!p) return;
+    const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined });
+    if (!res) return;
+    const next = after(at);
+    markDone(p.id, { rating: rating || null, outcome, queued: !!res.queued });
+    setCurrentId(next?.id ?? null);
+    const what = rating ? `${rating} ${ratingWord(rating)}` : outcomeWord(outcome, channel);
+    showToast(`${firstName(p.name)} · ${what}${res.queued ? ' · saved offline' : ''}`, p);
+  };
+  const skip = () => { const next = after(at); if (next) setCurrentId(next.id); };
+  const change = () => {
+    const p = toast?.person;
+    setToast(null);
+    clearTimeout(toastTimer.current);
+    if (!p) return;
+    markDone(p.id, null);
+    setCurrentId(p.id);
+    cardRef.current?.scrollIntoView?.({ block: 'start' });
+  };
+  const startOver = () => {
+    const next = { ...done };
+    for (const p of rows) delete next[p.id];
+    writeDone(next);
+    setDone(next);
+    setCurrentId(null);
+  };
+  const setChannel = (c) => update({ channel: c === 'text' ? 'text' : null });
+
+  const filterChips = <FilterChips f={f} update={update} keys={['rating', 'tag', 'role', 'q']} />;
 
   return (
-    <li className={`bank-row${logged ? ' done' : ''}`}>
-      <div className="bank-head">
-        <Link className="name" to={`/people/${p.id}`}>{p.name}</Link>
-        <span className="tag-chips">
-          <RatingChip code={current} />
-          {(p.tags || []).slice(0, 3).map((t) => <span key={t} className="chip">{t}</span>)}
-        </span>
-      </div>
-      <div className="bank-contact">
-        <span className="mono">{p.phone}</span>
-        {addrLine(p) && <span>{addrLine(p)}</span>}
-      </div>
-      <div className="bank-actions">
-        {!p.phone ? (
-          <span className="muted">No phone on file</span>
-        ) : channel === 'text' ? (
-          <a className="btn btn-primary btn-tap" href={smsHref(p.phone, body)} onClick={() => setReached(true)}>Text {first}</a>
-        ) : (
-          <a className="btn btn-primary btn-tap" href={telHref(p.phone)} onClick={() => setReached(true)}>Call {first}</a>
-        )}
-        {channel === 'phone' && p.phone && (
-          <a className="btn btn-quiet btn-tap" href={smsHref(p.phone, body)} onClick={() => setReached(true)}>Text instead</a>
-        )}
-        {reached && !logged && <span className="hint now">Now log this {noun} →</span>}
-        {logged && (
-          <span className="logged">
-            {logged.queued ? '✓ saved offline' : '✓ logged'} {logged.rating ? `as ${logged.rating}` : logged.outcome.replace('_', ' ')} via {noun}
-          </span>
-        )}
-      </div>
-      <div className="bank-log">
-        <RatingRow compact value={current} onPick={(code) => log('contacted', code)} disabled={act.busy} />
-        <span className="outcomes">
-          <button type="button" className="btn btn-tap" disabled={act.busy} onClick={() => log('no_answer')}>
-            {channel === 'text' ? 'No reply' : 'No answer'}
+    <div className="cl-page">
+      <div className="page-head cl-head">
+        <h1>Calls</h1>
+        <div className="cl-toggle" role="group" aria-label="Call or text">
+          <button type="button" aria-pressed={channel === 'phone'} onClick={() => setChannel('phone')}>
+            <Icon name="phone" size={18} /> Phone
           </button>
-          <button type="button" className="btn btn-quiet btn-tap" disabled={act.busy} onClick={() => log('refused')}>Refused</button>
-        </span>
-        {act.error && <span className="error">{act.error}</span>}
+          <button type="button" aria-pressed={channel === 'text'} onClick={() => setChannel('text')}>
+            <Icon name="text" size={18} /> Text
+          </button>
+        </div>
       </div>
-    </li>
+
+      {filterChips}
+
+      {persons.isError && <p className="error">{persons.error.message}</p>}
+
+      {persons.isLoading ? (
+        <p className="muted">Loading…</p>
+      ) : rows.length === 0 ? (
+        <div className="pp-empty">
+          <p>No one to {noun} yet.</p>
+          {desk && <Link className="btn pp-btn" to="/people">Go to People</Link>}
+        </div>
+      ) : !current ? (
+        <div className="pp-empty cl-alldone">
+          <p className="cl-big"><strong className="mono">{calledHere}</strong> done</p>
+          <button type="button" className="btn pp-btn" onClick={startOver}>Start over</button>
+        </div>
+      ) : (
+        <>
+          <div className="cl-progress">
+            <span><strong className="mono">{queue.length}</strong> to {noun}</span>
+            <div className="cl-bar" role="progressbar" aria-label={`${calledHere} of ${rows.length} done`}
+              aria-valuemin={0} aria-valuemax={rows.length} aria-valuenow={calledHere}>
+              <div className="cl-bar__fill" style={{ width: `${Math.round((calledHere / rows.length) * 100)}%` }} />
+            </div>
+          </div>
+
+          <section className="card cl-card" ref={cardRef} aria-label={`${current.name}`}>
+            <div className="cl-who">
+              <div className="cl-who__main">
+                <Link className="cl-name" to={`/people/${current.id}`}
+                  state={{ from: { to: `${location.pathname}${location.search}`, label: 'Calls' } }}>
+                  {current.name}
+                </Link>
+                <span className="cl-phone mono">{current.phone}</span>
+                {streetLine(current) && <span className="cl-addr">{streetLine(current)}</span>}
+              </div>
+              <RatingChip code={current.rating} />
+            </div>
+
+            {channel === 'text' ? (
+              <a className="btn cl-call" href={smsHref(current.phone, textBody(current, me))}>
+                <Icon name="text" size={22} /> Text {firstName(current.name)}
+              </a>
+            ) : (
+              <a className="btn cl-call" href={telHref(current.phone)}>
+                <Icon name="phone" size={22} /> Call {firstName(current.name)}
+              </a>
+            )}
+
+            <div className="cl-rate">
+              <RatingButtons value={current.rating} onPick={(code) => log('contacted', code)} disabled={act.busy} />
+              <ScaleKey />
+            </div>
+
+            <div className="cl-outcomes">
+              <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('no_answer')}>
+                {channel === 'text' ? 'No reply' : 'No answer'}
+              </button>
+              <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('refused')}>Refused</button>
+              <button type="button" className="cl-out cl-skip" disabled={act.busy || queue.length < 2} onClick={skip}>
+                Skip <Icon name="next" size={18} />
+              </button>
+            </div>
+            {act.error && <p className="error" role="alert">{act.error}</p>}
+          </section>
+
+          {queue.length > 1 && (
+            <div className="cl-next">
+              <button type="button" className="cl-next__btn" aria-expanded={listOpen} onClick={() => setListOpen((v) => !v)}>
+                Up next <span aria-hidden="true">{listOpen ? '−' : '+'}</span>
+              </button>
+              {listOpen && (
+                <ul className="cl-next__list">
+                  {queue.slice(at + 1).concat(queue.slice(0, at)).map((p) => (
+                    <li key={p.id}>
+                      <button type="button" onClick={() => { setCurrentId(p.id); setListOpen(false); cardRef.current?.scrollIntoView?.({ block: 'start' }); }}>
+                        <span>{p.name}</span>
+                        <RatingChip code={p.rating} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {toast && (
+        <div className="toast cl-toast" role="status">
+          <span>{toast.text}</span>
+          <button type="button" className="btn cl-toast__btn" onClick={change}>Change</button>
+        </div>
+      )}
+    </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The screen
 // ─────────────────────────────────────────────────────────────────────────────
-export default function People() {
-  const navigate = useNavigate();
-  const { me } = useOutletContext() ?? {};
-  const [params, setParams] = useSearchParams();
-  const desk = canDesk(me); // person.create is desk-only
-
-  const q = params.get('q') || '';
-  const tag = params.get('tag') || '';
-  const rating = params.get('rating') || '';
-  const role = params.get('role') || '';
-  // contact.log's channel is an enum — never pass a hand-edited ?bank= through.
-  const bankParam = params.get('bank');
-  const bank = bankParam === 'phone' || bankParam === 'text' ? bankParam : ''; // '' | phone | text
-  // The bank view only works with a phone number, whatever the URL says.
-  const has = bank ? 'phone' : (params.get('has') || '');
-  const showNew = params.get('new') === '1' && desk;
-
-  // Patch the URL in place; empty values drop the key.
-  const update = (patch, { replace = true } = {}) => {
-    const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === undefined || v === '' || v === false) next.delete(k);
-      else next.set(k, String(v));
-    }
-    setParams(next, { replace });
-  };
-
-  const qs = new URLSearchParams({ q, limit: '300' });
-  if (tag) qs.set('tag', tag);
-  if (rating) qs.set('rating', rating);
-  if (role) qs.set('role', role);
-  if (has) qs.set('has', has);
-
-  const persons = useQuery({
-    queryKey: ['persons', 'list', qs.toString()],
-    queryFn: () => apiGet(`/persons?${qs}`),
-    placeholderData: keepPreviousData,
-  });
-  const rows = persons.data?.persons ?? [];
-
-  // Tag vocabulary: suggested first, then anything seen in the results.
-  const seen = new Set(rows.flatMap((p) => p.tags || []));
-  if (tag) seen.add(tag);
-  const tagOptions = [...SUGGESTED_TAGS, ...[...seen].filter((t) => !SUGGESTED_TAGS.includes(t)).sort()];
-
-  const anyFilter = Boolean(tag || rating || role || has || q);
-  const roleLabel = VOLUNTEER_ROLES.find((r) => r.code === role)?.label;
-
-  const startBank = (kind) => update({ bank: kind, has: 'phone', new: null }, { replace: false });
-  const exitBank = () => update({ bank: null });
-
-  return (
-    <>
-      <div className="page-head">
-        <h1>People</h1>
-        <div className="head-actions">
-          {!bank && (
-            <>
-              <button type="button" className="btn" onClick={() => startBank('phone')}>Phone bank</button>
-              <button type="button" className="btn" onClick={() => startBank('text')}>Text bank</button>
-            </>
-          )}
-          {desk && !bank && <Link className="btn" to="/people/import">Import CSV</Link>}
-          {desk && !showNew && !bank && (
-            <button type="button" className="btn btn-primary" onClick={() => update({ new: '1' }, { replace: false })}>
-              Add person
-            </button>
-          )}
-          {bank && <button type="button" className="btn" onClick={exitBank}>Exit {bank} bank</button>}
-        </div>
-      </div>
-
-      {showNew && !bank && <AddPersonForm onClose={() => update({ new: null })} />}
-
-      {bank && (
-        <div className="banner bank-banner" role="status">
-          <span>
-            <strong>{bank === 'text' ? 'Text bank' : 'Phone bank'}.</strong>{' '}
-            Tap {bank === 'text' ? 'Text' : 'Call'} to open your {bank === 'text' ? 'messages' : 'dialer'}, then tap a rating or
-            “{bank === 'text' ? 'No reply' : 'No answer'}” to log it. Only people with a phone number are listed.
-          </span>
-          <span className="hint">{rows.length} to {bank === 'text' ? 'text' : 'call'}</span>
-        </div>
-      )}
-
-      <div className="field">
-        <label htmlFor="people-q">Search</label>
-        <input
-          id="people-q" className="input" type="search" placeholder="Name, email, phone or address…"
-          value={q} onChange={(e) => update({ q: e.target.value })}
-        />
-      </div>
-
-      <div className="filters" aria-label="Filters">
-        <div className={`filter-group${rating ? ' has-pick' : ''}`}>
-          <span className="eyebrow">Rating</span>
-          {RATINGS.map((r) => (
-            <button
-              key={r.code}
-              type="button"
-              className={`rating-chip${rating === r.code ? ' on' : ''}`}
-              data-band={r.band}
-              title={r.label}
-              aria-pressed={rating === r.code}
-              onClick={() => update({ rating: rating === r.code ? null : r.code })}
-            >
-              {r.short}
-            </button>
-          ))}
-        </div>
-        <div className="filter-group">
-          <span className="eyebrow">Tag</span>
-          {tagOptions.map((t) => (
-            <button key={t} type="button" className={`chip-btn${tag === t ? ' on' : ''}`} aria-pressed={tag === t}
-              onClick={() => update({ tag: tag === t ? null : t })}>
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="filter-group">
-          <span className="eyebrow">Role</span>
-          {VOLUNTEER_ROLES.map((r) => (
-            <button key={r.code} type="button" className={`chip-btn${role === r.code ? ' on' : ''}`} aria-pressed={role === r.code}
-              onClick={() => update({ role: role === r.code ? null : r.code })}>
-              {r.label}
-            </button>
-          ))}
-        </div>
-        <div className="filter-group">
-          <span className="eyebrow">Has</span>
-          <button type="button" className={`chip-btn${has === 'phone' ? ' on' : ''}`} aria-pressed={has === 'phone'}
-            disabled={!!bank} title={bank ? 'Bank view always needs a phone' : undefined}
-            onClick={() => update({ has: has === 'phone' ? null : 'phone' })}>
-            phone
-          </button>
-          <button type="button" className={`chip-btn${has === 'email' ? ' on' : ''}`} aria-pressed={has === 'email'}
-            disabled={!!bank}
-            onClick={() => update({ has: has === 'email' ? null : 'email' })}>
-            email
-          </button>
-          <button type="button" className={`chip-btn${has === 'location' ? ' on' : ''}`} aria-pressed={has === 'location'}
-            disabled={!!bank}
-            onClick={() => update({ has: has === 'location' ? null : 'location' })}>
-            map pin
-          </button>
-        </div>
-      </div>
-
-      <div className="count-line">
-        <span className="eyebrow">
-          {persons.isLoading ? 'Loading…' : `${rows.length} ${rows.length === 1 ? 'person' : 'people'}`}
-          {rows.length >= 300 ? ' (first 300 — narrow the search)' : ''}
-        </span>
-        {rating && <RatingChip code={rating} size="sm" />}
-        {tag && <span className="chip">{tag}</span>}
-        {roleLabel && <span className="chip">{roleLabel}</span>}
-        {anyFilter && (
-          <button type="button" className="btn btn-quiet btn-sm"
-            onClick={() => update({ q: null, tag: null, rating: null, role: null, has: bank ? 'phone' : null })}>
-            Clear filters
-          </button>
-        )}
-      </div>
-
-      {persons.isError && <p className="error">{persons.error.message}</p>}
-
-      {bank ? (
-        <ul className="bank-list">
-          {rows.map((p) => <BankRow key={p.id} p={p} channel={bank} me={me} />)}
-          {rows.length === 0 && !persons.isLoading && (
-            <li className="muted">No one with a phone number matches these filters.</li>
-          )}
-        </ul>
-      ) : (
-        <table className="table people-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Rating</th>
-              <th>Tags</th>
-              <th>Phone</th>
-              <th className="col-wide">Email</th>
-              <th className="col-wide">Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p.id} className="rowlink" onClick={() => navigate(`/people/${p.id}`)}>
-                <td className="name">
-                  <Link to={`/people/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.name}</Link>
-                  {p.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
-                </td>
-                <td><RatingChip code={p.rating} /></td>
-                <td><TagChips tags={p.tags} /></td>
-                <td>
-                  {p.phone
-                    ? <a className="tel" href={telHref(p.phone)} onClick={(e) => e.stopPropagation()}>{p.phone}</a>
-                    : <span className="muted">—</span>}
-                </td>
-                <td className="col-wide">
-                  {p.email
-                    ? <a href={`mailto:${p.email}`} onClick={(e) => e.stopPropagation()}>{p.email}</a>
-                    : <span className="muted">—</span>}
-                </td>
-                <td className="col-wide">{addrLine(p) || <span className="muted">—</span>}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && !persons.isLoading && (
-              <tr>
-                <td colSpan={6} className="muted">
-                  {anyFilter ? 'No one matches these filters.' : desk ? 'No people yet — add the first one.' : 'No people yet.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      )}
-    </>
-  );
+export default function People({ mode }) {
+  return mode === 'calls' ? <CallsScreen /> : <PeopleScreen />;
 }

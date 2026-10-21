@@ -1,17 +1,21 @@
-// Person profile — everything the campaign knows about one person, and every
-// field action you can take on them: rate, log a call, tag, assign a role,
-// request a sign, see shifts, gifts, contact history and the household.
-import { useRef, useState } from 'react';
-import { Link, useParams, useOutletContext } from 'react-router-dom';
+// Person profile. Top: name, rating, donor tier (desk), and Call · Text ·
+// Email (desk) · Map. Then the rating card (one tap logs a contact; Call/Text
+// set how it is logged). Everything else sits in sections that open on a
+// tap — Details (edit lives here), Tags (desk), Roles (desk), Signs, Shifts,
+// Gifts (desk) and History (open by default). Volunteers' back link returns
+// to wherever they came from (walk list, map, Calls).
+import { useId, useRef, useState } from 'react';
+import { Link, useParams, useOutletContext, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  RATINGS, ratingByCode, VOLUNTEER_ROLES, SOCIAL_PLATFORMS, SUGGESTED_TAGS,
+  ratingByCode, VOLUNTEER_ROLES, SOCIAL_PLATFORMS, SUGGESTED_TAGS,
   SIGN_KINDS, SIGN_STATUSES, DONOR_TIERS,
 } from '@starbase/shared/canvass';
+import RatingButtons, { OutcomeButtons, ratingWord } from '../components/RatingButtons.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import {
-  RatingChip, RatingRow, TagEditor, useAction, fmtWhen, fmtDay, telHref, smsHref,
-  canDesk, invalidatePersonData,
+  RatingChip, TagEditor, ScaleKey, Icon, useAction, fmtWhen, fmtDay, telHref, smsHref, textBody,
+  canDesk, invalidatePersonData, isDnc,
 } from './People.jsx';
 import './people.css';
 
@@ -24,13 +28,17 @@ const TIER_LABEL = {
 const TIER_CLASS = { superstar: 'chip chip-mark', star: 'chip chip-mark', monthly: 'chip chip-ok', 'one-time': 'chip' };
 
 const OUTCOME_LABEL = {
-  contacted: 'Contacted', no_answer: 'No answer', refused: 'Refused', moved: 'Moved', inaccessible: 'Inaccessible',
+  contacted: 'Talked', no_answer: 'No answer', refused: 'Refused', moved: 'Moved', inaccessible: 'No access',
 };
 const CHANNEL_LABEL = { door: 'Door', phone: 'Phone', text: 'Text' };
 const STATUS_CHIP = {
   assigned: 'chip', confirmed: 'chip chip-ok', declined: 'chip chip-danger', no_show: 'chip chip-danger', completed: 'chip',
   requested: 'chip chip-warn', installed: 'chip chip-ok', removed: 'chip chip-ghost',
 };
+// Most-asked first, like the door card.
+const SIGN_ORDER = ['lawn', 'large', 'billboard'];
+const SIGN_SHORT = { lawn: 'Lawn', large: 'Large', billboard: 'Billboard' };
+const SIGN_BUTTONS = [...SIGN_KINDS].sort((a, b) => SIGN_ORDER.indexOf(a.code) - SIGN_ORDER.indexOf(b.code));
 
 const stripHandle = (h) => String(h || '').trim().replace(/^@/, '');
 const isUrl = (h) => /^https?:\/\//i.test(String(h || '').trim());
@@ -49,23 +57,64 @@ const PLATFORM_LABEL = { x: 'X', tiktok: 'TikTok', youtube: 'YouTube', linkedin:
 const platformLabel = (p) => PLATFORM_LABEL[p] || p.charAt(0).toUpperCase() + p.slice(1);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Header: name, kind, rating, donor tier, tags (+ editor)
+// A section that opens on a tap. Closed sections aren't rendered at all.
 // ─────────────────────────────────────────────────────────────────────────────
-function Header({ person, donor, refresh, desk }) {
-  const [editingTags, setEditingTags] = useState(false);
-  const act = useAction(refresh);
-  const r = ratingByCode(person.rating);
-  const tags = Array.isArray(person.tags) ? person.tags : [];
-
+function Section({ title, count, open, onToggle, children }) {
+  const id = useId();
   return (
-    <header className="profile-head">
-      <span className="eyebrow"><Link to="/people">People</Link> / {person.kind === 'org' ? 'organization' : 'person'}</span>
-      <h1>{person.name}</h1>
-      <div className="profile-meta">
+    <section className="pf-sec">
+      <h2 style={{ margin: 0, fontSize: 'inherit' }}>
+        <button type="button" className="pf-sec__btn" aria-expanded={open} aria-controls={id} onClick={onToggle}>
+          <span className="pf-sec__title">{title}</span>
+          {count != null && count !== '' && <span className="pf-sec__count">{count}</span>}
+          <span className="pf-sec__caret" aria-hidden="true">{open ? '−' : '+'}</span>
+        </button>
+      </h2>
+      {open && <div className="pf-sec__body" id={id}>{children}</div>}
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Back: to the screen that opened this profile. People and Calls say who they
+// are (router state); the door card and walk list just go back in history.
+// Desks fall back to People; volunteers, who have no People list, to Today.
+// ─────────────────────────────────────────────────────────────────────────────
+function BackLink({ desk, className = 'eyebrow pf-back' }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from;
+  const inApp = location.key !== 'default'; // opened from another Starbase screen
+  if (from?.to) {
+    return inApp
+      ? <button type="button" className={className} onClick={() => navigate(-1)}>← {from.label || 'Back'}</button>
+      : <Link to={from.to} className={className}>← {from.label || 'Back'}</Link>;
+  }
+  if (desk) return <Link to="/people" className={className}>← People</Link>;
+  return inApp
+    ? <button type="button" className={className} onClick={() => navigate(-1)}>← Back</button>
+    : <Link to="/" className={className}>← Today</Link>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Header: name, rating, donor tier, Call · Text · Email · Map
+// ─────────────────────────────────────────────────────────────────────────────
+function Header({ person, donor, me, desk, onLog }) {
+  const r = ratingByCode(person.rating);
+  const email = desk && person.email; // volunteers phone and knock; email is desk work
+  return (
+    <header className="pf-head">
+      <BackLink desk={desk} />
+      <h1>
+        {person.name}
+        {person.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
+      </h1>
+      <div className="pf-meta">
         <RatingChip code={person.rating} />
-        {r
-          ? <span className="muted">{r.label}{person.rated_at ? ` · rated ${fmtDay(person.rated_at)}` : ''}</span>
-          : <span className="muted">Not yet rated</span>}
+        <span className="pf-word">
+          {r ? `${ratingWord(person.rating)}${person.rated_at ? ` · ${fmtDay(person.rated_at)}` : ''}` : 'Not rated'}
+        </span>
+        {isDnc(person) && <span className="chip chip-danger">Do not contact</span>}
         {/* donor is null for volunteers (the server hides money from them) */}
         {donor?.tier && TIER_LABEL[donor.tier] && (
           <span className={TIER_CLASS[donor.tier]} title={`${fmtMoney(donor.yearCents)} this year${Number(donor.monthlyCents) ? ` · ${fmtMoney(donor.monthlyCents)}/mo` : ''}`}>
@@ -73,34 +122,87 @@ function Header({ person, donor, refresh, desk }) {
           </span>
         )}
       </div>
-      <div className="profile-meta" style={{ marginTop: 'var(--s-2)' }}>
-        <span className="eyebrow">Tags</span>
-        {tags.length === 0 && !editingTags && <span className="muted">none</span>}
-        {!editingTags && tags.map((t) => (
-          <Link key={t} to={`/people?tag=${encodeURIComponent(t)}`} className="chip" style={{ textDecoration: 'none' }}>{t}</Link>
-        ))}
-        {desk && (
-          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setEditingTags((v) => !v)}>
-            {editingTags ? 'Done' : 'Edit tags'}
-          </button>
-        )}
-      </div>
-      {desk && editingTags && (
-        <TagEditor
-          tags={tags}
-          suggestions={SUGGESTED_TAGS}
-          disabled={act.busy}
-          autoFocus
-          onChange={(next) => act.run('person.update', { id: person.id, tags: next })}
-        />
+      {(person.phone || email || person.address) && (
+        <div className="pf-acts">
+          {person.phone && (
+            <a className="btn pf-act" href={telHref(person.phone)} onClick={() => onLog('phone')}>
+              <Icon name="phone" /> Call
+            </a>
+          )}
+          {person.phone && (
+            <a className="btn pf-act" href={smsHref(person.phone, textBody(person, me))} onClick={() => onLog('text')}>
+              <Icon name="text" /> Text
+            </a>
+          )}
+          {email && (
+            <a className="btn pf-act" href={`mailto:${person.email}`}>
+              <Icon name="email" /> Email
+            </a>
+          )}
+          {person.address && (
+            // Map selects ?person=<id>, and offers to place a pin when there is none
+            // (person.locate is open to volunteers too).
+            <Link className="btn pf-act" to={`/map?person=${person.id}`}
+              title={person.lat != null && person.lng != null ? 'On the map' : 'No pin yet — place one on the map'}>
+              <Icon name="map" /> Map
+            </Link>
+          )}
+        </div>
       )}
-      {act.error && <p className="error">{act.error}</p>}
     </header>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Contact card + edit form + socials
+// Rating card: big rating buttons + outcomes → contact.log. The channel is set
+// by the Call / Text tiles (else Door); the manual switch sits under the note.
+// ─────────────────────────────────────────────────────────────────────────────
+function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
+  const [note, setNote] = useState('');
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [status, setStatus] = useState('');
+  const act = useAction(refresh);
+
+  const log = async (outcome, rating) => {
+    const res = await act.run('contact.log', {
+      person_id: person.id, channel, outcome, rating: rating || undefined, note: note.trim() || undefined,
+    });
+    if (res) {
+      setNote('');
+      setNoteOpen(false);
+      const what = rating ? `${rating} ${ratingWord(rating)}` : OUTCOME_LABEL[outcome];
+      setStatus(`${res.queued ? 'Saved offline · ' : '✓ '}${CHANNEL_LABEL[channel]} · ${what}`);
+    }
+  };
+
+  return (
+    <section className="card pf-rate" ref={cardRef} aria-label="Rate">
+      <RatingButtons value={person.rating} onPick={(code) => log('contacted', code)} disabled={act.busy} />
+      <ScaleKey />
+      <OutcomeButtons onPick={(o) => log(o)} disabled={act.busy} />
+      <div className="pf-rate__foot">
+        {noteOpen ? (
+          <div className="field pf-note">
+            <label htmlFor="contact-note">Note — saved with your next tap</label>
+            <input id="contact-note" className="input" autoFocus maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="Wants a lawn sign" />
+          </div>
+        ) : (
+          <button type="button" className="btn btn-quiet pp-btn pf-note-btn" onClick={() => setNoteOpen(true)}>+ Add a note</button>
+        )}
+        <div className="channel-toggle pf-channel" role="group" aria-label="How you reached them">
+          {['door', 'phone', 'text'].map((c) => (
+            <button key={c} type="button" aria-pressed={channel === c} onClick={() => setChannel(c)}>{CHANNEL_LABEL[c]}</button>
+          ))}
+        </div>
+      </div>
+      {act.error ? <p className="error" role="alert">{act.error}</p> : <p className="pf-status" role="status">{status}</p>}
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Details: contact lines, socials, household, and Edit
 // ─────────────────────────────────────────────────────────────────────────────
 function EditDetailsForm({ person, refresh, onClose }) {
   const [form, setForm] = useState({
@@ -124,8 +226,7 @@ function EditDetailsForm({ person, refresh, onClose }) {
   };
 
   return (
-    <form className="card inline-form" onSubmit={submit}>
-      <span className="eyebrow">Edit details</span>
+    <form className="inline-form" onSubmit={submit}>
       <div className="form-row">
         <div className="field">
           <label htmlFor="ed-name">Name</label>
@@ -169,8 +270,8 @@ function EditDetailsForm({ person, refresh, onClose }) {
       </div>
       {act.error && <p className="error">{act.error}</p>}
       <div className="form-actions">
-        <button type="submit" className="btn btn-primary" disabled={act.busy}>Save</button>
-        <button type="button" className="btn btn-quiet" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn btn-primary pp-btn" disabled={act.busy}>Save</button>
+        <button type="button" className="btn btn-quiet pp-btn" onClick={onClose}>Cancel</button>
       </div>
     </form>
   );
@@ -208,17 +309,17 @@ function Socials({ person, refresh, desk }) {
     save(next);
   };
 
+  if (!entries.length && !desk) return null;
   return (
     <>
-      <div className="card-head" style={{ marginTop: 'var(--s-3)' }}>
+      <div className="card-head pf-sub">
         <span className="eyebrow">Socials</span>
         {desk && (
-          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setAdding((v) => !v)}>
+          <button type="button" className="btn btn-quiet pp-btn" onClick={() => setAdding((v) => !v)}>
             {adding ? 'Close' : '+ Add'}
           </button>
         )}
       </div>
-      {entries.length === 0 && !adding && <p className="muted" style={{ margin: 0 }}>No social handles on file.</p>}
       {entries.length > 0 && (
         <ul className="contact-lines">
           {entries.map(([p, h]) => {
@@ -248,11 +349,11 @@ function Socials({ person, refresh, desk }) {
             </select>
           </div>
           <div className="field wide">
-            <label htmlFor="soc-handle">Handle or URL</label>
+            <label htmlFor="soc-handle">Handle or link</label>
             <input id="soc-handle" className="input" autoFocus maxLength={300} value={handle} onChange={(e) => setHandle(e.target.value)}
               placeholder={platform === 'other' ? 'https://…' : '@handle'} />
           </div>
-          <button type="submit" className="btn btn-primary" disabled={act.busy || !handle.trim()}>Save</button>
+          <button type="submit" className="btn pp-btn" disabled={act.busy || !handle.trim()}>Save</button>
         </form>
       )}
       {act.error && <p className="error">{act.error}</p>}
@@ -260,133 +361,115 @@ function Socials({ person, refresh, desk }) {
   );
 }
 
-function ContactCard({ person, refresh, onLog, me, desk }) {
+function Details({ person, household, refresh, desk }) {
   const [editing, setEditing] = useState(false);
   if (desk && editing) return <EditDetailsForm person={person} refresh={refresh} onClose={() => setEditing(false)} />;
-
-  const first = (person.name || '').split(/\s+/)[0];
-  const mine = (me?.user?.name || '').split(/\s+/)[0];
-  const body = `Hi ${first}, it's ${mine} with ${me?.workspace?.name || 'the campaign'}.`;
   const addr = [
     [person.address, person.unit ? `#${person.unit}` : null].filter(Boolean).join(' '),
     [person.city, person.postal].filter(Boolean).join('  '),
   ].filter(Boolean);
+  const none = <span className="muted">—</span>;
 
   return (
-    <section className="card">
-      <div className="card-head">
-        <span className="eyebrow">Contact</span>
-        {desk && <button type="button" className="btn btn-quiet btn-sm" onClick={() => setEditing(true)}>Edit details</button>}
-      </div>
+    <>
       <ul className="contact-lines">
         <li>
           <span className="k">Phone</span>
-          <span className="v">
-            {person.phone
-              ? <a className="mono" href={telHref(person.phone)}>{person.phone}</a>
-              : <span className="muted">none</span>}
-          </span>
-          {person.phone && (
-            <span className="act">
-              <a className="btn btn-sm" href={telHref(person.phone)} onClick={() => onLog('phone')}>Call</a>
-              <a className="btn btn-sm" href={smsHref(person.phone, body)} onClick={() => onLog('text')}>Text</a>
-              <button type="button" className="btn btn-quiet btn-sm" onClick={() => onLog('phone')}>Log call</button>
-            </span>
-          )}
+          <span className="v">{person.phone ? <a className="mono" href={telHref(person.phone)}>{person.phone}</a> : none}</span>
         </li>
-        <li>
-          <span className="k">Email</span>
-          <span className="v">
-            {person.email ? <a href={`mailto:${person.email}`}>{person.email}</a> : <span className="muted">none</span>}
-          </span>
-        </li>
+        {desk && (
+          <li>
+            <span className="k">Email</span>
+            <span className="v">{person.email ? <a href={`mailto:${person.email}`}>{person.email}</a> : none}</span>
+          </li>
+        )}
         <li>
           <span className="k">Address</span>
-          <span className="v addr-lines">
-            {addr.length ? addr.map((l, i) => <div key={i}>{l}</div>) : <span className="muted">none</span>}
-          </span>
+          <span className="v addr-lines">{addr.length ? addr.map((l, i) => <div key={i}>{l}</div>) : none}</span>
           {person.address && (
             <span className="act">
-              {/* Map selects ?person=<id>, and offers to place a pin when there is none
-                  (person.locate is open to volunteers too). */}
-              {person.lat != null && person.lng != null
-                ? <Link className="btn btn-quiet btn-sm" to={`/map?person=${person.id}`}>On map</Link>
-                : <Link className="btn btn-quiet btn-sm" to={`/map?person=${person.id}`} title="No pin yet — place one on the map">Place pin</Link>}
+              <Link className="btn btn-quiet pp-btn" to={`/map?person=${person.id}`}>
+                {person.lat != null && person.lng != null ? 'On map' : 'Place pin'}
+              </Link>
             </span>
           )}
         </li>
       </ul>
+
       <Socials person={person} refresh={refresh} desk={desk} />
-    </section>
+
+      {person.address && (
+        <>
+          <div className="card-head pf-sub"><span className="eyebrow">Same address</span></div>
+          {household.length === 0
+            ? <p className="pf-empty">No one else.</p>
+            : (
+              <ul className="list-plain">
+                {household.map((h) => (
+                  <li key={h.id}>
+                    <Link to={`/people/${h.id}`}>{h.name}</Link>
+                    <RatingChip code={h.rating} />
+                  </li>
+                ))}
+              </ul>
+            )}
+        </>
+      )}
+
+      {desk && (
+        <div className="pf-row-acts">
+          <button type="button" className="btn pp-btn" onClick={() => setEditing(true)}>Edit details</button>
+        </div>
+      )}
+    </>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Rating card: channel toggle + rating row + outcomes → contact.log
+// Tags, roles, signs, shifts, gifts, history
 // ─────────────────────────────────────────────────────────────────────────────
-function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
-  const [note, setNote] = useState('');
-  const [status, setStatus] = useState('');
+function Tags({ person, refresh, desk }) {
+  const [editing, setEditing] = useState(false);
   const act = useAction(refresh);
-
-  const log = async (outcome, rating) => {
-    const res = await act.run('contact.log', {
-      person_id: person.id, channel, outcome, rating: rating || undefined, note: note.trim() || undefined,
-    });
-    if (res) {
-      setNote('');
-      const saved = res.queued ? 'Saved offline — sends when you’re back online · ' : '';
-      setStatus(saved + (rating
-        ? `Logged ${CHANNEL_LABEL[channel].toLowerCase()} · rated ${rating} (${ratingByCode(rating)?.label})`
-        : `Logged ${CHANNEL_LABEL[channel].toLowerCase()} · ${OUTCOME_LABEL[outcome].toLowerCase()}`));
-    }
-  };
-
+  const tags = Array.isArray(person.tags) ? person.tags : [];
+  if (desk && editing) {
+    return (
+      <>
+        <TagEditor
+          tags={tags}
+          suggestions={SUGGESTED_TAGS}
+          disabled={act.busy}
+          autoFocus
+          onChange={(next) => act.run('person.update', { id: person.id, tags: next })}
+        />
+        {act.error && <p className="error">{act.error}</p>}
+        <div className="pf-row-acts">
+          <button type="button" className="btn pp-btn" onClick={() => setEditing(false)}>Done</button>
+        </div>
+      </>
+    );
+  }
   return (
-    <section className="card" ref={cardRef}>
-      <div className="card-head">
-        <span className="eyebrow">Rate this contact</span>
-        <div className="channel-toggle" role="group" aria-label="Channel">
-          {['door', 'phone', 'text'].map((c) => (
-            <button key={c} type="button" aria-pressed={channel === c} onClick={() => setChannel(c)}>{CHANNEL_LABEL[c]}</button>
-          ))}
-        </div>
-      </div>
-      <div className="rate-block">
-        <div>
-          <span className="eyebrow label">Rating — tap one to log a contact</span>
-          <RatingRow value={person.rating} onPick={(code) => log('contacted', code)} disabled={act.busy} />
-          <div className="chip-row" aria-hidden="true">
-            {RATINGS.filter((r) => r.code.length > 1).map((r) => (
-              <span key={r.code} className="hint">{r.short} {r.label.replace(/^Opposed — /, '')}</span>
+    <>
+      {tags.length === 0
+        ? <p className="pf-empty">No tags.</p>
+        : (
+          <div className="tag-chips">
+            {tags.map((t) => (
+              <Link key={t} to={`/people?tag=${encodeURIComponent(t)}`} className="chip pf-chip-link">{t}</Link>
             ))}
           </div>
+        )}
+      {desk && (
+        <div className="pf-row-acts">
+          <button type="button" className="btn pp-btn" onClick={() => setEditing(true)}>Edit tags</button>
         </div>
-        <div>
-          <span className="eyebrow label">Couldn't reach them</span>
-          <div className="outcome-row">
-            {['no_answer', 'refused', 'moved', 'inaccessible'].map((o) => (
-              <button key={o} type="button" className="btn btn-tap" disabled={act.busy} onClick={() => log(o)}>
-                {OUTCOME_LABEL[o]}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="field" style={{ marginBottom: 0 }}>
-          <label htmlFor="contact-note">Note (optional, saved with the next tap)</label>
-          <input id="contact-note" className="input" maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)}
-            placeholder="Wants a lawn sign; call back after 6" />
-        </div>
-        {act.error ? <p className="error" style={{ margin: 0 }}>{act.error}</p> : <div className="status-line">{status}</div>}
-      </div>
-    </section>
+      )}
+    </>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Volunteer roles
-// ─────────────────────────────────────────────────────────────────────────────
-function RolesCard({ person, roles, refresh, desk }) {
+function Roles({ person, roles, refresh, desk }) {
   const [role, setRole] = useState('');
   const [detail, setDetail] = useState('');
   const act = useAction(refresh);
@@ -401,10 +484,9 @@ function RolesCard({ person, roles, refresh, desk }) {
   };
 
   return (
-    <section className="card">
-      <span className="eyebrow">Volunteer roles</span>
+    <>
       {roles.length === 0
-        ? <p className="muted" style={{ margin: 0 }}>Not signed up for anything yet.</p>
+        ? <p className="pf-empty">None yet.</p>
         : (
           <div className="role-chips">
             {roles.map((r) => (
@@ -418,37 +500,35 @@ function RolesCard({ person, roles, refresh, desk }) {
             ))}
           </div>
         )}
-      {desk && <form className="role-add" onSubmit={add}>
-        <div className="field">
-          <label htmlFor="role-pick">Add a role</label>
-          <select id="role-pick" className="input" value={role} onChange={(e) => { setRole(e.target.value); setDetail(''); }}>
-            <option value="">—</option>
-            {VOLUNTEER_ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
-          </select>
-        </div>
-        {def?.detail && (
+      {desk && (
+        <form className="role-add" onSubmit={add}>
           <div className="field">
-            <label htmlFor="role-detail">{def.detail}</label>
-            <input id="role-detail" className="input" maxLength={200} value={detail} onChange={(e) => setDetail(e.target.value)} placeholder={def.detail} />
+            <label htmlFor="role-pick">Add a role</label>
+            <select id="role-pick" className="input" value={role} onChange={(e) => { setRole(e.target.value); setDetail(''); }}>
+              <option value="">—</option>
+              {VOLUNTEER_ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+            </select>
           </div>
-        )}
-        <button type="submit" className="btn btn-primary" disabled={!role || act.busy}>Assign</button>
-      </form>}
+          {def?.detail && (
+            <div className="field">
+              <label htmlFor="role-detail">{def.detail}</label>
+              <input id="role-detail" className="input" maxLength={200} value={detail} onChange={(e) => setDetail(e.target.value)} placeholder={def.detail} />
+            </div>
+          )}
+          <button type="submit" className="btn pp-btn" disabled={!role || act.busy}>Add</button>
+        </form>
+      )}
       {act.error && <p className="error">{act.error}</p>}
-    </section>
+    </>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Signs at this address
-// ─────────────────────────────────────────────────────────────────────────────
-function SignsCard({ person, signs, refresh }) {
+function Signs({ person, signs, refresh }) {
   const act = useAction(refresh);
   const kindLabel = (k) => SIGN_KINDS.find((s) => s.code === k)?.label || k;
   return (
-    <section className="card">
-      <span className="eyebrow">Signs at this address</span>
-      {signs.length === 0 && <p className="muted" style={{ margin: 0 }}>No signs yet.</p>}
+    <>
+      {signs.length === 0 && <p className="pf-empty">No signs yet.</p>}
       {signs.map((s) => (
         <div key={s.id} className="sign-row">
           <span>
@@ -464,56 +544,46 @@ function SignsCard({ person, signs, refresh }) {
           </span>
         </div>
       ))}
-      <div className="chip-row">
-        {SIGN_KINDS.map((k) => (
-          <button key={k.code} type="button" className="btn btn-sm" disabled={act.busy}
+      <div className="card-head pf-sub"><span className="eyebrow">Request a sign</span></div>
+      <div className="pf-row-acts" style={{ marginTop: 0 }}>
+        {SIGN_BUTTONS.map((k) => (
+          <button key={k.code} type="button" className="btn pp-btn" disabled={act.busy} title={k.label}
             onClick={() => act.run('sign.place', { kind: k.code, person_id: person.id })}>
-            Request {k.code}
+            {SIGN_SHORT[k.code] || k.label}
           </button>
         ))}
       </div>
-      {!person.address && <p className="hint" style={{ marginTop: 'var(--s-2)' }}>Add an address first so the sign crew knows where to go.</p>}
+      {!person.address && <p className="hint" style={{ marginTop: 'var(--s-2)' }}>Add an address first.</p>}
       {act.error && <p className="error">{act.error}</p>}
-    </section>
+    </>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shifts, gifts, contact history, household
-// ─────────────────────────────────────────────────────────────────────────────
-function ShiftsCard({ shifts }) {
+function Shifts({ shifts }) {
+  if (shifts.length === 0) {
+    return <p className="pf-empty">None. <Link to="/shifts">See shifts</Link></p>;
+  }
   return (
-    <section className="card">
-      <span className="eyebrow">Shifts</span>
-      {shifts.length === 0
-        ? <p className="muted" style={{ margin: 0 }}>No shifts assigned. <Link to="/shifts">See upcoming shifts →</Link></p>
-        : (
-          <ul className="list-plain">
-            {shifts.map((s) => (
-              <li key={s.assignment_id}>
-                <span>
-                  <Link to={`/shifts/${s.id}`}>{s.title}</Link>
-                  <br />
-                  <span className="muted mono" style={{ fontSize: 12 }}>{fmtWhen(s.starts_at)}{s.location ? ` · ${s.location}` : ''}</span>
-                </span>
-                <span className={STATUS_CHIP[s.status] || 'chip'}>{String(s.status || '').replace('_', ' ')}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-    </section>
+    <ul className="list-plain">
+      {shifts.map((s) => (
+        <li key={s.assignment_id}>
+          <span>
+            <Link to={`/shifts/${s.id}`}>{s.title}</Link>
+            <br />
+            <span className="muted mono" style={{ fontSize: 12 }}>{fmtWhen(s.starts_at)}{s.location ? ` · ${s.location}` : ''}</span>
+          </span>
+          <span className={STATUS_CHIP[s.status] || 'chip'}>{String(s.status || '').replace('_', ' ')}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function GiftsSection({ person, gifts, totals }) {
+function Gifts({ person, gifts, totals }) {
   return (
-    <section>
-      <div className="card-head">
-        <h2 style={{ margin: 0 }}>Gifts</h2>
-        <Link className="btn btn-primary" to={`/money?new=1&person=${person.id}`}>Log a gift</Link>
-      </div>
+    <>
       {totals.length > 0 && (
-        <div className="chip-row" style={{ marginBottom: 'var(--s-3)' }}>
+        <div className="chip-row" style={{ margin: '0 0 var(--s-3)' }}>
           {/* total_cents is a sum()::bigint — may arrive as a string; fmtMoney coerces with Number() */}
           {totals.map((t) => (
             <span key={t.year} className="chip">
@@ -522,79 +592,47 @@ function GiftsSection({ person, gifts, totals }) {
           ))}
         </div>
       )}
-      <table className="table">
-        <thead>
-          <tr><th>Date</th><th className="num">Amount</th><th>Method</th><th>Cadence</th><th>Note</th><th></th></tr>
-        </thead>
-        <tbody>
-          {gifts.map((g) => (
-            <tr key={g.id}>
-              <td className="mono">{fmtDate(g.date)}</td>
-              <td className="num">{fmtMoney(g.amount_cents)}</td>
-              <td>{g.method ? <span className="chip">{g.method}</span> : <span className="muted">—</span>}</td>
-              <td>
+      {gifts.length === 0
+        ? <p className="pf-empty">No gifts yet.</p>
+        : (
+          <ul className="pf-gifts">
+            {gifts.map((g) => (
+              <li key={g.id}>
+                <span className="amt">{fmtMoney(g.amount_cents)}</span>
+                <span className="when">{fmtDate(g.date)}</span>
+                {g.method && <span className="chip">{g.method}</span>}
                 {g.cadence === 'monthly'
                   ? <span className="chip chip-mark">monthly</span>
                   : <span className="chip chip-ghost">one-time</span>}
-              </td>
-              <td className="muted">{g.note || ''}</td>
-              <td>{g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}</td>
-            </tr>
-          ))}
-          {gifts.length === 0 && (
-            <tr><td colSpan={6} className="muted">No gifts recorded.</td></tr>
-          )}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
-function ContactHistory({ contacts }) {
-  return (
-    <section className="card">
-      <span className="eyebrow">Contact history</span>
-      {contacts.length === 0
-        ? <p className="muted" style={{ margin: 0 }}>No contacts logged yet — rate them above to start the record.</p>
-        : (
-          <ul className="timeline">
-            {contacts.map((c) => (
-              <li key={c.id}>
-                <span className="when">{fmtWhen(c.created_at)}</span>
-                <span className="what">
-                  <span className="chip">{CHANNEL_LABEL[c.channel] || c.channel}</span>
-                  <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>
-                  {c.rating && <RatingChip code={c.rating} size="sm" />}
-                  {c.by_name && <span className="by">by {c.by_name}</span>}
-                  {c.note && <span className="note">{c.note}</span>}
-                </span>
+                {g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}
+                {g.note && <span className="note">{g.note}</span>}
               </li>
             ))}
           </ul>
         )}
-    </section>
+      <div className="pf-row-acts">
+        <Link className="btn pp-btn" to={`/money?new=1&person=${person.id}`}>Log a gift</Link>
+      </div>
+    </>
   );
 }
 
-function HouseholdCard({ person, household }) {
+function History({ contacts }) {
+  if (contacts.length === 0) return <p className="pf-empty">No contacts yet.</p>;
   return (
-    <section className="card">
-      <span className="eyebrow">Household</span>
-      {!person.address
-        ? <p className="muted" style={{ margin: 0 }}>Add an address to see who else lives here.</p>
-        : household.length === 0
-          ? <p className="muted" style={{ margin: 0 }}>No one else on file at this address.</p>
-          : (
-            <ul className="list-plain">
-              {household.map((h) => (
-                <li key={h.id}>
-                  <Link to={`/people/${h.id}`}>{h.name}</Link>
-                  <RatingChip code={h.rating} />
-                </li>
-              ))}
-            </ul>
-          )}
-    </section>
+    <ul className="timeline">
+      {contacts.map((c) => (
+        <li key={c.id}>
+          <span className="when">{fmtWhen(c.created_at)}</span>
+          <span className="what">
+            <span className="chip">{CHANNEL_LABEL[c.channel] || c.channel}</span>
+            {c.rating ? <RatingChip code={c.rating} size="sm" /> : <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>}
+            {c.by_name && <span className="by">{c.by_name}</span>}
+            {c.note && <span className="note">{c.note}</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -607,7 +645,9 @@ export default function Person() {
   const desk = canDesk(me);
   const queryClient = useQueryClient();
   const [channel, setChannel] = useState('door');
+  const [open, setOpen] = useState({ history: true });
   const ratingRef = useRef(null);
+  const toggle = (key) => () => setOpen((o) => ({ ...o, [key]: !o[key] }));
 
   const profile = useQuery({
     queryKey: ['person', id],
@@ -620,7 +660,7 @@ export default function Person() {
   // (['blasts'].mediaContacts counts media-tagged people with an email).
   const refresh = () => invalidatePersonData(queryClient);
 
-  // "Log call" / "Text" from the contact card: preset the channel, jump to the rating card.
+  // Call / Text at the top: preset the channel, bring the rating card into view.
   const onLog = (ch) => {
     setChannel(ch);
     ratingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -629,43 +669,56 @@ export default function Person() {
   if (profile.isLoading) return <p className="muted">Loading…</p>;
   if (profile.isError || !profile.data?.person) {
     return (
-      <p className="error">
-        {profile.error?.status === 404 || !profile.data?.person
-          ? 'No one on file with that link — they may have been removed.'
-          : profile.error.message}{' '}
-        <Link to="/people">Back to People</Link>
-      </p>
+      <div className="pp-empty">
+        <p>{profile.error?.status === 404 || !profile.data?.person ? 'No one here — they may have been removed.' : profile.error.message}</p>
+        <BackLink desk={desk} className="btn pp-btn" />
+      </div>
     );
   }
   // Volunteers get gifts: [], totals: [], donor: null from the server.
   const {
     person, gifts = [], totals = [], contacts = [], roles = [], signs = [], shifts = [], donor = null, household = [],
   } = profile.data;
+  const tags = Array.isArray(person.tags) ? person.tags : [];
+  const thisYear = totals.find((t) => String(t.year) === String(new Date().getFullYear()));
 
   return (
-    <>
-      <Header person={person} donor={donor} refresh={refresh} desk={desk} />
+    <div className="pf-page">
+      <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} />
 
-      <div className="profile-grid">
-        <ContactCard person={person} refresh={refresh} onLog={onLog} me={me} desk={desk} />
-        <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
+      <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
+
+      <div className="pf-sections">
+        <Section title="Details" open={!!open.details} onToggle={toggle('details')}>
+          <Details person={person} household={household} refresh={refresh} desk={desk} />
+        </Section>
+        {/* Tags and roles are desk work: volunteers can't change them (person.update / volunteer.* are desk-only). */}
+        {desk && (
+          <Section title="Tags" count={tags.length || ''} open={!!open.tags} onToggle={toggle('tags')}>
+            <Tags person={person} refresh={refresh} desk={desk} />
+          </Section>
+        )}
+        {desk && (
+          <Section title="Volunteer roles" count={roles.length || ''} open={!!open.roles} onToggle={toggle('roles')}>
+            <Roles person={person} roles={roles} refresh={refresh} desk={desk} />
+          </Section>
+        )}
+        <Section title="Signs" count={signs.length || ''} open={!!open.signs} onToggle={toggle('signs')}>
+          <Signs person={person} signs={signs} refresh={refresh} />
+        </Section>
+        <Section title="Shifts" count={shifts.length || ''} open={!!open.shifts} onToggle={toggle('shifts')}>
+          <Shifts shifts={shifts} />
+        </Section>
+        {desk && (
+          <Section title="Gifts" count={thisYear ? fmtMoney(Number(thisYear.total_cents)) : gifts.length || ''}
+            open={!!open.gifts} onToggle={toggle('gifts')}>
+            <Gifts person={person} gifts={gifts} totals={totals} />
+          </Section>
+        )}
+        <Section title="History" count={contacts.length || ''} open={!!open.history} onToggle={toggle('history')}>
+          <History contacts={contacts} />
+        </Section>
       </div>
-
-      <div className="profile-grid">
-        <RolesCard person={person} roles={roles} refresh={refresh} desk={desk} />
-        <SignsCard person={person} signs={signs} refresh={refresh} />
-      </div>
-
-      <div className="profile-grid">
-        <ShiftsCard shifts={shifts} />
-        <HouseholdCard person={person} household={household} />
-      </div>
-
-      {desk && <GiftsSection person={person} gifts={gifts} totals={totals} />}
-
-      <div style={{ marginTop: 'var(--s-4)' }}>
-        <ContactHistory contacts={contacts} />
-      </div>
-    </>
+    </div>
   );
 }

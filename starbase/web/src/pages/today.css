@@ -1,34 +1,55 @@
-/* Today — sample data, your turf, events, pledges, toast.
-   The field strip, support bar, shifts and signs line keep their ops-* rules
-   in shifts.css. Everything here is today-* so it never collides. */
+/* Today — big numbers, one-line rows, the volunteer's "Start canvassing".
+   Everything here is today-* so it never collides (Today no longer borrows
+   the ops-* field strip from shifts.css). */
 
 .today { min-width: 0; }
+.today > h1 { margin-bottom: var(--s-4); }
 
 /* ── Shared bits ── */
 .today-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
 .btn.today-tap {
-  min-height: 44px;
-  padding-left: 16px;
-  padding-right: 16px;
+  min-height: 48px;
+  padding: 0 18px;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   text-align: center;
 }
-.today-card-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); flex-wrap: wrap; margin-bottom: var(--s-1); }
-.today-more {
+.today-chev { font-family: var(--font-serif); font-size: 22px; line-height: 1; color: var(--text-3); flex: none; }
+.today-chev.is-toggle { transform: rotate(90deg); transition: transform 0.15s; }
+[aria-expanded='true'] > .today-chev.is-toggle { transform: rotate(-90deg); }
+.today-empty { color: var(--text-3); margin: 0; padding: var(--s-2) 0; }
+.today-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.today-section { margin: var(--s-5) 0; }
+h2.today-h {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin: 0 0 var(--s-2);
+}
+.today-subh { font-size: 15px; margin: var(--s-4) 0 var(--s-1); }
+.today-fieldline { font-size: 12px; color: var(--text-3); margin: var(--s-3) 0; }
+.today-more-link {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   text-decoration: none;
-  color: var(--text-2);
+  color: var(--text-1);
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  margin: -12px 0; /* full-height tap target without padding out the card head */
+  gap: var(--s-1);
+  min-height: 48px;
+  border-bottom: 2px solid transparent;
 }
-.today-more:hover { color: var(--text-1); text-decoration: underline; text-decoration-color: var(--mark-deep); }
+.today-more-link:hover { border-bottom-color: var(--mark); }
 
 /* ── No signal yet (brief paused offline) ── */
 .today-offline {
@@ -39,18 +60,218 @@
   background: var(--paper-0);
 }
 
-/* Getting started: a step this role can't do */
-.today-step-who { font-size: 13px; text-align: right; }
+/* ── The three big numbers (desk) ── */
+.today-nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-2);
+  margin: var(--s-4) 0 var(--s-2);
+}
+.today-num {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--s-2);
+  min-width: 0;
+  min-height: 112px;
+  padding: var(--s-3);
+  font: inherit;
+  text-align: left;
+  color: var(--text-1);
+  text-decoration: none;
+  background: var(--paper-0);
+  border: var(--border);
+  border-top: 3px solid var(--ink);
+  border-radius: var(--r-card);
+  cursor: pointer;
+}
+.today-num:hover { border-color: var(--ink); background: var(--paper-1); }
+.today-num:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+.today-num[aria-expanded='true'] { border-color: var(--ink); background: var(--paper-1); }
+.today-num__n {
+  font-family: var(--font-serif);
+  font-size: clamp(28px, 8vw, 56px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+.today-num__label {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  line-height: 1.3;
+}
+
+/* Support bar: green / yellow / red, from the doorstep ratings */
+.today-bar { display: flex; gap: 2px; width: 100%; height: 14px; background: var(--paper-2); border-radius: var(--r-ctrl); overflow: hidden; }
+.today-bar.is-small { height: 6px; gap: 1px; }
+.today-bar > span { display: block; height: 100%; min-width: 3px; }
+.today-bar [data-band='support'] { background: var(--ok); }
+.today-bar [data-band='undecided'] { background: var(--mark); }
+.today-bar [data-band='opposed'] { background: var(--danger); }
+
+.card.today-support { margin: 0 0 var(--s-2); }
+.today-legend { display: flex; gap: var(--s-2) var(--s-4); flex-wrap: wrap; margin: var(--s-3) 0 0; padding: 0; list-style: none; font-size: 14px; }
+.today-legend li { display: inline-flex; align-items: baseline; gap: 6px; }
+.today-legend .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; align-self: center; }
+.today-legend .sw[data-band='support'] { background: var(--ok); }
+.today-legend .sw[data-band='undecided'] { background: var(--mark); border: 1px solid var(--mark-deep); }
+.today-legend .sw[data-band='opposed'] { background: var(--danger); }
+.today-legend .mono { font-size: 13px; }
+.today-legend .pct { color: var(--text-3); }
+.today-variants {
+  display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3);
+  list-style: none; margin: var(--s-2) 0 0; padding: 0;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-3);
+}
+.today-variants .mono { color: var(--danger); font-weight: 600; }
+.today-support-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); margin-top: var(--s-2); flex-wrap: wrap; }
+.today-support-foot .mono { font-size: 12px; }
+
+/* ── One-line rows (Needs you, Coming up, walk lists) ── */
+.today-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--paper-0);
+  border: var(--border);
+  border-radius: var(--r-card);
+}
+.today-rows > li + li { border-top: 1px solid var(--rule); }
+.today-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+  font: inherit;
+  text-align: left;
+  color: var(--text-1);
+  text-decoration: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.today-row:hover { background: var(--paper-1); }
+.today-row:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
+.today-row__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.today-row__main strong { font-weight: 600; }
+.today-row__kicker {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.today-row__title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.today-row__when { display: block; font-family: var(--font-mono); font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+.today-row .chip { flex: none; }
+.today-row__extra { color: var(--text-1); font-weight: 600; }
+.today-fill { flex: none; font-size: 13px; color: var(--text-2); }
+/* Holds the volunteer's shift line while "which shifts am I on?" loads, so
+   the row doesn't jump from "Open shift" to "Your next shift". */
+.today-row--wait { min-height: 70px; }
+
+/* Getting started */
+.card.today-steps { border-top: 3px solid var(--mark); }
+.today-steps .today-rows { border: 0; background: none; }
+.today-step { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-1) 0; flex-wrap: wrap; }
+.today-step-who { font-size: 13px; }
+
+/* Event rows (volunteer "More") */
+.today-event { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-1) var(--s-3); padding: var(--s-2) var(--s-4); }
+.today-event .today-row__main { white-space: normal; flex: 1 1 200px; }
+.today-rsvp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-decoration-color: var(--mark-deep);
+  text-underline-offset: 3px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+}
+.today-rsvp:hover { color: var(--text-1); }
+
+/* ── Volunteer: Start canvassing ── */
+.today-go { margin: var(--s-4) 0 var(--s-4); }
+.btn.btn-primary.today-start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: 80px;
+  padding: var(--s-4);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border-width: 2px;
+  border-radius: var(--r-card);
+  box-shadow: 0 3px 0 var(--mark-deep);
+}
+.btn.btn-primary.today-start:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--mark-deep); }
+.today-offline + .today-start { margin-top: var(--s-4); }
+.today-go__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  margin: var(--s-3) 0 0;
+  font-size: 14px;
+}
+.today-go__meta .mono { font-size: 12px; color: var(--text-3); }
+.today-go__turf { font-weight: 600; overflow-wrap: anywhere; }
+.today-progress { display: block; flex: 1 0 100%; height: 6px; background: var(--paper-2); border-radius: 999px; overflow: hidden; }
+.today-progress > span { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+.today-next { margin-top: var(--s-4); }
+
+/* ── Quiet "More" at the bottom ── */
+.today-morebox { margin-top: var(--s-6); border-top: 1px solid var(--rule-2); }
+.today-morebox__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 48px;
+  padding: 0 var(--s-3) 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.today-morebox__toggle .today-chev { font-size: 18px; }
+.today-morebox__toggle:hover, .today-morebox__toggle[aria-expanded='true'] { color: var(--text-1); }
+.today-morebox__toggle:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+.today-morebox__body { padding-bottom: var(--s-4); }
+.today-morebox__body .today-rows { margin: var(--s-2) 0; }
+.today-morebox__tools { margin-top: var(--s-4); }
 
 /* ── Sample data ── */
 .card.today-sample {
-  border-color: var(--rule-2);
   border-top: 3px solid var(--mark);
-  padding: var(--s-4) var(--s-5) var(--s-5);
-  margin-top: var(--s-4);
+  padding: var(--s-4);
 }
-.today-sample h2 { font-size: 20px; margin: 0 0 var(--s-2); }
-.today-sample-lede { color: var(--text-2); margin: 0 0 var(--s-4); max-width: 56ch; }
+.today-sample-lede { margin: 0 0 var(--s-3); font-size: 17px; }
 .today-sample .error { margin: var(--s-3) 0 0; }
 
 .today-sample-line {
@@ -61,8 +282,8 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--text-3);
-  margin: calc(-1 * var(--s-2)) 0 0;
-  min-height: 44px;
+  margin: calc(-1 * var(--s-3)) 0 0;
+  min-height: 48px;
 }
 .today-dot { margin: 0 var(--s-2); color: var(--text-4); }
 .today-linkbtn {
@@ -71,8 +292,8 @@
   color: var(--text-2);
   background: none;
   border: 0;
-  padding: 0 var(--s-1);
-  min-height: 44px;
+  padding: 0 var(--s-2);
+  min-height: 48px;
   cursor: pointer;
   text-decoration: underline;
   text-decoration-color: var(--rule-2);
@@ -87,93 +308,27 @@
   border-left: 3px solid var(--danger);
   border-radius: 0 var(--r-card) var(--r-card) 0;
   padding: var(--s-3) var(--s-4);
-  margin: var(--s-2) 0 var(--s-2);
+  margin: var(--s-2) 0;
 }
 .today-confirm p { margin: 0 0 var(--s-3); color: var(--text-2); }
 .btn.today-danger { color: var(--danger); border-color: var(--danger); }
 .btn.today-danger:hover { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
 
-/* ── Your turf ── */
-.card.today-turf.is-lead {
-  border: var(--border-ink);
-  border-top: 3px solid var(--mark);
-  margin-top: var(--s-4);
-}
-.today-turf-list { list-style: none; margin: 0; padding: 0; }
-.today-turf-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2) var(--s-4);
-  flex-wrap: wrap;
-  padding: var(--s-2) 0;
-  border-bottom: 1px solid var(--rule);
-}
-.today-turf-list li:last-child { border-bottom: 0; }
-.today-turf-info { display: flex; flex-direction: column; gap: 3px; flex: 1 1 200px; min-width: 0; }
-.today-turf-name { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
-.today-turf-meta { font-size: 12px; color: var(--text-3); }
-.today-progress { display: block; height: 6px; max-width: 260px; background: var(--paper-2); border-radius: 999px; overflow: hidden; }
-.today-progress > span { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
-.today-turf-none { color: var(--text-2); margin: 0 0 var(--s-3); }
-
-/* ── Upcoming events ── */
-.today-event-info { display: flex; flex-direction: column; min-width: 0; flex: 1 1 220px; }
-.today-event-title { font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
-a.today-event-title:hover { text-decoration: underline; }
-.today-events .when { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); }
-.today-rsvp {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--text-2);
-  text-decoration: underline;
-  text-decoration-color: var(--mark-deep);
-  text-underline-offset: 3px;
-  display: inline-block;
-  align-self: flex-start;
-  padding: 8px 0;
-  line-height: 20px;
-}
-.today-rsvp:hover { color: var(--text-1); }
-.today-events .list-plain li { align-items: center; }
-
-.today-going { display: inline-flex; align-items: center; gap: var(--s-2); white-space: nowrap; font-size: 12px; color: var(--text-2); }
-.today-going-track { width: 72px; height: 6px; background: var(--paper-2); border-radius: 999px; overflow: hidden; display: inline-block; }
-.today-going-track > span { display: block; height: 100%; background: var(--ink); border-radius: 999px; }
-.today-going[data-full] .today-going-track > span { background: var(--ok); }
-.today-going[data-full] { color: var(--ok); }
-
-/* ── Pledges (under the money hero) ── */
-.today-pledges {
-  display: inline-block;
-  padding: 10px 0;
-  line-height: 24px;
-  margin-top: var(--s-1);
-  font-size: 14px;
-  color: var(--text-2);
-  text-decoration: underline;
-  text-decoration-color: var(--mark-deep);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 4px;
-}
-.today-pledges:hover { color: var(--text-1); background: var(--mark-soft); }
-.today-pledges .mono { font-size: 13px; color: var(--text-1); }
-
 /* ── Toast: above the phone tab bar ── */
 .toast.today-toast { max-width: calc(100vw - 32px); }
-.toast.today-toast .btn { min-height: 36px; }
+.toast.today-toast .btn { min-height: 44px; }
 
 @media (max-width: 720px) {
   .toast.today-toast {
-    bottom: calc(64px + env(safe-area-inset-bottom));
+    bottom: calc(72px + env(safe-area-inset-bottom));
     z-index: 950;
     width: max-content;
   }
+  .today-nums { gap: 6px; }
+  .today-num { min-height: 96px; padding: var(--s-3) var(--s-2) var(--s-2); }
 }
 @media (max-width: 480px) {
-  .card.today-sample { padding: var(--s-4); }
   .today-sample .today-actions .btn,
   .today-confirm .today-actions .btn,
-  .today-turf .btn.today-tap { width: 100%; }
+  .today-morebox__tools .btn { flex: 1 1 140px; }
 }

@@ -1,51 +1,54 @@
-// DoorCard — the drawer for one door: who lives here, call/text with a one-tap
-// "log this call/text", the big rating row for the selected person, outcome
-// buttons, a note, sign request, and "add person at this door". The map
-// decides where it sits (bottom sheet on phones, right panel on desktop).
+// DoorCard — the drawer for one door. Rating first: the selected person's
+// name, the big rating buttons, then one row of quiet "no conversation"
+// outcomes. Everything else (note, call/text with a one-tap "log this call",
+// channel, sign request, add a person, profile) sits under "More". Several
+// people at one door → simple tabs at the top. The map decides where it sits
+// (bottom sheet on phones, right panel on desktop).
 // Also exports AddDoorForm — the same person.create flow for a tapped spot
 // that has no door yet.
 //
 // Offline: every contact.log goes through the outbox (logContact), so a knock
 // tapped with no signal is saved on the phone and sent later — the card still
 // shows the rating straight away. Sign requests and new people need the
-// server, so those say plainly that they need signal.
-import { useState } from 'react';
+// server, so those say so.
+//
+// Contacts are append-only: after a tap the toast offers "Change", which
+// puts focus back on the rating row — the next tap logs the correction.
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { action, ApiError } from '../api.js';
 import { logContact } from '../offline.js';
-import { SIGN_KINDS, ratingByCode } from '@starbase/shared/canvass';
-import RatingButtons, { RatingChip } from './RatingButtons.jsx';
+import { SIGN_KINDS } from '@starbase/shared/canvass';
+import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingSay } from './RatingButtons.jsx';
 import '../pages/map.css';
 
-const OUTCOME_BUTTONS = [
-  { code: 'no_answer', label: 'No answer' },
-  { code: 'refused', label: 'Refused' },
-  { code: 'moved', label: 'Moved' },
-  { code: 'inaccessible', label: 'Inaccessible' },
-];
-const OUTCOME_LABEL = Object.fromEntries(OUTCOME_BUTTONS.map((o) => [o.code, o.label]));
+// "Wants a sign?" — one tap files a request (Undo is on the toast). A kind
+// this door already has (requested or up) isn't offered again.
 const SIGN_BUTTONS = [
-  { code: 'lawn', label: 'Lawn' },
-  { code: 'large', label: 'Large' },
+  { code: 'lawn', label: 'Lawn sign' },
+  { code: 'large', label: 'Large sign' },
   { code: 'billboard', label: 'Billboard' },
 ];
 export const SIGN_LABEL = Object.fromEntries(SIGN_KINDS.map((s) => [s.code, s.label]));
 const SIGN_CHIP = { installed: 'chip-ok', requested: 'chip-warn' };
+const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: 'Removed' };
 // Channel for the rating + outcome taps. Door by default on the map; tapping
 // Call / Text switches it so the rating that follows is logged as that call.
+// "Logging: At the door · Phone call · Text" at the bottom of More sets it by
+// hand (kept away from the Call / Text buttons, which dial).
 const CHANNEL_BUTTONS = [
-  { code: 'door', label: 'Door', at: 'at the door' },
-  { code: 'phone', label: 'Phone', at: 'by phone' },
-  { code: 'text', label: 'Text', at: 'by text' },
+  { code: 'door', label: 'At the door' },
+  { code: 'phone', label: 'Phone call' },
+  { code: 'text', label: 'Text' },
 ];
-const CHANNEL_AT = Object.fromEntries(CHANNEL_BUTTONS.map((c) => [c.code, c.at]));
+const CHANNEL_CHIP = { phone: 'By phone', text: 'By text' };
 
-export const QUEUED_MSG = 'Saved offline — sends when you\'re back online';
+export const QUEUED_MSG = 'Saved offline';
 // Queued with signal showing: the server didn't answer (dead zone, outage).
-const QUEUED_NO_SERVER_MSG = 'Saved on this phone — sends once the server answers';
-export const OFFLINE_MSG = 'You\'re offline — try this again when you have signal';
-const SIGNED_OUT_MSG = 'Your sign-in ran out — sign in again, then tap this again';
+const QUEUED_NO_SERVER_MSG = 'Saved on this phone — sends soon';
+export const OFFLINE_MSG = 'Needs signal — try again';
+const SIGNED_OUT_MSG = 'Signed out — sign in, then try again';
 const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 // fetch() rejects with a TypeError (not an ApiError) when there's no network.
 const offlineError = (err) => isOffline() || !(err instanceof ApiError);
@@ -64,10 +67,11 @@ const dialable = (phone) => String(phone || '').replace(/\s*(?:ext\.?|x|#).*$/i,
 // not the UTC one (an evening knock in Surrey is already "tomorrow" in UTC).
 const localDate = (iso) => {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-CA');
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 };
 const telHref = (phone) => `tel:${dialable(phone)}`;
 const smsHref = (phone, body) => `sms:${dialable(phone)}?&body=${encodeURIComponent(body)}`;
+const isDnc = (p) => Array.isArray(p?.tags) && p.tags.includes('do-not-contact');
 
 export function doorTitle(door) {
   if (!door?.address) return 'Unaddressed pin';
@@ -116,16 +120,17 @@ function useRefresh() {
 }
 
 function PersonFields({ idPrefix, form, set, withAddress }) {
+  const [more, setMore] = useState(false);
   return (
     <>
       <div className="field">
-        <label htmlFor={`${idPrefix}-name`}>Name (required)</label>
+        <label htmlFor={`${idPrefix}-name`}>Name</label>
         <input id={`${idPrefix}-name`} className="input" required autoFocus maxLength={300} autoComplete="off" value={form.name} onChange={set('name')} />
       </div>
       {withAddress && (
         <div className="form-row">
           <div className="field" style={{ flex: '3 1 180px' }}>
-            <label htmlFor={`${idPrefix}-address`}>Address (required)</label>
+            <label htmlFor={`${idPrefix}-address`}>Address</label>
             <input id={`${idPrefix}-address`} className="input" required maxLength={1000} autoComplete="off" placeholder="12345 72 Ave" value={form.address} onChange={set('address')} />
           </div>
           <div className="field" style={{ flex: '1 1 80px' }}>
@@ -134,10 +139,14 @@ function PersonFields({ idPrefix, form, set, withAddress }) {
           </div>
         </div>
       )}
-      <div className="field">
-        <label htmlFor={`${idPrefix}-phone`}>Phone</label>
-        <input id={`${idPrefix}-phone`} className="input" type="tel" inputMode="tel" maxLength={40} autoComplete="off" value={form.phone} onChange={set('phone')} />
-      </div>
+      {more || form.phone ? (
+        <div className="field">
+          <label htmlFor={`${idPrefix}-phone`}>Phone</label>
+          <input id={`${idPrefix}-phone`} className="input" type="tel" inputMode="tel" maxLength={40} autoComplete="off" autoFocus={more && !form.phone} value={form.phone} onChange={set('phone')} />
+        </div>
+      ) : (
+        <button type="button" className="fk-link door-form__more" onClick={() => setMore(true)}>+ Phone</button>
+      )}
     </>
   );
 }
@@ -153,7 +162,7 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim()) { setError('Name is required'); return; }
+    if (!form.name.trim()) { setError('Add a name'); return; }
     if (isOffline()) { setError(OFFLINE_MSG); toast(OFFLINE_MSG); return; }
     setBusy(true);
     setError(null);
@@ -166,7 +175,7 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
         lat: door.lat,
         lng: door.lng,
       });
-      toast(`Added ${res.person.name} at this door`);
+      toast(`Added ${res.person.name}`);
       patchDoors(queryClient, (d) => ({
         ...d,
         persons: [...d.persons.filter((p) => p.id !== res.person.id), doorPerson(res.person, door)],
@@ -174,7 +183,7 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
       refresh();
       onDone(res.person.id);
     } catch (err) {
-      const msg = refusalMsg(err, 'Could not save that person — try again');
+      const msg = refusalMsg(err, 'Not saved — try again');
       setError(msg);
       if (offlineError(err)) toast(msg);
       setBusy(false);
@@ -182,13 +191,11 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
   };
 
   return (
-    <form className="door-form" onSubmit={submit}>
-      <span className="eyebrow">Add person at this door</span>
-      <p className="muted door-form__where">{doorTitle(door)}</p>
+    <form className="door-form door-form--inline" onSubmit={submit} aria-label="Add a person at this door">
       <PersonFields idPrefix="dp" form={form} set={set} />
       {error && <p className="error">{error}</p>}
       <div className="door-form__actions">
-        <button type="submit" className="btn btn-primary door-act" disabled={busy}>Save person</button>
+        <button type="submit" className="btn door-act" disabled={busy}>Save person</button>
         <button type="button" className="btn btn-quiet door-act" onClick={onCancel}>Cancel</button>
       </div>
     </form>
@@ -208,7 +215,7 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
     e.preventDefault();
     // Whitespace passes `required`; the server trims names (→ 400) and a
     // blank address would make an unaddressed pin, not a door.
-    if (!form.name.trim() || !form.address.trim()) { setError('Name and address are required'); return; }
+    if (!form.name.trim() || !form.address.trim()) { setError('Add a name and address'); return; }
     if (isOffline()) { setError(OFFLINE_MSG); toast(OFFLINE_MSG); return; }
     setBusy(true);
     setError(null);
@@ -221,7 +228,7 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
         lat: latlng.lat,
         lng: latlng.lng,
       });
-      toast(`Added ${res.person.name} — new door on the map`);
+      toast(`Added ${res.person.name}`);
       patchDoors(queryClient, (d) => ({
         ...d,
         persons: [...d.persons.filter((p) => p.id !== res.person.id), doorPerson(res.person, latlng)],
@@ -229,7 +236,7 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
       refresh();
       onDone(res.person.id);
     } catch (err) {
-      const msg = refusalMsg(err, 'Could not save that person — try again');
+      const msg = refusalMsg(err, 'Not saved — try again');
       setError(msg);
       if (offlineError(err)) toast(msg);
       setBusy(false);
@@ -237,20 +244,18 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
   };
 
   return (
-    <form className="door-card door-form" onSubmit={submit}>
+    <form className="door-card door-form" onSubmit={submit} aria-label="New door">
       <header className="mapsheet-head">
-        <div>
-          <span className="eyebrow">New door</span>
-          <h2 className="mapsheet-title">Who lives here?</h2>
-        </div>
+        <h2 className="mapsheet-title">New door</h2>
         <button type="button" className="btn btn-quiet mapsheet-close" onClick={onCancel} aria-label="Close">✕</button>
       </header>
-      <p className="muted mono door-form__where">{latlng.lat.toFixed(5)}, {latlng.lng.toFixed(5)}</p>
-      <PersonFields idPrefix="nd" form={form} set={set} withAddress />
-      {error && <p className="error">{error}</p>}
-      <div className="door-form__actions">
-        <button type="submit" className="btn btn-primary door-act" disabled={busy}>Add door</button>
-        <button type="button" className="btn btn-quiet door-act" onClick={onCancel}>Cancel</button>
+      <div className="door-form__body">
+        <PersonFields idPrefix="nd" form={form} set={set} withAddress />
+        {error && <p className="error">{error}</p>}
+        <div className="door-form__actions">
+          <button type="submit" className="btn btn-primary door-act" disabled={busy}>Add door</button>
+          <button type="button" className="btn btn-quiet door-act" onClick={onCancel}>Cancel</button>
+        </div>
       </div>
     </form>
   );
@@ -261,19 +266,22 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
 export default function DoorCard({ door, selectedId, onSelect, onClose, toast, me, canCreate = true }) {
   const queryClient = useQueryClient();
   const refresh = useRefresh();
+  const rateRef = useRef(null);
   const [local, setLocal] = useState({});     // optimistic ratings by person id
   const [pending, setPending] = useState(null); // { id, channel } after a tel:/sms: tap
   const [channel, setChannel] = useState('door');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [more, setMore] = useState(false);
 
   const persons = door.persons;
   const sel = persons.find((p) => p.id === selectedId) || persons[0];
   const ratingOf = (p) => (p.id in local ? local[p.id] : p.rating);
   const noteText = note.trim();
+  const multi = persons.length > 1;
 
-  // Optimistic rating on the card chip and on the pin (via the doors cache).
+  // Optimistic rating on the card and on the pin (via the doors cache).
   const setRating = (person, code, ratedAt) => {
     setLocal((l) => ({ ...l, [person.id]: code }));
     patchDoors(queryClient, (d) => ({
@@ -288,6 +296,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     setChannel(via);
     if (sel?.id !== p.id) onSelect(p.id);
   };
+  const backToDoor = () => { setPending(null); setChannel('door'); };
 
   const log = async (person, via, outcome, rating = null) => {
     if (busy) return;
@@ -305,29 +314,28 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         note: noteText || undefined,
       });
       setNote('');
-      if (pending) {
-        // The call/text is logged — the next tap is back at the door.
-        setPending(null);
-        setChannel('door');
-      }
+      if (pending) backToDoor(); // the call/text is logged — the next tap is back at the door
+      // Append-only: "Change" brings the rating row back; the next tap logs the fix.
+      const change = { label: 'Change', onClick: () => focusRating(rateRef.current) };
       if (queued) {
         // Keep the optimistic rating; Shell refreshes everything once the
         // outbox sends. Refetching now would only pause (offline) or fail.
-        toast(isOffline() ? QUEUED_MSG : QUEUED_NO_SERVER_MSG);
+        toast(isOffline() ? QUEUED_MSG : QUEUED_NO_SERVER_MSG, change);
         return;
       }
+      const who = multi ? `${firstName(person.name)} · ` : '';
       const what = rating
-        ? `${rating} · ${ratingByCode(rating)?.label}`
+        ? `Rated ${rating} · ${ratingSay(rating)}`
         : outcome === 'contacted'
-          ? (via === 'door' ? 'note' : via === 'phone' ? 'call' : 'text')
-          : `${OUTCOME_LABEL[outcome].toLowerCase()}${via !== 'door' ? ` (${via})` : ''}`;
-      toast(`Logged ${what} — ${person.name}`);
+          ? (via === 'door' ? 'Note saved' : via === 'phone' ? 'Call logged' : 'Text logged')
+          : `${OUTCOME_LABEL[outcome]}${via !== 'door' ? ` (${via})` : ''}`;
+      toast(`${who}${what}`, change);
       refresh();
     } catch (err) {
       // Only a refusal lands here (bad input, no permission) — network
       // trouble is queued above, never thrown.
       if (rating) setRating(person, prev.code, prev.at);
-      toast(refusalMsg(err, 'Could not log that — try again'));
+      toast(refusalMsg(err, 'Not saved — try again'));
     } finally {
       setBusy(false);
     }
@@ -345,93 +353,162 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         lng: door.lng,
         address: door.address || undefined,
       });
-      toast(`${SIGN_LABEL[kind]} requested — ${sel.name}`);
-      if (res?.sign?.id) {
+      const sign = res?.sign;
+      toast(`${SIGN_LABEL[kind]} requested`, sign?.id ? { label: 'Undo', onClick: () => undoSign(sign) } : null);
+      if (sign?.id) {
         patchDoors(queryClient, (d) => ({
           ...d,
-          signs: [...(d.signs || []).filter((s) => s.id !== res.sign.id), { ...res.sign, lat: door.lat, lng: door.lng }],
+          signs: [...(d.signs || []).filter((s) => s.id !== sign.id), { ...sign, lat: door.lat, lng: door.lng }],
         }));
       }
       refresh();
     } catch (err) {
-      toast(refusalMsg(err, 'Could not request that sign — try again'));
+      toast(refusalMsg(err, 'Not saved — try again'));
     } finally {
       setBusy(false);
     }
   };
 
+  // The toast's Undo: take the request back (status "removed", which drops
+  // it from the map and the sign crew's list). Runs after the card closed too.
+  const undoSign = async (sign) => {
+    if (isOffline()) { toast(OFFLINE_MSG); return; }
+    try {
+      await action('sign.update', { id: sign.id, status: 'removed' });
+      patchDoors(queryClient, (d) => ({ ...d, signs: (d.signs || []).filter((s) => s.id !== sign.id) }));
+      toast(`${SIGN_LABEL[sign.kind] || 'Sign'} cancelled`);
+      refresh();
+    } catch (err) {
+      toast(refusalMsg(err, 'Not undone — try again'));
+    }
+  };
+  const haveSign = new Set(door.signs.filter((s) => s.status !== 'removed').map((s) => s.kind));
+  const signOffer = SIGN_BUTTONS.filter((s) => !haveSign.has(s.code));
+
   const smsBody = (p) =>
     `Hi ${firstName(p.name)}, it's ${me?.user?.name || 'a volunteer'} with ${me?.workspace?.name || 'the campaign'}.`;
+
+  const dnc = isDnc(sel);
+  const moreId = `door-more-${sel?.id || 'none'}`;
 
   return (
     <aside className="door-card" aria-label={`Door: ${doorTitle(door)}`}>
       <header className="mapsheet-head">
-        <div>
-          <span className="eyebrow">Door · {persons.length} {persons.length === 1 ? 'person' : 'people'}</span>
-          <h2 className="mapsheet-title">{doorTitle(door)}</h2>
+        <div className="door-head">
+          <h2 className="mapsheet-title door-head__name">
+            {multi ? doorTitle(door) : sel?.name}
+            {!multi && dnc && <span className="chip chip-danger door-dnc">Do not contact</span>}
+          </h2>
+          {!multi && <span className="door-head__addr">{doorTitle(door)}</span>}
         </div>
         <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close door card">✕</button>
       </header>
 
-      <ul className="door-people">
-        {persons.map((p) => {
-          const active = sel?.id === p.id;
-          const dnc = Array.isArray(p.tags) && p.tags.includes('do-not-contact');
-          return (
-            <li key={p.id} className={`door-person${active ? ' is-active' : ''}`}>
-              <button
-                type="button"
-                className="door-person__pick"
-                aria-pressed={active}
-                onClick={() => onSelect(p.id)}
-              >
-                <span className="door-person__who">
-                  <span className="door-person__name">{p.name}</span>
-                  {p.rated_at && <span className="door-person__meta muted mono">rated {localDate(p.rated_at)}</span>}
-                </span>
-                <span className="door-person__chips">
-                  {dnc && <span className="chip chip-danger">do not contact</span>}
-                  <RatingChip code={ratingOf(p)} />
-                </span>
-              </button>
-              <div className="door-person__actions">
-                {p.phone ? (
-                  <>
-                    <a className="btn door-act" href={telHref(p.phone)} onClick={() => startReach(p, 'phone')}>
-                      Call
-                    </a>
-                    <a className="btn door-act" href={smsHref(p.phone, smsBody(p))} onClick={() => startReach(p, 'text')}>
-                      Text
-                    </a>
-                    <span className="door-person__phone mono muted">{p.phone}</span>
-                  </>
-                ) : (
-                  <span className="muted door-person__phone">no phone</span>
-                )}
-                <Link className="btn btn-quiet door-act" to={`/people/${p.id}`}>Profile</Link>
-              </div>
-              {pending?.id === p.id && (
-                <div className="door-loglink" role="group" aria-label={`Log this ${pending.channel === 'phone' ? 'call' : 'text'}`}>
-                  <span className="eyebrow">Log this {pending.channel === 'phone' ? 'call' : 'text'} — or tap a rating below</span>
-                  <button type="button" className="btn btn-primary door-act" disabled={busy} onClick={() => log(p, pending.channel, 'contacted')}>
-                    Reached
-                  </button>
-                  <button type="button" className="btn door-act" disabled={busy} onClick={() => log(p, pending.channel, 'no_answer')}>
-                    No answer
-                  </button>
-                  <button type="button" className="btn btn-quiet door-act" onClick={() => { setPending(null); setChannel('door'); }}>Skip</button>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {sel && (
+        <section className="door-rate" ref={rateRef} aria-label={`Rate ${sel.name}`}>
+          <PersonTabs persons={persons} value={sel.id} onPick={onSelect} ratingOf={ratingOf} />
+          {multi && dnc && <p className="door-dnc-line"><span className="chip chip-danger">Do not contact</span> {firstName(sel.name)}</p>}
+          {channel !== 'door' && (
+            <p className="door-via">
+              <span className="chip chip-warn">{CHANNEL_CHIP[channel]}</span>
+              <button type="button" className="fk-link" onClick={backToDoor}>At the door instead</button>
+            </p>
+          )}
+          <RatingButtons
+            key={sel.id}
+            value={ratingOf(sel)}
+            disabled={busy}
+            onPick={(code) => log(sel, channel, 'contacted', code)}
+          />
+          <OutcomeButtons disabled={busy} onPick={(code) => log(sel, channel, code)} />
+        </section>
+      )}
 
       {sel && (
-        <section className="door-section">
-          <div className="door-rate-head">
-            <span className="eyebrow">{persons.length > 1 ? `Rate ${firstName(sel.name)}` : 'Rating'} · {CHANNEL_AT[channel]}</span>
-            <div className="door-channel" role="radiogroup" aria-label="Contact channel">
+        <More id={moreId} open={more} onToggle={() => setMore((m) => !m)}>
+          <div className="field door-note">
+            <label htmlFor="door-note">Note</label>
+            <textarea
+              id="door-note"
+              className="input"
+              rows={2}
+              maxLength={2000}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Note — saved with your rating"
+            />
+            {noteText && (
+              <button type="button" className="btn door-act door-note__only" disabled={busy} onClick={() => log(sel, channel, 'contacted')}>
+                Save note only
+              </button>
+            )}
+          </div>
+
+          <div className="door-more__row">
+            {sel.phone ? (
+              <>
+                <a className="btn door-act" href={telHref(sel.phone)} onClick={() => startReach(sel, 'phone')}>Call</a>
+                <a className="btn door-act" href={smsHref(sel.phone, smsBody(sel))} onClick={() => startReach(sel, 'text')}>Text</a>
+                <span className="door-more__phone mono">{sel.phone}</span>
+              </>
+            ) : (
+              <span className="muted door-more__phone">No phone</span>
+            )}
+          </div>
+          {pending?.id === sel.id && (
+            <div className="door-loglink" role="group" aria-label={`Log this ${pending.channel === 'phone' ? 'call' : 'text'}`}>
+              <span className="door-loglink__label">Log this {pending.channel === 'phone' ? 'call' : 'text'}</span>
+              <button type="button" className="btn door-act" disabled={busy} onClick={() => log(sel, pending.channel, 'contacted')}>Reached</button>
+              <button type="button" className="btn door-act" disabled={busy} onClick={() => log(sel, pending.channel, 'no_answer')}>No answer</button>
+              <button type="button" className="btn btn-quiet door-act" onClick={backToDoor}>Skip</button>
+            </div>
+          )}
+
+          <div className="door-more__sec">
+            <span className="door-more__label" id="door-sign-label">{signOffer.length ? 'Wants a sign?' : 'Signs'}</span>
+            {door.signs.length > 0 && (
+              <div className="door-signs-have">
+                {door.signs.map((s) => (
+                  <span key={s.id} className={`chip ${SIGN_CHIP[s.status] || ''}`} title={SIGN_LABEL[s.kind]}>
+                    {SIGN_LABEL[s.kind]} · {SIGN_STATUS[s.status] || s.status}
+                  </span>
+                ))}
+              </div>
+            )}
+            {signOffer.length > 0 && (
+              <div className="door-sign-btns" role="group" aria-labelledby="door-sign-label">
+                {signOffer.map((s) => (
+                  <button
+                    key={s.code} type="button" className="btn door-act" disabled={busy}
+                    title={`Request a ${SIGN_LABEL[s.code].toLowerCase()}`}
+                    aria-label={`Request a ${SIGN_LABEL[s.code].toLowerCase()}`}
+                    onClick={() => placeSign(s.code)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {canCreate && (
+            adding ? (
+              <AddPersonInline
+                door={door}
+                toast={toast}
+                onCancel={() => setAdding(false)}
+                onDone={(id) => { setAdding(false); onSelect(id); }}
+              />
+            ) : (
+              <button type="button" className="btn door-act door-add-btn" onClick={() => setAdding(true)}>
+                + Person at this door
+              </button>
+            )
+          )}
+
+          <div className="door-more__sec">
+            <span className="door-more__label" id="door-channel-label">Logging</span>
+            <div className="door-channel" role="radiogroup" aria-labelledby="door-channel-label">
               {CHANNEL_BUTTONS.map((c) => (
                 <button
                   key={c.code}
@@ -446,75 +523,12 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
               ))}
             </div>
           </div>
-          <RatingButtons
-            value={ratingOf(sel)}
-            disabled={busy}
-            onPick={(code) => log(sel, channel, 'contacted', code)}
-          />
-          <div className="door-outcomes" role="group" aria-label="Outcome">
-            {OUTCOME_BUTTONS.map((o) => (
-              <button key={o.code} type="button" className="btn door-act" disabled={busy} onClick={() => log(sel, channel, o.code)}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-          <div className="field door-note">
-            <label htmlFor="door-note">Note — sent with your next tap</label>
-            <textarea
-              id="door-note"
-              className="input"
-              rows={2}
-              maxLength={2000}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Issue raised, best time to reach, lawn sign spot…"
-            />
-            {noteText && (
-              <button type="button" className="btn btn-quiet door-act door-note__only" disabled={busy} onClick={() => log(sel, channel, 'contacted')}>
-                Save note only
-              </button>
-            )}
-          </div>
-        </section>
-      )}
 
-      {sel && (
-        <section className="door-section">
-          <span className="eyebrow">Sign request · {firstName(sel.name)}</span>
-          {door.signs.length > 0 && (
-            <div className="door-signs-have">
-              {door.signs.map((s) => (
-                <span key={s.id} className={`chip ${SIGN_CHIP[s.status] || ''}`} title={SIGN_LABEL[s.kind]}>
-                  {SIGN_LABEL[s.kind]} · {s.status}
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="door-sign-btns" role="group" aria-label="Request a sign">
-            {SIGN_BUTTONS.map((s) => (
-              <button key={s.code} type="button" className="btn door-act" disabled={busy} title={SIGN_LABEL[s.code]} onClick={() => placeSign(s.code)}>
-                {s.label}
-              </button>
-            ))}
+          <div className="door-more__foot">
+            <Link className="btn btn-quiet door-act" to={`/people/${sel.id}`}>Profile</Link>
+            {sel.rated_at && <span className="muted mono door-more__when">Rated {localDate(sel.rated_at)}</span>}
           </div>
-        </section>
-      )}
-
-      {canCreate && (
-        <section className="door-section">
-          {adding ? (
-            <AddPersonInline
-              door={door}
-              toast={toast}
-              onCancel={() => setAdding(false)}
-              onDone={(id) => { setAdding(false); onSelect(id); }}
-            />
-          ) : (
-            <button type="button" className="btn door-act door-add-btn" onClick={() => setAdding(true)}>
-              + Add person at this door
-            </button>
-          )}
-        </section>
+        </More>
       )}
     </aside>
   );

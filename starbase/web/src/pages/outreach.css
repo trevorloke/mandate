@@ -1,204 +1,343 @@
-/* Outreach — newsletter · press · petitions · events · website bridge,
-   plus Money's pledge queue (pl-*).
-   Page-specific styles only; primitives (.card .table .btn .chip .banner .toast)
-   come from app.css. Everything here is prefixed ot- so it never collides.
-   NOTE: app.css is imported after the page tree (main.jsx), so it lands later
-   in the bundle — any rule that overrides a primitive (.btn .chip .toast) must
-   out-specify it (e.g. .btn.ot-btn-sm), never rely on source order. */
+/* Outreach + Team — same shape as the ops screens: title left, the one yellow
+   action right, tabs under it, then a stack of rows that open in place.
+   Tap targets: ≥ 44px everywhere, ≥ 48px on touch. Money's pledge queue
+   (pl-*) also lives here.
+   Page-specific styles only; primitives (.card .btn .chip .input .toast) come
+   from app.css. Everything here is prefixed ot- so it never collides. Rules
+   that refine a primitive double the class (.btn.ot-btn-tap) so they win
+   whatever the bundle order. */
 
-/* ── Tab strip (URL-driven, /outreach/:tab) ── */
-.ot-tabs {
+/* ── Page frame ── */
+.ot-page { max-width: 720px; margin: 0 auto; }
+.ot-top {
   display: flex;
-  gap: var(--s-1);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2) var(--s-3);
+  flex-wrap: wrap;
+  min-height: 48px; /* same height with or without the action, so nothing jumps */
+  margin-bottom: var(--s-4);
+}
+.ot-top h1 { margin: 0; }
+
+/* ── Tabs: icon + word + count, all five fit a phone ── */
+.ot-tabs {
+  display: grid;
+  grid-template-columns: repeat(var(--ot-tabs, 5), minmax(0, 1fr));
   border-bottom: 1px solid var(--rule-2);
-  margin-bottom: var(--s-5);
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  margin: 0 0 var(--s-4);
 }
 .ot-tab {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-decoration: none;
-  color: var(--text-3);
-  padding: 0 var(--s-3);
-  min-height: 44px;
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--s-2);
-  border-bottom: 2px solid transparent;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 60px;
+  padding: 6px 2px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
   margin-bottom: -1px;
-  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
 }
 .ot-tab:hover { color: var(--text-1); }
-.ot-tab.active { color: var(--text-1); border-bottom-color: var(--mark); }
-.ot-tab .n {
-  font-size: 10px;
-  color: var(--text-4);
-  background: var(--paper-1);
+.ot-tab.active { color: var(--text-1); border-bottom-color: var(--mark); font-weight: 600; }
+.ot-tab:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -3px; }
+.ot-tab-icon { position: relative; display: inline-flex; }
+.ot-tab-svg { width: 22px; height: 22px; flex: none; }
+.ot-tab.active .ot-tab-svg { stroke-width: 2.2; }
+.ot-tab-icon .n {
+  position: absolute;
+  top: -6px;
+  left: calc(100% - 7px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
   border-radius: 999px;
-  padding: 1px 6px;
-  letter-spacing: 0.04em;
-}
-.ot-tab.active .n { background: var(--mark-soft); color: var(--text-1); }
-
-/* ── Layout ── */
-.ot-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-4); align-items: start; margin-bottom: var(--s-4); }
-.ot-row > .card { margin-bottom: 0; }
-@media (max-width: 720px) { .ot-row { grid-template-columns: 1fr; } }
-
-.ot-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); flex-wrap: wrap; margin-bottom: var(--s-3); }
-.ot-head .eyebrow { margin-bottom: 0; }
-.ot-head h2 { margin: 0; }
-.ot-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
-.ot-lede { color: var(--text-2); margin: 0 0 var(--s-3); }
-.ot-lede a { text-decoration: none; border-bottom: 1px dotted var(--rule-2); }
-.ot-lede a:hover { border-bottom-color: var(--ink); }
-.ot-lede code { overflow-wrap: anywhere; }
-
-/* Big quiet number */
-.ot-stat .n {
-  font-size: 44px;
+  background: var(--paper-2);
+  color: var(--text-1);
+  font-size: 10px;
   font-weight: 600;
-  line-height: 1.05;
-  letter-spacing: -0.01em;
+  line-height: 18px;
+  letter-spacing: 0;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.ot-stat .sub { color: var(--text-3); margin-top: 2px; }
+.ot-tab.active .ot-tab-icon .n { background: var(--ink); color: var(--paper-0); }
+.ot-tab-label { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 721px) {
+  .ot-tab { flex-direction: row; gap: 12px; min-height: 52px; font-size: 11px; letter-spacing: 0.1em; }
+}
 
-/* ── Tap-sized buttons (field-friendly) ── */
-.btn.ot-btn-tap { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; font-size: 12px; }
-.btn.ot-btn-sm { padding: 4px 9px; font-size: 10px; min-height: 28px; }
+/* ── Buttons ── */
+.btn.ot-btn-tap {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  padding: 0 16px;
+  font-size: 12px;
+}
+.btn.ot-solid { background: var(--ink); color: var(--paper-0); border-color: var(--ink); }
+.btn.ot-solid:hover { background: var(--ink); border-color: var(--ink); opacity: 0.88; }
+.btn.ot-copy { flex: none; }
+.btn.ot-copy[data-copied='true'] { background: var(--ok); color: var(--paper-0); border-color: var(--ok); }
+.btn.ot-btn-danger { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
+.btn.ot-btn-danger:hover { background: var(--danger); border-color: var(--danger); opacity: 0.9; }
+.ot-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.ot-page > .ot-actions { margin-bottom: var(--s-4); }
 
-/* ── Share box: mono URL + Copy ── */
-.ot-share { display: flex; flex-direction: column; gap: var(--s-2); }
-.ot-link-row {
+/* ── A big number with a short label ── */
+.ot-big { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; margin: 0 0 var(--s-3); }
+.ot-big .n { font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.ot-big .lbl { font-size: 17px; color: var(--text-2); }
+.ot-big--sm { margin: 0; }
+.ot-big--sm .n { font-size: 28px; }
+.ot-big--sm .lbl { font-size: 15px; }
+
+/* ── Rows: name first, at most two facts; tap opens in place ── */
+.ot-list { list-style: none; margin: 0 0 var(--s-4); padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.ot-item {
+  background: var(--paper-0);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+.ot-item[data-open] { border-color: var(--ink); }
+.ot-item[data-tone='past'] .ot-row__name { color: var(--text-3); }
+.ot-line { display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-3); }
+.ot-line > .ot-row { flex: 1 1 auto; min-width: 0; }
+.ot-row {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  border: var(--border);
-  border-radius: var(--r-ctrl);
-  background: var(--paper);
-  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  justify-content: space-between;
+  gap: var(--s-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--s-3) var(--s-4);
+  background: none;
+  border: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
-.ot-link-row .label { flex: 0 0 auto; }
-.ot-link {
-  flex: 1 1 auto;
-  min-width: 0;
+a.ot-row:hover, button.ot-row:hover { background: var(--paper-1); }
+.ot-row:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
+.ot-row--static { cursor: default; }
+.ot-row__main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.ot-row__name { font-size: 17px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.ot-row__name.ot-email { font-size: 14px; }
+.ot-row__sub {
+  display: flex;
+  align-items: center;
+  gap: 4px var(--s-2);
+  flex-wrap: wrap;
+  margin: 0;
   font-family: var(--font-mono);
   font-size: 12px;
+  color: var(--text-3);
+}
+/* Separators hang off the end of a fact, so a wrapped line never starts with one */
+.ot-row__sub > span:not(.chip):not(:last-child)::after { content: '·'; margin-left: var(--s-2); }
+/* Stacked facts (Team: email, then "since Oct 21") — one per line, no dots */
+.ot-row__sub--stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+.ot-row__sub--stack > span:not(.chip):not(:last-child)::after { content: none; }
+.ot-row__sub--stack .ot-email { max-width: 100%; }
+.ot-num { font-size: 14px; color: var(--text-1); }
+/* Rows that open in place carry a small chevron */
+.ot-row[aria-expanded]::after {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--text-3);
+  border-bottom: 1.5px solid var(--text-3);
+  transform: rotate(45deg);
+  margin: -4px 2px 0 0;
+}
+.ot-row[aria-expanded='true']::after { transform: rotate(-135deg); margin-top: 4px; }
+
+/* What a row reveals */
+.ot-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  border-top: 1px solid var(--rule);
+}
+.ot-body > p { margin: 0; }
+.ot-body .field { margin-bottom: var(--s-3); }
+.ot-text { white-space: pre-line; color: var(--text-2); margin: 0; }
+.ot-where { color: var(--text-2); overflow-wrap: anywhere; }
+.ot-url {
+  align-self: flex-start;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
   overflow-wrap: anywhere;
-  color: var(--text-1);
   text-decoration: none;
   border-bottom: 1px dotted var(--rule-2);
 }
-.ot-link:hover { border-bottom-color: var(--ink); }
-.ot-link-row .btn { flex: 0 0 auto; min-height: 36px; display: inline-flex; align-items: center; }
-.btn.ot-copy[data-copied='true'] { background: var(--ok); color: var(--paper); border-color: var(--ok); }
-.ot-note { color: var(--text-3); font-size: 13px; margin: 0; }
-.ot-note code { font-family: var(--font-mono); font-size: 11.5px; background: var(--paper-1); padding: 1px 4px; border-radius: 2px; }
-.ot-link-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
-.ot-link-list .ot-link-row .label { min-width: 92px; }
-.ot-link-caption { font-size: 14px; font-weight: 600; margin: 0 0 var(--s-1); }
-@media (max-width: 720px) {
-  .ot-link-row { flex-wrap: wrap; }
-  .ot-link-list .ot-link-row .label { min-width: 100%; }
-}
+.ot-url:hover { color: var(--text-1); border-bottom-color: var(--ink); }
+.ot-email { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; color: inherit; }
+.chip.ot-chip-ghost { color: var(--text-4); border-color: var(--rule); }
+.chip.ot-chip-soon { color: var(--text-1); border-color: var(--ink); }
 
-/* ── Compose ── */
-.ot-compose textarea.input { min-height: 180px; resize: vertical; line-height: 1.5; }
-.ot-compose .ot-foot { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; margin-top: var(--s-2); }
-.ot-hint { font-size: 12.5px; color: var(--text-3); line-height: 1.45; }
-.ot-compose .ot-audience { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--text-3); }
+/* ── "More" — a quiet toggle; what it reveals is only rendered when open ── */
+.ot-more-wrap { margin: var(--s-2) 0 var(--s-4); border-top: 1px solid var(--rule); }
+.ot-more {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 48px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ot-more::before { content: '+'; font-size: 16px; line-height: 1; width: 12px; text-align: center; }
+.ot-more[aria-expanded='true']::before { content: '−'; }
+.ot-more:hover { color: var(--text-1); }
+.ot-more:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+.ot-more-body { display: flex; flex-direction: column; gap: var(--s-5); padding-top: var(--s-2); }
+.ot-compose .ot-more-body, .ot-event-form .ot-more-body { gap: 0; }
+.ot-more-wrap + .ot-more-wrap { margin-top: calc(-1 * var(--s-4)); }
+
+/* Sections inside More */
+.ot-sec { margin: 0; }
+.ot-sec-h {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ot-count { color: var(--text-1); font-weight: 600; letter-spacing: 0.04em; }
+.ot-sec .ot-list { margin-bottom: var(--s-2); }
+
+/* ── Compose / new forms (open in place, under the tabs) ── */
+.ot-compose { border-color: var(--ink); }
+.ot-compose textarea.input { min-height: 160px; resize: vertical; line-height: 1.5; }
+.ot-compose .input { min-height: 44px; }
+.ot-foot { display: flex; align-items: center; gap: var(--s-2) var(--s-3); flex-wrap: wrap; margin-top: var(--s-2); }
+.ot-audience { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; color: var(--text-3); }
+.ot-hint { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); overflow-wrap: anywhere; margin: 0; }
 .ot-confirm {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--s-2) var(--s-3);
   flex-wrap: wrap;
-  background: var(--mark-soft);
-  border: 1px solid var(--mark-deep);
+  width: 100%;
+  background: var(--paper-1);
   border-radius: var(--r-ctrl);
   padding: var(--s-2) var(--s-3);
 }
-.ot-confirm span { font-size: 14px; }
+.ot-confirm > span { font-size: 15px; }
+@media (max-width: 560px) { .ot-confirm > span { flex: 1 1 100%; } }
+.ot-confirm.ot-confirm-danger { background: var(--paper-0); border: 1px solid var(--danger); }
+.ot-check { display: flex; align-items: center; gap: var(--s-3); min-height: 48px; cursor: pointer; margin-bottom: var(--s-2); }
+.ot-check input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--ink); }
+.ot-check input:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 
-/* Blast result — status colour is one rule: sent = ok, queued = mark, failed = danger */
+/* Send result — one line; status colour is one rule: sent = ok, queued = mark, failed = danger */
 .ot-result {
   border: 1px solid var(--rule-2);
   border-left-width: 4px;
   border-radius: var(--r-card);
   background: var(--paper-0);
-  padding: var(--s-3) var(--s-4);
-  margin: var(--s-3) 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
+  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3);
+  margin: 0 0 var(--s-4);
 }
-.ot-result .ot-result-head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-.ot-result .ot-result-head strong { font-size: 15px; }
+.ot-compose .ot-result { margin: var(--s-3) 0 0; }
+.ot-result-head { display: flex; align-items: center; gap: var(--s-2); }
+.ot-result-head strong { font-size: 15px; font-weight: 600; flex: 1 1 auto; min-width: 0; }
 .ot-result[data-status='sent']   { border-color: var(--ok); }
-.ot-result[data-status='queued'] { border-color: var(--mark-deep); background: var(--mark-soft); }
+.ot-result[data-status='queued'] { border-color: var(--mark-deep); }
 .ot-result[data-status='failed'] { border-color: var(--danger); }
-.ot-result .detail { color: var(--text-2); font-size: 14px; }
-.ot-result .provider { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
+.ot-result .provider { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; padding: 0 var(--s-2) var(--s-2) 0; }
 .ot-status-dot {
-  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%;
   background: var(--text-4);
 }
 .ot-status-dot[data-status='sent']   { background: var(--ok); }
 .ot-status-dot[data-status='queued'] { background: var(--mark); box-shadow: inset 0 0 0 1px var(--mark-deep); }
 .ot-status-dot[data-status='failed'] { background: var(--danger); }
 
-/* ── Tables ── */
-.ot-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.table.ot-table td { vertical-align: middle; } /* beats app.css .table td (baseline) */
-.ot-table .when { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ot-table .email { font-family: var(--font-mono); font-size: 12.5px; overflow-wrap: anywhere; }
-.ot-table .act { text-align: right; white-space: nowrap; }
-.ot-table tr.off td { color: var(--text-4); }
-.ot-table tr.off td .email { color: var(--text-4); }
-.ot-table .subject { font-weight: 600; }
-.chip.ot-chip-ghost { color: var(--text-4); border-color: var(--rule); }
-.chip.ot-chip-kind { text-transform: none; letter-spacing: 0.04em; }
-.ot-empty { color: var(--text-3); padding: var(--s-3) 0; font-style: italic; }
-.table td.ot-empty { padding: var(--s-3) var(--s-2); }
-.ot-row-note { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-3); margin-top: 2px; overflow-wrap: anywhere; }
-@media (max-width: 720px) { .ot-table .col-wide { display: none; } }
+/* One-line bits */
+.ot-note { color: var(--text-3); font-size: 14px; margin: 0; }
+.ot-note code, .ot-dev-links code {
+  font-family: var(--font-mono); font-size: 11.5px; background: var(--paper-1);
+  padding: 1px 4px; border-radius: 2px; overflow-wrap: anywhere;
+}
+.ot-empty { font-size: 17px; color: var(--text-2); margin: var(--s-4) 0; }
+.ot-row-note { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
+.ot-pay { display: flex; align-items: center; gap: var(--s-2); margin: 0; font-weight: 600; }
 
-/* Inline add (email + name + button) */
-.ot-inline-add { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--rule); }
+/* Inline add (email + name + button), site link */
+.ot-inline-add { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; margin-top: var(--s-2); }
 .ot-inline-add .field { margin-bottom: 0; flex: 1 1 180px; }
-.ot-inline-add .btn { min-height: 38px; display: inline-flex; align-items: center; }
+.ot-inline-add .input { min-height: 44px; }
 
-/* ── Petitions ── */
-.ot-petitions { list-style: none; margin: 0; padding: 0; }
-.ot-petition { padding: var(--s-3) 0; border-bottom: 1px solid var(--rule); }
-.ot-petition:last-child { border-bottom: 0; }
-.ot-petition-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); flex-wrap: wrap; }
-.ot-petition-head .title { font-size: 17px; font-weight: 600; margin: 0; }
-.ot-petition-head .meta { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-.ot-petition-head .sigs { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
-.ot-petition-head .sigs strong { font-size: 15px; }
-.ot-petition .ot-link-row { margin-top: var(--s-2); }
-.ot-petition .ot-petition-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; margin-top: var(--s-2); }
-.ot-petition.off .title { color: var(--text-3); }
-.ot-body { white-space: pre-line; }
-.ot-expander { margin-top: var(--s-2); border-top: 1px dashed var(--rule); padding-top: var(--s-2); }
-.ot-switch[aria-pressed='true'] { background: var(--ok); color: var(--paper); border-color: var(--ok); }
-.ot-switch[aria-pressed='true']:hover { background: var(--ok); border-color: var(--ok); opacity: 0.9; }
-.ot-slug-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
+/* ── Petition signatures ── */
+.ot-list--flat { gap: 0; margin: 0; }
+.ot-sig { display: flex; flex-direction: column; gap: 2px; padding: var(--s-2) 0; border-bottom: 1px solid var(--rule); }
+.ot-sig:last-child { border-bottom: 0; }
+.ot-sig__name { font-weight: 600; display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; overflow-wrap: anywhere; }
 
-/* ── Website tab ── */
-.ot-site-current { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-bottom: var(--s-2); }
-.ot-site-current a { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
-.ot-site-form { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; }
-.ot-site-form .field { margin-bottom: 0; flex: 1 1 260px; }
-.ot-site-form .btn { min-height: 38px; display: inline-flex; align-items: center; }
+/* ── Events: going / capacity ── */
+.ot-meter { display: flex; flex-direction: column; gap: 4px; max-width: 320px; }
+.ot-meter-n { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.ot-meter-n strong { font-size: 22px; }
+.ot-meter-n .lbl { color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10.5px; }
+.ot-meter-bar { height: 6px; background: var(--paper-1); border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+.ot-meter-bar span { display: block; height: 100%; background: var(--ink); }
+.ot-meter[data-full='true'] .ot-meter-bar span { background: var(--danger); }
 
-.ot-seg { display: inline-flex; border: var(--border-2); border-radius: var(--r-ctrl); overflow: hidden; }
+/* RSVP list: a row per RSVP, status select on the right — no table, so it
+   never scrolls sideways on a phone at the door. */
+.ot-rsvp-sum { display: flex; gap: var(--s-3); flex-wrap: wrap; align-items: baseline; margin: 0; font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ot-rsvps { list-style: none; margin: 0; padding: 0; }
+.ot-rsvp { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) 0; border-bottom: 1px solid var(--rule); }
+.ot-rsvp:last-child { border-bottom: 0; }
+.ot-rsvp .who { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.ot-rsvp .name { font-weight: 600; overflow-wrap: anywhere; }
+.ot-rsvp .name a { text-decoration: none; border-bottom: 1px dotted var(--rule-2); }
+.ot-rsvp .guests { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--text-3); }
+.ot-rsvp .contact { display: flex; gap: var(--s-1) var(--s-3); flex-wrap: wrap; align-items: baseline; }
+.ot-rsvp .ot-email { font-size: 12px; color: var(--text-2); }
+.ot-rsvp .when { font-family: var(--font-mono); font-size: 11px; color: var(--text-4); }
+.ot-rsvp[data-status='cancelled'] .name { color: var(--text-4); text-decoration: line-through; }
+.ot-rsvp[data-status='attended'] .name::after { content: ' ✓'; color: var(--ok); }
+.input.ot-rsvp-status { flex: 0 0 auto; width: auto; min-width: 128px; min-height: 48px; font-family: var(--font-mono); font-size: 12px; }
+
+/* ── Website: embed code for the developer ── */
+.ot-dev-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.ot-dev-links li { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.ot-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: var(--border-2); border-radius: var(--r-ctrl); overflow: hidden; }
 .ot-seg button {
-  min-height: 36px;
+  min-height: 48px;
+  min-width: 0;
   border: 0;
   border-right: 1px solid var(--rule-2);
   background: var(--paper-0);
@@ -206,16 +345,18 @@
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 0 12px;
+  letter-spacing: 0.08em;
+  padding: 0 8px;
   cursor: pointer;
 }
 .ot-seg button:last-child { border-right: 0; }
 .ot-seg button:hover { background: var(--paper-1); }
 .ot-seg button[aria-pressed='true'] { background: var(--ink); color: var(--paper-0); }
 .ot-seg button:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
-
-.ot-pre-wrap { position: relative; margin-top: var(--s-2); }
+.ot-snippet-event { max-width: 480px; margin-bottom: 0; }
+.ot-snippet-event .input { min-height: 48px; }
+.ot-pre-wrap { display: flex; flex-direction: column; gap: var(--s-2); }
+.ot-pre-wrap .ot-copy { align-self: flex-end; }
 .ot-pre {
   margin: 0;
   font-family: var(--font-mono);
@@ -225,90 +366,34 @@
   background: var(--paper);
   border: var(--border);
   border-radius: var(--r-ctrl);
-  padding: var(--s-3) var(--s-3) var(--s-3);
+  padding: var(--s-3);
   overflow-x: auto;
   tab-size: 2;
   max-height: 420px;
 }
-.ot-pre-wrap .ot-copy { position: absolute; top: var(--s-2); right: var(--s-2); }
-/* Phones: the floating Copy would cover the first code line — stack it above. */
-@media (max-width: 720px) {
-  .ot-pre-wrap { display: flex; flex-direction: column; gap: var(--s-2); }
-  .ot-pre-wrap .ot-copy { position: static; align-self: flex-end; }
+
+/* ── Team ── */
+.ot-invite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--s-2);
+  align-items: stretch;
+  margin: 0 0 var(--s-3);
 }
-
-/* ── Events ── */
-.ot-events { list-style: none; margin: 0; padding: 0; }
-.ot-event { padding: var(--s-3) 0; border-bottom: 1px solid var(--rule); }
-.ot-event:last-child { border-bottom: 0; }
-.ot-event-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s-3); flex-wrap: wrap; }
-.ot-event-main { flex: 1 1 260px; min-width: 0; }
-.ot-event-main .title { font-size: 17px; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
-.ot-event-main .when {
-  font-family: var(--font-mono); font-size: 12px; color: var(--text-2);
-  font-variant-numeric: tabular-nums; margin-top: 2px;
-  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+.ot-invite .input { min-height: 48px; }
+.ot-invite .btn { min-height: 48px; }
+@media (max-width: 560px) {
+  .ot-invite { grid-template-columns: minmax(0, 1fr) auto; }
+  .ot-invite .ot-invite__email { grid-column: 1 / -1; }
 }
-.ot-event-main .where { color: var(--text-3); font-size: 14px; margin-top: 2px; overflow-wrap: anywhere; }
-.ot-event.past .title { color: var(--text-2); }
-.ot-event .ot-link-row { margin-top: var(--s-2); }
-.ot-event > .ot-note { margin-top: var(--s-2); }
-.ot-event-desc { margin: var(--s-2) 0 0; font-size: 14px; }
-.ot-event .ot-petition-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; margin-top: var(--s-2); }
+.input.ot-role { width: auto; min-width: 132px; min-height: 48px; font-family: var(--font-mono); font-size: 12px; flex: none; }
+.ot-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.ot-joinlink { display: block; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; color: var(--text-2); }
+.ot-roles { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.ot-roles li { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: baseline; }
+.ot-roles strong { min-width: 96px; }
 
-/* Going / capacity */
-.ot-meter { flex: 0 1 200px; min-width: 150px; display: flex; flex-direction: column; gap: 4px; }
-.ot-meter-n { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
-.ot-meter-n strong { font-size: 18px; }
-.ot-meter-n .of { color: var(--text-3); }
-.ot-meter-n .lbl { color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
-.ot-meter-bar { height: 6px; background: var(--paper-1); border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
-.ot-meter-bar span { display: block; height: 100%; background: var(--mark); }
-.ot-meter[data-full='true'] .ot-meter-bar span { background: var(--danger); }
-.ot-meter-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); letter-spacing: 0.04em; }
-@media (max-width: 720px) { .ot-meter { flex: 1 1 100%; } }
-
-/* RSVP list: a row per RSVP, status select on the right — no table, so it
-   never scrolls sideways on a phone at the door. */
-.ot-rsvp-sum { display: flex; gap: var(--s-3); flex-wrap: wrap; align-items: baseline; margin: 0 0 var(--s-2); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
-.ot-rsvp-sum .muted { font-size: 11px; }
-.ot-rsvps { list-style: none; margin: 0; padding: 0; }
-.ot-rsvp { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) 0; border-bottom: 1px solid var(--rule); }
-.ot-rsvp:last-child { border-bottom: 0; }
-.ot-rsvp .who { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
-.ot-rsvp .name { font-weight: 600; overflow-wrap: anywhere; }
-.ot-rsvp .name a { text-decoration: none; border-bottom: 1px dotted var(--rule-2); }
-.ot-rsvp .guests { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--text-3); }
-.ot-rsvp .contact { display: flex; gap: var(--s-1) var(--s-3); flex-wrap: wrap; align-items: baseline; }
-.ot-rsvp .email { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
-.ot-rsvp .when { font-family: var(--font-mono); font-size: 11px; color: var(--text-4); }
-.ot-rsvp[data-status='cancelled'] .name { color: var(--text-4); text-decoration: line-through; }
-.ot-rsvp[data-status='attended'] .name::after { content: ' ✓'; color: var(--ok); }
-.input.ot-rsvp-status { flex: 0 0 auto; width: auto; min-width: 128px; min-height: 44px; font-family: var(--font-mono); font-size: 12px; }
-
-/* Event form (a card when new, bare inside the row when editing) */
-.ot-event-form > .eyebrow { display: block; margin-bottom: var(--s-2); }
-li .ot-event-form { margin-top: var(--s-3); padding: var(--s-3); border: 1px dashed var(--rule-2); border-radius: var(--r-card); background: var(--paper); }
-.ot-check { display: flex; align-items: flex-start; gap: var(--s-2); min-height: 44px; padding: var(--s-2) 0; cursor: pointer; margin-bottom: var(--s-2); }
-.ot-check input { width: 20px; height: 20px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--ink); }
-.ot-check input:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
-
-/* Destructive confirm */
-.ot-confirm.ot-confirm-danger { background: var(--paper-0); border-color: var(--danger); }
-.btn.ot-btn-danger { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
-.btn.ot-btn-danger:hover { background: var(--danger); border-color: var(--danger); opacity: 0.9; }
-
-/* ── Donations (Website tab) ── */
-.ot-pay { display: flex; align-items: center; gap: var(--s-2); margin: var(--s-3) 0 var(--s-1); font-weight: 600; }
-.ot-donate-note { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--rule); }
-.ot-donate-note textarea.input { resize: vertical; min-height: 84px; line-height: 1.5; }
-.ot-donate-note .eyebrow { display: block; }
-a.ot-note { text-decoration: none; border-bottom: 1px dotted var(--rule-2); }
-a.ot-note:hover { color: var(--text-1); border-bottom-color: var(--ink); }
-.ot-snippet-event { max-width: 480px; margin-bottom: var(--s-2); }
-.ot-snippet-event .input { min-height: 40px; }
-
-/* ── Money: the pledge queue (Money.jsx imports this file for these) ── */
+/* ── Money: the pledge queue (pl-*) ── */
 .pl-list { list-style: none; margin: 0; padding: 0; }
 .pl-row { padding: var(--s-3) 0; border-bottom: 1px solid var(--rule); }
 .pl-row:last-child { border-bottom: 0; }
@@ -343,17 +428,9 @@ a.ot-note:hover { color: var(--text-1); border-bottom-color: var(--ink); }
 
 /* ── Toast: keep above the phone tab bar ── */
 .toast.ot-toast { max-width: calc(100vw - 32px); text-align: center; }
-@media (max-width: 720px) { .toast.ot-toast { bottom: calc(56px + env(safe-area-inset-bottom) + var(--s-3)); } }
+@media (max-width: 720px) { .toast.ot-toast { bottom: calc(60px + env(safe-area-inset-bottom) + var(--s-3)); } }
 
-/* ── Touch screens: every control gets a full 44px target ── */
-@media (pointer: coarse) {
-  .btn.ot-btn-sm,
-  .ot-link-row .btn,
-  .ot-seg button,
-  .ot-inline-add .btn,
-  .ot-site-form .btn,
-  .toast.ot-toast .btn,
-  .ot-snippet-event .input { min-height: 44px; }
-  .btn.ot-btn-sm { padding: 0 14px; font-size: 11px; }
-  .ot-tab { min-height: 48px; }
+/* ── Touch screens: fingers, not cursors ── */
+@media (pointer: coarse), (max-width: 720px) {
+  .ot-compose .input, .ot-inline-add .input { min-height: 48px; }
 }

@@ -1,16 +1,21 @@
-// Money — the gift ledger. Type-ahead donor picker (never type IDs),
-// dollars in / cents on the wire, compliance banner on cap crossings,
-// optimistic void with a 7s UNDO toast, cursor-paginated load more.
-// Above the ledger: online pledges from the donate page, to mark received
-// (→ a gift, cap-checked) or cancel.
+// Money — what came in, and what needs the desk.
+//   Top: one big "Raised this year" number, then "Needs you": pledges from the
+//   donate page to mark received (→ a gift, cap-checked) or cancel, and gifts
+//   flagged over the contribution limit.
+//   One yellow "Log a gift" (?new=1; ?person=<id> preselects the donor):
+//   donor, amount, date — method, cadence and note under "More details".
+//   Type-ahead donor picker (never type IDs); a compliance banner on a cap crossing.
+//   The ledger: rows of donor, amount, date (+ monthly / flagged chips). Tap a
+//   row for method, note, the donor's profile and Void (optimistic, 7s Undo).
+//   Under "More": the donate page link and paid & closed pledges.
+//   Dollars on screen, integer cents on the wire; cursor-paginated load more.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   useInfiniteQuery, useQuery, useQueryClient, keepPreviousData,
 } from '@tanstack/react-query';
 import { apiGet, action, fmtMoney, fmtDate, todayISO, dollarsToCents } from '../api.js';
-import './people.css';
-import './outreach.css'; // shared ot-* helpers + the pl-* pledge queue styles
+import './shifts.css';
 
 // gift.log / gift.void / gift.restore and GET /records/* are desk-only
 // (server: MONEY_ROLES; volunteers get 403 on both reads and writes).
@@ -21,6 +26,24 @@ const CADENCES = [
   { code: 'one-time', label: 'One-time' },
   { code: 'monthly', label: 'Monthly' },
 ];
+// The ledger opens on the latest few; the rest is one tap ("All gifts").
+const LATEST = 3;
+
+// "$3,325" for the big number; rows keep the cents.
+const fmtBig = (cents) => fmtMoney(cents).replace(/\.00$/, '');
+// "Aug 2" (this year) or "Aug 2, 2025"
+const shortDate = (value) => {
+  const [y, m, d] = fmtDate(value).split('-').map(Number);
+  if (!y || !m || !d) return fmtDate(value);
+  const date = new Date(y, m - 1, d);
+  const opts = { month: 'short', day: 'numeric' };
+  if (y !== new Date().getFullYear()) opts.year = 'numeric';
+  return date.toLocaleDateString('en-CA', opts);
+};
+const localDay = (ts) => {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? fmtDate(ts) : shortDate(d.toLocaleDateString('en-CA'));
+};
 
 // ── Donor picker: type-ahead against /api/persons?q=, arrow keys, inline create ──
 function DonorPicker({ value, onChange }) {
@@ -90,15 +113,15 @@ function DonorPicker({ value, onChange }) {
 
   if (value) {
     return (
-      <div>
-        <span className="chip">{value.name}</span>{' '}
-        <button type="button" className="btn btn-quiet" onClick={() => onChange(null)}>Change donor</button>
+      <div className="ops-picked">
+        <span className="chip ops-chip-lg">{value.name}</span>
+        <button type="button" className="btn btn-quiet ops-tap" onClick={() => onChange(null)}>Change</button>
       </div>
     );
   }
 
   return (
-    <div className="picker" ref={boxRef}>
+    <div className="picker ops-picker" ref={boxRef}>
       <input
         id="gift-donor"
         className="input"
@@ -125,7 +148,7 @@ function DonorPicker({ value, onChange }) {
               onMouseDown={(e) => { e.preventDefault(); choose(item); }}
             >
               {item.id === '__create__'
-                ? <>+ Create new person “{item.name}”</>
+                ? <>+ Add new person “{item.name}”</>
                 : <>{item.name}{item.email && <span className="meta">{item.email}</span>}</>}
             </li>
           ))}
@@ -136,7 +159,7 @@ function DonorPicker({ value, onChange }) {
   );
 }
 
-// ── Log-a-gift form ──
+// ── Log a gift: donor, amount, date — the rest under "More details" ──
 function GiftForm({ presetPersonId, onSaved, onClose }) {
   const [donor, setDonor] = useState(null);
   const [amount, setAmount] = useState('');
@@ -144,6 +167,7 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
   const [method, setMethod] = useState('');
   const [cadence, setCadence] = useState('one-time');
   const [note, setNote] = useState('');
+  const [more, setMore] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -160,10 +184,10 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
     e.preventDefault();
     setError(null);
     const cents = dollarsToCents(amount);
-    if (!donor) { setError('pick a donor first'); return; }
-    if (cents === null) { setError('enter an amount in dollars, like 50 or 49.99'); return; }
+    if (!donor) { setError('Pick a donor first'); return; }
+    if (cents === null) { setError('Enter dollars, like 50 or 49.99'); return; }
     // amount_cents is z.number().int().nonnegative(); a $0 gift is never intended.
-    if (cents === 0) { setError('the amount must be more than $0'); return; }
+    if (cents === 0) { setError('The amount must be more than $0'); return; }
     setBusy(true);
     try {
       const res = await action('gift.log', {
@@ -182,8 +206,7 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
   };
 
   return (
-    <form className="card" onSubmit={submit}>
-      <span className="eyebrow">Log a gift</span>
+    <form className="card ops-form" onSubmit={submit} aria-label="Log a gift">
       <div className="field">
         <label htmlFor="gift-donor">Donor</label>
         <DonorPicker value={donor} onChange={setDonor} />
@@ -199,27 +222,41 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
           <input id="gift-date" className="input mono" type="date" required
             value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
-        <div className="field">
-          <label htmlFor="gift-method">Method</label>
-          <select id="gift-method" className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option value="">—</option>
-            {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="gift-cadence">Cadence</label>
-          <select id="gift-cadence" className="input" value={cadence} onChange={(e) => setCadence(e.target.value)}>
-            {CADENCES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-          </select>
-        </div>
       </div>
-      <div className="field">
-        <label htmlFor="gift-note">Note</label>
-        <input id="gift-note" className="input" maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} />
+
+      <button type="button" className="ops-more" aria-expanded={more} aria-controls="gift-more"
+        onClick={() => setMore((v) => !v)}>
+        More details
+      </button>
+      {more && (
+        <div id="gift-more" className="ops-more-body">
+          <div className="form-row">
+            <div className="field">
+              <label htmlFor="gift-method">Method</label>
+              <select id="gift-method" className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="">—</option>
+                {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="gift-cadence">Cadence</label>
+              <select id="gift-cadence" className="input" value={cadence} onChange={(e) => setCadence(e.target.value)}>
+                {CADENCES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="gift-note">Note</label>
+            <input id="gift-note" className="input" maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+        </div>
+      )}
+
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="ops-actions">
+        <button type="submit" className="btn btn-primary ops-tap" disabled={busy}>{busy ? 'Saving…' : 'Save gift'}</button>
+        <button type="button" className="btn btn-quiet ops-tap" onClick={onClose}>Cancel</button>
       </div>
-      {error && <p className="error">{error}</p>}
-      <button type="submit" className="btn btn-primary" disabled={busy}>Save gift</button>{' '}
-      <button type="button" className="btn btn-quiet" onClick={onClose}>Cancel</button>
     </form>
   );
 }
@@ -229,21 +266,19 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
 // confirms payment, or when the treasurer marks it received here (e-transfer,
 // cheque…). Receiving runs the same cap check as a desk gift.
 const OPEN_PLEDGE = new Set(['pledged', 'pending']);
-const localDay = (ts) => {
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? fmtDate(ts) : d.toLocaleDateString('en-CA');
-};
 const PLEDGE_STATUS = {
   pledged:   { label: 'pledged', cls: 'chip chip-warn', title: 'Waiting for the donor to send it' },
   pending:   { label: 'card pending', cls: 'chip chip-warn', title: 'Started card checkout; Stripe has not confirmed payment' },
   paid:      { label: 'paid by card', cls: 'chip chip-ok', title: 'Stripe confirmed payment' },
   received:  { label: 'received', cls: 'chip chip-ok', title: 'Marked received at the desk' },
-  cancelled: { label: 'cancelled', cls: 'chip chip-ghost', title: 'Cancelled — no gift recorded' },
+  cancelled: { label: 'cancelled', cls: 'chip ops-chip-muted', title: 'Cancelled — no gift recorded' },
 };
 const PledgeStatus = ({ status }) => {
   const s = PLEDGE_STATUS[status] || { label: status, cls: 'chip' };
   return <span className={s.cls} title={s.title}>{s.label}</span>;
 };
+// A plain fact, so a quiet outline chip — yellow is kept for problems.
+const MonthlyChip = () => <span className="chip">monthly</span>;
 
 function PledgeRow({ p, onReceived, onChanged }) {
   const [mode, setMode] = useState(null); // null | 'receive' | 'cancel'
@@ -278,41 +313,33 @@ function PledgeRow({ p, onReceived, onChanged }) {
     }
   };
 
+  const back = () => { setMode(null); setError(null); };
   const idp = `pl-${p.id.slice(0, 8)}`;
   return (
-    <li className="pl-row">
-      <div className="pl-main">
-        <div className="pl-who">
-          <span className="name">{p.person_id ? <Link to={`/people/${p.person_id}`}>{p.name}</Link> : p.name}</span>
-          <span className="email">{p.email}</span>
-        </div>
-        <div className="pl-amt">
-          <strong>{fmtMoney(p.amount_cents)}</strong>
-          {p.cadence === 'monthly'
-            ? <span className="chip chip-mark">monthly</span>
-            : <span className="chip chip-ghost">one-time</span>}
-        </div>
-      </div>
-      <div className="pl-meta">
-        <span>{localDay(p.created_at)}</span>
-        <PledgeStatus status={p.status} />
+    <li className="ops-item">
+      <div className="ops-row ops-row--static">
+        <span className="ops-row__main">
+          <span className="ops-row__name">{p.person_id ? <Link to={`/people/${p.person_id}`}>{p.name}</Link> : p.name}</span>
+          <span className="ops-row__sub">
+            {localDay(p.created_at)}
+            {p.cadence === 'monthly' && <MonthlyChip />}
+            {p.status !== 'pledged' && <PledgeStatus status={p.status} />}
+          </span>
+        </span>
+        <span className="ops-row__end"><span className="ops-row__amt">{fmtMoney(p.amount_cents)}</span></span>
       </div>
 
       {open && mode === null && (
-        <div className="pl-actions">
-          <button type="button" className="btn btn-primary ot-btn-tap" onClick={() => setMode('receive')}>Mark received</button>
-          <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => setMode('cancel')}>Cancel</button>
+        <div className="ops-pledge-acts">
+          <button type="button" className="btn ops-tap" onClick={() => setMode('receive')}>Received</button>
+          <button type="button" className="btn btn-quiet ops-tap" onClick={() => setMode('cancel')}>Cancel</button>
         </div>
       )}
 
       {open && mode === 'receive' && (
-        <form className="pl-receive" onSubmit={receive}>
-          {p.status === 'pending' && (
-            <p className="ot-note">They started paying by card. Only mark it received if the money came another way.</p>
-          )}
-          {p.cadence === 'monthly' && (
-            <p className="ot-note">Records this month’s gift and closes the pledge. Log later months in the ledger.</p>
-          )}
+        <form className="ops-body" onSubmit={receive} aria-label={`Mark ${p.name}’s pledge received`}>
+          {p.status === 'pending' && <p className="ops-meta">Card checkout started — only if paid another way.</p>}
+          {p.cadence === 'monthly' && <p className="ops-meta">Records this month’s gift only.</p>}
           <div className="form-row">
             <div className="field">
               <label htmlFor={`${idp}-method`}>Paid by</label>
@@ -327,23 +354,23 @@ function PledgeRow({ p, onReceived, onChanged }) {
             </div>
           </div>
           {error && <p className="error" role="alert">{error}</p>}
-          <div className="pl-actions">
-            <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy || !date}>
-              {busy ? 'Saving…' : `Record ${fmtMoney(p.amount_cents)} gift`}
+          <div className="ops-actions">
+            <button type="submit" className="btn ops-solid ops-tap" disabled={busy || !date}>
+              {busy ? 'Saving…' : `Record ${fmtMoney(p.amount_cents)}`}
             </button>
-            <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={() => { setMode(null); setError(null); }}>Back</button>
+            <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={back}>Back</button>
           </div>
         </form>
       )}
 
       {open && mode === 'cancel' && (
-        <div className="pl-actions">
-          <div className="ot-confirm ot-confirm-danger" role="group" aria-label="Confirm cancel">
-            <span>Cancel {p.name}’s {fmtMoney(p.amount_cents)} pledge? No gift is recorded.</span>
-            <button type="button" className="btn ot-btn-tap ot-btn-danger" disabled={busy} onClick={cancel}>
-              {busy ? 'Cancelling…' : 'Yes, cancel it'}
+        <div className="ops-body">
+          <div className="ops-confirm" role="group" aria-label="Confirm cancel">
+            <span>Cancel this pledge?</span>
+            <button type="button" className="btn ops-danger ops-tap" disabled={busy} onClick={cancel}>
+              {busy ? 'Cancelling…' : 'Yes'}
             </button>
-            <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={() => { setMode(null); setError(null); }}>Keep it</button>
+            <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={back}>No</button>
           </div>
           {error && <p className="error" role="alert">{error}</p>}
         </div>
@@ -352,78 +379,65 @@ function PledgeRow({ p, onReceived, onChanged }) {
   );
 }
 
-function Pledges({ onBanner }) {
-  const queryClient = useQueryClient();
-  const pledges = useQuery({ queryKey: ['pledges'], queryFn: () => apiGet('/pledges') });
-  const [result, setResult] = useState(null);
-  const all = pledges.data?.pledges ?? [];
-  const open = all.filter((p) => OPEN_PLEDGE.has(p.status));
-  const closed = all.filter((p) => !OPEN_PLEDGE.has(p.status));
-  const openCents = open.reduce((n, p) => n + (p.amount_cents || 0), 0);
-  const slug = pledges.data?.slug;
-
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['pledges'] });
-    queryClient.invalidateQueries({ queryKey: ['records', 'gift'] });
-    queryClient.invalidateQueries({ queryKey: ['brief'] });
-    queryClient.invalidateQueries({ queryKey: ['person'] });
-  };
-
-  const onReceived = (res, p) => {
-    const g = res.gift || {};
-    setResult({
-      text: `Recorded ${fmtMoney(g.amount_cents ?? p.amount_cents)} from ${p.name} — ${g.method || 'received'}, ${fmtDate(g.date)}. It’s in the ledger below.`,
-      flagged: !!g.flagged,
-    });
-    onBanner(res.compliance?.over ? g.flag_reason : null);
-    refresh();
-  };
-  const onChanged = (text) => {
-    setResult({ text, flagged: false });
-    refresh();
-  };
-
-  // Nothing to show until the donate page has been used at least once.
-  if (pledges.isSuccess && all.length === 0) {
-    return (
-      <p className="ot-note" style={{ marginBottom: 'var(--s-4)' }}>
-        No online pledges yet. Share the donate page{slug ? <> (<span className="mono">/d/{slug}</span>)</> : null} — set it up under{' '}
-        <Link to="/outreach/website">Outreach → Website</Link>.
-      </p>
-    );
-  }
-
+// ── A gift over the limit (from the brief); tap for the reason ──
+function FlaggedRow({ f, personId }) {
+  const [open, setOpen] = useState(false);
+  const bodyId = `fl-${f.id}`;
   return (
-    <section className="card" aria-labelledby="pl-head">
-      <div className="ot-head">
-        <span className="eyebrow" id="pl-head">Pledges to confirm</span>
-        <span className="ot-note">
-          {pledges.isPending ? 'Loading…' : open.length ? `${open.length} open · ${fmtMoney(openCents)}` : 'all caught up'}
+    <li className="ops-item">
+      <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((v) => !v)}>
+        <span className="ops-row__main">
+          <span className="ops-row__name">{f.donor}</span>
+          <span className="ops-row__sub">{shortDate(f.date)}<span className="chip chip-warn">over limit</span></span>
         </span>
-      </div>
-      {pledges.isError && <p className="error">{pledges.error.message}</p>}
-      {result && (
-        <div className="pl-result" role="status">
-          <span>{result.text}{result.flagged ? ' Flagged — see the banner above.' : ''}</span>
-          <button type="button" className="btn btn-quiet" onClick={() => setResult(null)}>Dismiss</button>
+        <span className="ops-row__end"><span className="ops-row__amt">{fmtMoney(f.amount_cents)}</span></span>
+      </button>
+      {open && (
+        <div className="ops-body" id={bodyId}>
+          {f.flag_reason && <p>{f.flag_reason}</p>}
+          {personId && (
+            <div className="ops-actions">
+              <Link className="btn btn-quiet ops-tap ops-link" to={`/people/${personId}`}>Donor</Link>
+            </div>
+          )}
         </div>
       )}
-      {open.length > 0 ? (
-        <ul className="pl-list">
-          {open.map((p) => <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onChanged} />)}
-        </ul>
-      ) : pledges.isSuccess && (
-        <p className="ot-note">No pledges waiting. New ones from the donate page show up here.</p>
+    </li>
+  );
+}
+
+// ── One ledger row; tap for method, note, donor and Void ──
+function GiftRow({ g, open, onToggle, onVoid }) {
+  const bodyId = `gift-${g.id}`;
+  return (
+    <li className="ops-item" data-open={open ? '' : undefined}>
+      <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
+        <span className="ops-row__main">
+          <span className="ops-row__name">{g.person_name ?? '…'}</span>
+          <span className="ops-row__sub">
+            {shortDate(g.date)}
+            {g.cadence === 'monthly' && <MonthlyChip />}
+            {g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}
+          </span>
+        </span>
+        <span className="ops-row__end"><span className="ops-row__amt">{fmtMoney(g.amount_cents)}</span></span>
+      </button>
+      {open && (
+        <div className="ops-body" id={bodyId}>
+          {(g.method || g.note) && (
+            <p className="ops-chips">
+              {g.method && <span className="chip">{g.method}</span>}
+              {g.note && <span className="ops-meta">{g.note}</span>}
+            </p>
+          )}
+          {g.flagged && g.flag_reason && <p className="ops-meta">{g.flag_reason}</p>}
+          <div className="ops-actions">
+            <Link className="btn btn-quiet ops-tap ops-link" to={`/people/${g.person_id}`}>Donor</Link>
+            <button type="button" className="btn btn-quiet ops-tap" onClick={onVoid}>Void</button>
+          </div>
+        </div>
       )}
-      {closed.length > 0 && (
-        <details className="pl-history">
-          <summary>Paid &amp; closed ({closed.length})</summary>
-          <ul className="pl-list">
-            {closed.map((p) => <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onChanged} />)}
-          </ul>
-        </details>
-      )}
-    </section>
+    </li>
   );
 }
 
@@ -440,6 +454,10 @@ export default function Money() {
   const [voided, setVoided] = useState(() => new Set());
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [pledgeNote, setPledgeNote] = useState(null);
+  const [more, setMore] = useState(false);
+  const [allGifts, setAllGifts] = useState(false);
   const toastTimer = useRef(null);
 
   const gifts = useInfiniteQuery({
@@ -450,16 +468,45 @@ export default function Money() {
     getNextPageParam: (last) => last?.next ?? undefined,
     enabled: canMoney,
   });
+  const pledges = useQuery({ queryKey: ['pledges'], queryFn: () => apiGet('/pledges'), enabled: canMoney });
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), enabled: canMoney });
 
-  const rows = (gifts.data?.pages ?? []).flatMap((p) => p?.records ?? []).filter((g) => !voided.has(g.id));
+  // Newest gift date first (the ledger itself pages in entry order).
+  const rows = (gifts.data?.pages ?? []).flatMap((p) => p?.records ?? []).filter((g) => !voided.has(g.id))
+    .sort((a, b) => fmtDate(b.date).localeCompare(fmtDate(a.date)));
+  const allPledges = pledges.data?.pledges ?? [];
+  const openPledges = allPledges.filter((p) => OPEN_PLEDGE.has(p.status));
+  const closedPledges = allPledges.filter((p) => !OPEN_PLEDGE.has(p.status));
+  const flagged = (brief.data?.flagged ?? []).filter((f) => !voided.has(f.id));
+  // The latest few skip gifts already listed under "Needs you"; "All gifts" shows every one.
+  const flaggedIds = new Set(flagged.map((f) => f.id));
+  const latest = rows.filter((g) => !flaggedIds.has(g.id)).slice(0, LATEST);
+  const personOf = Object.fromEntries(rows.map((g) => [g.id, g.person_id]));
+  const slug = pledges.data?.slug;
 
-  // Donor names arrive joined on each ledger row (person_name).
-  const donorName = Object.fromEntries(rows.map((g) => [g.person_id, g.person_name]));
+  // The big number: this calendar year from the ledger once it's all loaded;
+  // until then (or past one page) the brief's running total.
+  const year = String(new Date().getFullYear());
+  const allLoaded = gifts.isSuccess && !gifts.hasNextPage;
+  let raised = null;
+  if (allLoaded) {
+    raised = {
+      label: 'Raised this year',
+      cents: rows.filter((g) => fmtDate(g.date).startsWith(year)).reduce((n, g) => n + (Number(g.amount_cents) || 0), 0),
+    };
+  } else if (brief.data?.money) {
+    raised = { label: 'Raised so far', cents: brief.data.money.totalCents };
+  }
+  const weekCents = brief.data?.money?.weekCents ?? 0;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['records', 'gift'] });
     queryClient.invalidateQueries({ queryKey: ['brief'] });
     queryClient.invalidateQueries({ queryKey: ['person'] });
+  };
+  const refreshPledges = () => {
+    queryClient.invalidateQueries({ queryKey: ['pledges'] });
+    invalidate();
   };
 
   const onSaved = (res) => {
@@ -468,8 +515,20 @@ export default function Money() {
     invalidate();
   };
 
+  const onReceived = (res, p) => {
+    const g = res.gift || {};
+    setPledgeNote(`Recorded ${fmtMoney(g.amount_cents ?? p.amount_cents)} from ${p.name}${g.flagged ? ' — flagged' : ''}`);
+    setBanner(res.compliance?.over ? g.flag_reason : null);
+    refreshPledges();
+  };
+  const onPledgeChanged = (text) => {
+    setPledgeNote(text);
+    refreshPledges();
+  };
+
   const voidGift = async (id) => {
     setError(null);
+    setOpenId(null);
     setVoided((s) => new Set(s).add(id)); // optimistic remove
     clearTimeout(toastTimer.current);
     setToast({ id });
@@ -503,24 +562,23 @@ export default function Money() {
 
   if (!canMoney) {
     return (
-      <>
-        <div className="page-head"><h1>Money</h1></div>
-        <p className="muted">
-          Gifts and contribution limits are handled by the campaign desk (manager, treasurer, staff).
-          If someone hands you a donation, note it on their profile and let the desk know.
-        </p>
-      </>
+      <div className="ops-page">
+        <div className="ops-head"><h1>Money</h1></div>
+        <p className="ops-empty">Handed a donation? Tell the campaign desk.</p>
+      </div>
     );
   }
 
+  const needs = openPledges.length + flagged.length;
+
   return (
-    <>
-      <div className="page-head">
+    <div className="ops-page">
+      <div className="ops-head">
         <h1>Money</h1>
-        <div className="head-actions">
-          <Link className="btn btn-quiet" to="/filings">Filings →</Link>
+        <div className="ops-head__actions">
+          <Link className="btn btn-quiet ops-tap" to="/filings">Filings</Link>
           {!showNew && (
-            <button type="button" className="btn btn-primary" onClick={() => setParams({ new: '1' })}>
+            <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>
               Log a gift
             </button>
           )}
@@ -529,8 +587,8 @@ export default function Money() {
 
       {banner && (
         <div className="banner" role="status">
-          <span><strong>Over the contribution limit.</strong> {banner}</span>
-          <button type="button" className="btn btn-quiet" onClick={() => setBanner(null)}>Dismiss</button>
+          <span><strong>Over the limit.</strong> {banner}</span>
+          <button type="button" className="btn btn-quiet ops-tap" onClick={() => setBanner(null)}>Dismiss</button>
         </div>
       )}
 
@@ -538,60 +596,89 @@ export default function Money() {
         <GiftForm presetPersonId={presetPersonId} onSaved={onSaved} onClose={() => setParams({})} />
       )}
 
-      <Pledges onBanner={setBanner} />
-
-      <span className="eyebrow" style={{ display: 'block', marginBottom: 'var(--s-2)' }}>Gift ledger</span>
-
-      {error && <p className="error">{error}</p>}
-      {gifts.isError && <p className="error">{gifts.error.message}</p>}
-
-      <div className="ot-scroll">
-        <table className="table">
-          <thead>
-            <tr><th>Date</th><th>Donor</th><th className="num">Amount</th><th>Method</th><th>Cadence</th><th></th><th></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((g) => (
-              <tr key={g.id}>
-                <td className="mono">{fmtDate(g.date)}</td>
-                <td>
-                  <Link to={`/people/${g.person_id}`}>{donorName[g.person_id] ?? '…'}</Link>
-                </td>
-                <td className="num">{fmtMoney(g.amount_cents)}</td>
-                <td>{g.method ? <span className="chip">{g.method}</span> : <span className="muted">—</span>}</td>
-                <td>
-                  {g.cadence === 'monthly'
-                    ? <span className="chip chip-mark">monthly</span>
-                    : <span className="chip chip-ghost">one-time</span>}
-                </td>
-                <td>{g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}</td>
-                <td>
-                  <button type="button" className="btn btn-quiet" onClick={() => voidGift(g.id)}>Void</button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && !gifts.isPending && (
-              <tr><td colSpan={7} className="muted">No gifts yet — press “n” anywhere to log one.</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="ops-hero">
+        <span className="eyebrow">{raised?.label ?? 'Raised'}</span>
+        <span className="n">{raised ? fmtBig(raised.cents) : '—'}</span>
+        {weekCents > 0 && <span className="sub">+{fmtBig(weekCents)} this week</span>}
       </div>
 
-      {gifts.hasNextPage && (
-        <p>
-          <button type="button" className="btn" disabled={gifts.isFetchingNextPage}
+      {pledgeNote && <p className="ops-done" role="status">✓ {pledgeNote}</p>}
+      {pledges.isError && <p className="error">{pledges.error.message}</p>}
+      {needs > 0 && (
+        <section className="ops-needs" aria-labelledby="needs-head">
+          <span className="eyebrow" id="needs-head">Needs you · {needs}</span>
+          <ul className="ops-rows">
+            {openPledges.map((p) => (
+              <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onPledgeChanged} />
+            ))}
+            {flagged.map((f) => <FlaggedRow key={f.id} f={f} personId={personOf[f.id]} />)}
+          </ul>
+        </section>
+      )}
+
+      <span className="eyebrow ops-label">Gifts</span>
+      {error && <p className="error">{error}</p>}
+      {gifts.isError && <p className="error">{gifts.error.message}</p>}
+      {rows.length === 0 && gifts.isSuccess && <p className="ops-empty">No gifts yet.</p>}
+      {rows.length > 0 && (
+        <ul className="ops-rows" id="gift-list">
+          {(allGifts ? rows : latest).map((g) => (
+            <GiftRow
+              key={g.id}
+              g={g}
+              open={openId === g.id}
+              onToggle={() => setOpenId((cur) => (cur === g.id ? null : g.id))}
+              onVoid={() => voidGift(g.id)}
+            />
+          ))}
+        </ul>
+      )}
+      {(rows.length > latest.length || gifts.hasNextPage) && (
+        <button type="button" className="ops-more" aria-expanded={allGifts} aria-controls="gift-list"
+          onClick={() => setAllGifts((v) => !v)}>
+          All gifts · {gifts.hasNextPage ? `${rows.length}+` : rows.length}
+        </button>
+      )}
+      {allGifts && gifts.hasNextPage && (
+        <div className="ops-actions">
+          <button type="button" className="btn ops-tap" disabled={gifts.isFetchingNextPage}
             onClick={() => gifts.fetchNextPage()}>
             {gifts.isFetchingNextPage ? 'Loading…' : 'Load more'}
           </button>
-        </p>
-      )}
-
-      {toast && (
-        <div className="toast" role="status">
-          <span>Gift voided</span>
-          <button type="button" className="btn" onClick={undoVoid}>Undo</button>
         </div>
       )}
-    </>
+
+      <div className="ops-foot">
+        <button type="button" className="ops-more" aria-expanded={more} aria-controls="money-more"
+          onClick={() => setMore((v) => !v)}>
+          More
+        </button>
+        {more && (
+          <div id="money-more" className="ops-more-body">
+            <p>
+              Donate page{slug ? <>: <a className="mono" href={`/d/${slug}`} target="_blank" rel="noopener noreferrer">/d/{slug}</a></> : null}
+              {' · '}<Link to="/outreach/website">Set up</Link>
+            </p>
+            {closedPledges.length > 0 && (
+              <>
+                <span className="eyebrow ops-label">Paid &amp; closed pledges · {closedPledges.length}</span>
+                <ul className="ops-rows">
+                  {closedPledges.map((p) => (
+                    <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onPledgeChanged} />
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {toast && (
+        <div className="toast ops-toast" role="status">
+          <span>Gift voided</span>
+          <button type="button" className="btn ops-tap" onClick={undoVoid}>Undo</button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -41,7 +41,10 @@
   --border: 1px solid var(--rule);
   --border-2: 1px solid var(--rule-2);
   --border-ink: 1px solid var(--ink);
-  --max-w: 960px;
+  /* One column for every screen (Map is the only full-width one). --max-w is
+     the column plus its side gutters, for the nav and page boxes. */
+  --page-w: 720px;
+  --max-w: calc(var(--page-w) + 2 * var(--s-4));
 }
 
 @media (prefers-color-scheme: dark) {
@@ -273,11 +276,49 @@ h2 { font-size: 18px; }
 .nav .links a.active { color: var(--text-1); border-bottom-color: var(--mark); }
 .spacer { flex: 1; }
 .nav .ws { font-size: 13px; color: var(--text-3); font-style: italic; }
+
+/* Account menu: the avatar opens name · campaign · Team · Sign out */
+.acct { position: relative; }
+.acct-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; padding: 0; margin: 0 calc(-1 * var(--s-2));
+  background: none; border: 0; border-radius: 50%; cursor: pointer; color: inherit;
+}
+.acct-btn:hover .avatar, .acct-btn[aria-expanded='true'] .avatar { background: var(--mark); color: var(--mark-ink); border-color: var(--mark-deep); }
+.acct-btn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
+.acct-panel {
+  position: absolute; right: calc(-1 * var(--s-2)); top: calc(100% + 4px); z-index: 960;
+  min-width: 220px; max-width: calc(100vw - 2 * var(--s-4));
+  background: var(--paper-0); border: var(--border-ink); border-radius: var(--r-card);
+  box-shadow: 3px 3px 0 rgba(12, 12, 12, 0.15);
+  padding: var(--s-1) 0;
+}
+.acct-panel[hidden] { display: none; }
+.acct-who { display: flex; flex-direction: column; padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--rule); }
+.acct-name { font-weight: 600; overflow-wrap: anywhere; }
+.acct-ws { font-size: 13px; color: var(--text-3); font-style: italic; overflow-wrap: anywhere; }
+.acct-item {
+  display: flex; align-items: center; width: 100%; min-height: 48px; padding: 0 var(--s-4);
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-1); text-decoration: none; text-align: left;
+  background: none; border: 0; cursor: pointer;
+}
+.acct-item + .acct-item { border-top: 1px solid var(--rule); }
+.acct-item:hover { background: var(--paper-1); }
+.acct-item.active { box-shadow: inset 3px 0 0 var(--mark); }
+.acct-item:disabled { opacity: 0.5; cursor: default; }
+.acct-item:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
+.acct-confirm { padding: var(--s-3) var(--s-4); border-top: 1px solid var(--rule); }
+.acct-confirm p { margin: 0 0 var(--s-3); font-size: 14px; }
+.acct-confirm__row { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.btn.acct-danger { color: var(--danger); border-color: var(--danger); }
+.btn.acct-danger:hover { background: var(--danger); color: var(--paper-0); }
+
 .avatar {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.05em;
-  width: 26px; height: 26px;
+  width: 30px; height: 30px;
   border-radius: 50%;
   border: var(--border-ink);
   display: inline-flex;
@@ -288,6 +329,10 @@ h2 { font-size: 18px; }
 }
 
 .page { max-width: var(--max-w); margin: 0 auto; padding: var(--s-5) var(--s-4) var(--s-7); }
+/* A screen narrower than the column (e.g. the call card) sits centred in it. */
+.page > * { margin-inline: auto; }
+/* The map is the one full-width screen. */
+.page:has(> .map-page) { max-width: none; }
 .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-4); margin-bottom: var(--s-4); flex-wrap: wrap; }
 
 /* ── 11. Hero stat ── */
@@ -357,17 +402,46 @@ h2 { font-size: 18px; }
 @media (max-width: 720px) {
   .nav .links { display: none; }
   .nav .ws { display: none; }
-  .page { padding-bottom: 64px; }
+  .nav-inner { min-height: 52px; }
+  /* Clear the tab bar; the full-bleed map cancels exactly 64px itself. */
+  .page { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+  .page:has(> .map-page) { padding-bottom: 64px; }
+  /* 16px side gutter so the end tabs' labels never touch the screen edge;
+     seven 10px untracked mono labels ("OUTREACH" ≈ 48px) fit a 390px phone. */
   .tabbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
-    display: grid; grid-template-columns: repeat(7, 1fr);
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
     background: var(--paper-0); border-top: 1px solid var(--ink);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding: 0 var(--s-4) env(safe-area-inset-bottom);
   }
   .tabbar a {
-    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
-    text-decoration: none; color: var(--text-3); text-align: center; padding: 10px 2px 9px;
-    border-top: 2px solid transparent; margin-top: -1px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    min-width: 0; min-height: 56px; padding: 6px 0 5px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0; text-transform: uppercase;
+    text-decoration: none; color: var(--text-3); text-align: center;
+    border-top: 3px solid transparent; margin-top: -1px;
+    -webkit-tap-highlight-color: transparent;
   }
-  .tabbar a.active { color: var(--text-1); border-top-color: var(--mark); }
+  .tabbar .tab-icon { width: 22px; height: 22px; flex: none; }
+  .tabbar .tab-label { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabbar a.active { color: var(--text-1); border-top-color: var(--mark); font-weight: 600; }
+  .tabbar a.active .tab-icon { stroke-width: 2.2; }
+  .tabbar a:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -3px; }
+  /* Volunteers: four tabs, so the labels can be big. */
+  .tabbar[data-count='4'] a { min-height: 60px; font-size: 12px; letter-spacing: 0.06em; }
+  .tabbar[data-count='4'] .tab-icon { width: 24px; height: 24px; }
+}
+
+/* ── 13. Touch: fingers, not cursors ──
+   Touch screens and phone-width windows get ≥44px tap targets on the shared
+   controls; desktop (fine pointer, wide window) keeps its density. Padding is
+   computed from the font size so the label stays centred whatever a page sets. */
+@media (pointer: coarse), (max-width: 720px) {
+  .btn {
+    min-height: 44px;
+    padding-top: max(7px, calc((44px - 1.3em) / 2 - 1px));
+    padding-bottom: max(7px, calc((44px - 1.3em) / 2 - 1px));
+  }
+  button.chip, a.chip, label.chip { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--s-3); }
+  .input { min-height: 44px; font-size: 16px; } /* 16px: iOS won't zoom on focus */
 }

@@ -1,18 +1,24 @@
-// Today — the brief. Field strip (doors this week + the support picture),
-// hero money stat + open pledges, activation checklist, flagged gifts, your
-// turf (walk lists), upcoming shifts, events and signs, upcoming filings, and
-// the open-data footer (verify + export). A nearly empty campaign gets a
-// one-click sample dataset (managers), cleared again from the same screen.
-// Volunteers see their turf first — it's their job for the day — and never
-// see money.
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useOutletContext } from 'react-router-dom';
+// Today — the first screen, one job per role.
+//   Volunteer: one big "Start canvassing" (their walk list, or the map), then
+//     ONE shift line: "Your next shift" only when they're on it, otherwise the
+//     next open shift with "5 spots open" (→ /shifts). One small line of field
+//     numbers. Other turfs and the upcoming events (with their RSVP pages) sit
+//     under "More".
+//   Desk: three big numbers (doors this week · support · total raised), each a
+//     tap to its screen — support opens its 1/2/3/4D/4B… breakdown in place;
+//     then "Needs you" (gifts over the limit, open pledges, filings due, short
+//     shifts, signs to put up) — every row a tap to where it's fixed — then
+//     the next shift and event.
+//     Getting started shows only the steps not done, and only while the
+//     campaign is new. Walk lists, filings, providers, "Verify my books" and
+//     the export sit under a quiet "More" at the bottom.
+// A nearly empty campaign gets a one-click sample dataset (managers), cleared
+// again from the same screen. Volunteers never see money.
+import { useEffect, useId, useRef, useState } from 'react';
+import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RATINGS } from '@starbase/shared/canvass';
-import { ApiError, apiGet, apiPost, fmtMoney, fmtDate } from '../api.js';
-// Styles only: importing Shifts.jsx itself would pull the whole Shifts page
-// into the first-load bundle (Today is not lazy), so FillBar is copied below.
-import './shifts.css';
+import { ApiError, apiGet, apiPost, fmtMoney } from '../api.js';
 import './today.css';
 
 const greeting = () => {
@@ -31,32 +37,21 @@ const STEP_ROLES = {
   filing: ['manager', 'treasurer'],
 };
 
-// Same markup as Shifts.jsx's FillBar (ops-fill styles live in shifts.css).
-function FillBar({ filled = 0, capacity }) {
-  const n = Number(filled) || 0;
-  if (!capacity) {
-    return (
-      <span className="ops-fill" aria-label={`${n} signed up, no cap`}>
-        <span className="ops-fill-num mono">{n} signed up</span>
-      </span>
-    );
-  }
-  const pct = Math.min(100, Math.round((n / capacity) * 100));
-  const full = n >= capacity;
-  return (
-    <span className="ops-fill" data-full={full ? '' : undefined} aria-label={`${n} of ${capacity} spots filled`}>
-      <span className="ops-fill-track" aria-hidden="true">
-        <span className="ops-fill-bar" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="ops-fill-num mono">{n}/{capacity}{full ? ' full' : ''}</span>
-    </span>
-  );
-}
-
-const plural = (n, word) => `${word}${n === 1 ? '' : 's'}`;
+const plural = (n, word, many = `${word}s`) => (n === 1 ? word : many);
+const num = (n) => (Number(n) || 0).toLocaleString('en-CA');
 const fmtWhen = (iso) => new Date(iso).toLocaleString('en-CA', {
   weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 });
+const DAY = 86_400_000;
+const withinDays = (iso, days) => new Date(iso).getTime() - Date.now() < days * DAY;
+
+// Big-number money: whole dollars, compact past $100k so it fits a phone tile.
+const fmtBigMoney = (cents) => {
+  const d = Math.round((Number(cents) || 0) / 100);
+  if (d >= 1_000_000) return `$${(d / 1_000_000).toFixed(d >= 10_000_000 ? 0 : 1)}M`;
+  if (d >= 100_000) return `$${Math.round(d / 1000)}k`;
+  return `$${d.toLocaleString('en-CA')}`;
+};
 
 // api.js has no DELETE helper; same error contract as apiGet/apiPost.
 const apiDelete = async (path) => {
@@ -79,7 +74,9 @@ function useToast() {
   return { msg, show, clear };
 }
 
-// ── Sample data (managers) ──
+const Chevron = () => <span className="today-chev" aria-hidden="true">›</span>;
+
+// ── Sample data (managers, empty campaign) ──
 function SampleCard({ onToast }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -101,7 +98,7 @@ function SampleCard({ onToast }) {
         await queryClient.invalidateQueries();
         setAlready(true);
       } else {
-        setError(`Couldn’t load sample data — ${e.message}. Try again.`);
+        setError(`Couldn’t load sample data — ${e.message}`);
       }
     } finally {
       setBusy(false);
@@ -109,23 +106,18 @@ function SampleCard({ onToast }) {
   };
 
   return (
-    <section className="card today-sample" aria-labelledby="today-sample-h">
-      <span className="eyebrow">New campaign</span>
-      <h2 id="today-sample-h">Try Starbase with sample data</h2>
-      <p className="today-sample-lede">
-        52 Surrey voters across six neighbourhoods, with ratings, signs, donors, a shift, an event, and a turf.
-        Clear it any time — your own records stay.
-      </p>
+    <section className="card today-sample" aria-label="Sample data">
+      <p className="today-sample-lede">Try it with 52 made-up Surrey voters.</p>
       <div className="today-actions">
         <button type="button" className="btn btn-primary today-tap" onClick={load} disabled={busy}>
-          {busy ? 'Loading sample data…' : 'Load sample data'}
+          {busy ? 'Loading…' : 'Load sample data'}
         </button>
-        <Link to="/people/import" className="btn btn-quiet today-tap">Or import your own list</Link>
+        <Link to="/people/import" className="btn btn-quiet today-tap">Import your list</Link>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       {already && (
         <>
-          <p className="error" role="alert">Sample people are already in this campaign. Clear them first, then load again.</p>
+          <p className="error" role="alert">Sample people are already here. Clear them first.</p>
           <SampleLoadedLine canClear onToast={onToast} onCleared={() => setAlready(false)} />
         </>
       )}
@@ -159,30 +151,30 @@ function SampleLoadedLine({ canClear, onToast, onCleared }) {
       onCleared?.();
       onToast(`Sample data cleared${r.cleared ? ` — ${r.cleared} people removed` : ''}`);
     } catch (e) {
-      setError(`Couldn’t clear sample data — ${e.message}. Try again.`);
+      setError(`Couldn’t clear sample data — ${e.message}`);
     } finally {
       setBusy(false);
     }
   };
 
   if (!canClear) {
-    return <p className="today-sample-line">Sample data is loaded — these voters are made up.</p>;
+    return <p className="today-sample-line">Sample data · made-up voters</p>;
   }
   if (!confirming) {
     return (
       <p className="today-sample-line">
         Sample data is loaded<span className="today-dot" aria-hidden="true">·</span>
-        <button type="button" ref={openRef} className="today-linkbtn" onClick={() => setConfirming(true)}>Clear sample data</button>
+        <button type="button" ref={openRef} className="today-linkbtn" onClick={() => setConfirming(true)}>Clear</button>
       </p>
     );
   }
   return (
     <div className="today-confirm" role="group" aria-label="Clear sample data"
       onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setConfirming(false); }}>
-      <p>Remove every sample person, gift, sign, the shift, the event and the turf? Your own records stay.</p>
+      <p>Remove all sample data? Your own records stay.</p>
       <div className="today-actions">
         <button type="button" className="btn today-tap today-danger" onClick={clear} disabled={busy}>
-          {busy ? 'Clearing…' : 'Clear sample data'}
+          {busy ? 'Clearing…' : 'Clear it'}
         </button>
         <button type="button" ref={keepRef} className="btn btn-quiet today-tap" onClick={() => setConfirming(false)} disabled={busy}>
           Keep it
@@ -193,223 +185,427 @@ function SampleLoadedLine({ canClear, onToast, onCleared }) {
   );
 }
 
-// ── Field strip: doors this week + one stacked support bar ──
+// ── Support picture: bands from the doorstep scale ──
 const BANDS = [
   { band: 'support', label: 'Support' },
   { band: 'undecided', label: 'Undecided' },
   { band: 'opposed', label: 'Opposed' },
 ];
 
-function SupportBar({ ratings }) {
+function supportPicture(ratings) {
   const counts = { support: 0, undecided: 0, opposed: 0 };
   const variants = [];
   for (const r of RATINGS) {
     const n = Number(ratings?.[r.code]) || 0;
     counts[r.band] += n;
-    if (r.band === 'opposed' && n > 0) variants.push(`${r.short} ${n}`);
+    if (r.band === 'opposed' && n > 0) variants.push({ code: r.short, label: r.label, n });
   }
   const total = counts.support + counts.undecided + counts.opposed;
   const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
-  const summary = BANDS.map((b) => `${b.label} ${counts[b.band]} (${pct(counts[b.band])}%)`).join(', ');
-  const showVariants = variants.some((v) => !v.startsWith('4 '));
+  return { counts, variants, total, pct };
+}
 
+function SupportBar({ pic, size }) {
+  const { counts, total, pct } = pic;
+  if (!total) return null;
+  const summary = BANDS.map((b) => `${b.label} ${counts[b.band]} (${pct(counts[b.band])}%)`).join(', ');
   return (
-    <div className="ops-support">
-      <div className="ops-support-head">
-        <span className="eyebrow">Support · <span className="mono">{total.toLocaleString('en-CA')}</span> rated</span>
-        <Link to="/map" className="ops-maplink">Open the map →</Link>
-      </div>
+    <span className={`today-bar${size === 'small' ? ' is-small' : ''}`} role="img" aria-label={summary}>
+      {BANDS.filter((b) => counts[b.band] > 0).map((b) => (
+        <span key={b.band} data-band={b.band} style={{ flex: `${counts[b.band]} 1 0` }} />
+      ))}
+    </span>
+  );
+}
+
+function SupportDetail({ pic, id }) {
+  const { counts, variants, total, pct } = pic;
+  const showVariants = variants.some((v) => v.code !== '4');
+  return (
+    <section className="card today-support" id={id} aria-label="Support breakdown">
       {total === 0 ? (
-        <p className="ops-empty">No ratings yet — every door you knock fills this in.</p>
+        <p className="today-empty">No ratings yet — every door fills this in.</p>
       ) : (
         <>
-          <div className="ops-bar" role="img" aria-label={summary}>
-            {BANDS.filter((b) => counts[b.band] > 0).map((b) => (
-              <span key={b.band} data-band={b.band} style={{ flex: `${counts[b.band]} 1 0` }}
-                title={`${b.label}: ${counts[b.band]} (${pct(counts[b.band])}%)`} />
-            ))}
-          </div>
-          <ul className="ops-legend">
+          <SupportBar pic={pic} />
+          <ul className="today-legend">
             {BANDS.map((b) => (
               <li key={b.band}>
                 <span className="sw" data-band={b.band} aria-hidden="true" />
-                {b.label} <span className="mono">{counts[b.band].toLocaleString('en-CA')}</span>
+                {b.label} <span className="mono">{num(counts[b.band])}</span>
                 <span className="mono pct">{pct(counts[b.band])}%</span>
               </li>
             ))}
           </ul>
-          {showVariants && <div className="ops-variants" title="Opposed, by who they back">opposed · {variants.join(' · ')}</div>}
+          {showVariants && (
+            <ul className="today-variants" aria-label="Opposed, by who they back">
+              {variants.map((v) => (
+                <li key={v.code} title={v.label}><span className="mono">{v.code}</span> {num(v.n)}</li>
+              ))}
+            </ul>
+          )}
         </>
       )}
-    </div>
-  );
-}
-
-function FieldStrip({ field, ratings }) {
-  const f = field ?? {};
-  const doors = Number(f.doors) || 0;
-  const calls = Number(f.calls) || 0;
-  const texts = Number(f.texts) || 0;
-  return (
-    <section className="ops-field" aria-label="Field this week">
-      <div className="ops-doors">
-        <span className="eyebrow">Doors this week</span>
-        <span className="n">{doors.toLocaleString('en-CA')}</span>
-        <span className="sub">
-          <span className="mono">{calls.toLocaleString('en-CA')}</span> {plural(calls, 'call')} ·{' '}
-          <span className="mono">{texts.toLocaleString('en-CA')}</span> {plural(texts, 'text')}
-        </span>
+      <div className="today-support-foot">
+        <span className="mono muted">{num(total)} rated</span>
+        <Link to="/map" className="today-more-link">Open the map <Chevron /></Link>
       </div>
-      <SupportBar ratings={ratings} />
     </section>
   );
 }
 
-// ── Your turf: walk lists assigned to me ──
-function TurfProgress({ stats }) {
-  if (!stats) return null;
-  const doors = Number(stats.doors) || 0;
-  const done = Math.min(doors, Number(stats.doorsDone) || 0);
-  if (doors === 0) return <span className="today-turf-meta mono">No doors in this turf yet</span>;
-  const left = doors - done;
-  const pct = Math.round((done / doors) * 100);
+// ── Desk: the three big numbers ──
+function Numbers({ b, pic }) {
+  const [params, setParams] = useSearchParams();
+  const open = params.get('support') === '1';
+  const detailId = useId();
+  const toggle = () => {
+    const next = new URLSearchParams(params);
+    if (open) next.delete('support'); else next.set('support', '1');
+    setParams(next, { replace: true });
+  };
+  const doors = Number(b.field?.doors) || 0;
+  const supportPct = pic.total ? `${pic.pct(pic.counts.support)}%` : '—';
   return (
     <>
-      <span className="today-turf-meta mono">
-        {left === 0 ? 'All doors done' : `${left} ${plural(left, 'door')} left`} · {done}/{doors} knocked
-      </span>
-      <span className="today-progress" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
+      <div className="today-nums">
+        <Link to="/map" className="today-num">
+          <span className="today-num__n">{num(doors)}</span>
+          <span className="today-num__label">Doors this week</span>
+        </Link>
+        <button type="button" className="today-num" aria-expanded={open} aria-controls={detailId} onClick={toggle}
+          aria-label={pic.total ? `Support ${supportPct} of ${num(pic.total)} rated` : 'Support — no ratings yet'}>
+          <span className="today-num__n">{supportPct}</span>
+          <SupportBar pic={pic} size="small" />
+          <span className="today-num__label">Support <span aria-hidden="true">{open ? '▴' : '▾'}</span></span>
+        </button>
+        {b.money && (
+          <Link to="/money" className="today-num" aria-label={`Total raised ${fmtMoney(b.money.totalCents)}`}>
+            <span className="today-num__n">{fmtBigMoney(b.money.totalCents)}</span>
+            <span className="today-num__label">Total raised</span>
+          </Link>
+        )}
+      </div>
+      {open && <SupportDetail pic={pic} id={detailId} />}
     </>
   );
 }
 
-function YourTurf({ turfs, lead }) {
-  // Doors left comes from the turfs list (shared cache with /turfs and the map).
-  const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs') });
-  const statsById = Object.fromEntries((turfsQ.data?.turfs ?? []).map((t) => [t.id, t]));
+// ── Desk: Needs you ──
+// Every row is a tap to the screen where it's dealt with (no rows that open
+// in place). The only reason a gift is flagged is the contribution limit
+// (server/lib/gifts.js), so it says so in plain words — the same label as Money.
+const OVER_LIMIT = 'Over limit';
+
+function LinkRow({ to, main, chip, chipCls = 'chip', title }) {
   return (
-    <section className={`card today-turf${lead ? ' is-lead' : ''}`} aria-labelledby="today-turf-h">
-      <span className="eyebrow" id="today-turf-h">{turfs.length === 1 ? 'Your turf' : 'Your turfs'}</span>
-      <ul className="today-turf-list">
-        {turfs.map((t) => (
-          <li key={t.id}>
-            <span className="today-turf-info">
-              <span className="today-turf-name">{t.name}</span>
-              <TurfProgress stats={statsById[t.id]} />
-            </span>
-            <Link to={`/turfs/${t.id}`} className={`btn today-tap${lead ? ' btn-primary' : ''}`}>
-              Open walk list
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <li className="today-need">
+      <Link to={to} className="today-row" title={title}>
+        <span className="today-row__main">{main}</span>
+        {chip && <span className={chipCls}>{chip}</span>}
+        <Chevron />
+      </Link>
+    </li>
   );
 }
 
-function NoTurfYet() {
-  return (
-    <section className="card today-turf is-lead">
-      <span className="eyebrow">Your turf</span>
-      <p className="today-turf-none">No walk list yet — ask your organizer to assign you a turf. Meanwhile, knock the doors near you.</p>
-      <Link to="/map" className="btn btn-primary today-tap">Open the map</Link>
-    </section>
-  );
+const spots = (n) => `${n} ${plural(n, 'spot')}`;
+
+function filingChip(n) {
+  if (n < 0) return { chip: `${-n}d overdue`, chipCls: 'chip chip-danger' };
+  if (n === 0) return { chip: 'Due today', chipCls: 'chip chip-warn' };
+  return { chip: `${n}d left`, chipCls: 'chip' };
 }
 
-function UpcomingShifts({ shifts, canPlan }) {
+function NeedsYou({ b }) {
+  const flagged = b.flagged ?? [];
+  const pledges = Number(b.pledges?.n) || 0;
+  const filings = (b.filings ?? []).filter((f) => Number(f.days_left) <= 7);
+  const shortShifts = (b.shifts ?? [])
+    .filter((s) => s.capacity && (Number(s.filled) || 0) < s.capacity && withinDays(s.starts_at, 7))
+    .slice(0, 2);
+  const signs = Number(b.signs?.requested) || 0;
+  const shownFlags = flagged.length > 3 ? flagged.slice(0, 2) : flagged;
+  const moreFlags = flagged.length - shownFlags.length;
+  const empty = !flagged.length && !pledges && !filings.length && !shortShifts.length && !signs;
+
   return (
-    <section className="card ops-today-shifts">
-      <span className="eyebrow">Upcoming shifts</span>
-      {shifts.length === 0 ? (
-        <p className="ops-empty">
-          Nothing scheduled.{' '}
-          {canPlan ? <Link to="/shifts?new=1">Plan a shift →</Link> : <Link to="/shifts">See all shifts →</Link>}
-        </p>
+    <section className="today-section" aria-labelledby="today-needs-h">
+      <h2 className="today-h" id="today-needs-h">Needs you</h2>
+      {empty ? (
+        <p className="today-empty">All caught up.</p>
       ) : (
-        <ul className="list-plain">
-          {shifts.map((s) => (
-            <li key={s.id}>
-              <span>
-                <Link to={`/shifts/${s.id}`}>{s.title}</Link>
-                <span className="when">{fmtWhen(s.starts_at)}{s.location ? ` · ${s.location}` : ''}</span>
-              </span>
-              <FillBar filled={s.filled} capacity={s.capacity} />
-            </li>
+        <ul className="today-rows">
+          {shownFlags.map((g) => (
+            <LinkRow key={g.id} to={`/money?gift=${encodeURIComponent(g.id)}`} title={g.flag_reason || undefined}
+              main={<><strong className="mono">{fmtMoney(g.amount_cents)}</strong> {g.donor}</>}
+              chip={OVER_LIMIT} chipCls="chip chip-warn" />
           ))}
+          {moreFlags > 0 && (
+            <LinkRow to="/money" main={<><strong className="mono">{moreFlags}</strong> more {plural(moreFlags, 'gift')}</>}
+              chip={OVER_LIMIT} chipCls="chip chip-warn" />
+          )}
+          {pledges > 0 && (
+            <LinkRow to="/money"
+              main={<><strong className="mono">{pledges}</strong> open {plural(pledges, 'pledge')}</>}
+              chip={fmtMoney(b.pledges.cents)} />
+          )}
+          {filings.map((f) => <LinkRow key={f.id} to="/filings" main={f.name} {...filingChip(Number(f.days_left))} />)}
+          {shortShifts.map((s) => {
+            const short = s.capacity - (Number(s.filled) || 0);
+            return <LinkRow key={s.id} to={`/shifts/${s.id}`} main={s.title} chip={`${short} short`} chipCls="chip chip-warn" />;
+          })}
+          {signs > 0 && (
+            <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
+          )}
         </ul>
       )}
     </section>
   );
 }
 
-// ── Upcoming events ──
-function Going({ going, capacity }) {
-  const n = Number(going) || 0;
-  if (!capacity) return <span className="today-going mono">{n} going</span>;
-  const full = n >= capacity;
-  const pct = Math.min(100, Math.round((n / capacity) * 100));
+// ── Coming up: one line each ──
+// Two-line row: a small kicker, the title, the time. `fill` is a short plain
+// count on the right ("12 going"); `extra` rides on the time line ("5 spots
+// open") so a long title keeps the full width. Never a bare "3/8".
+function WhenRow({ to, kicker, title, when, fill, extra }) {
   return (
-    <span className="today-going" data-full={full ? '' : undefined} aria-label={`${n} going of ${capacity} spots`}>
-      <span className="today-going-track" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
-      <span className="mono">{n}/{capacity} going{full ? ' · full' : ''}</span>
-    </span>
+    <li className="today-need">
+      <Link to={to} className="today-row">
+        <span className="today-row__main">
+          <span className="today-row__kicker">{kicker}</span>
+          <span className="today-row__title">{title}</span>
+          <span className="today-row__when">
+            {fmtWhen(when)}
+            {extra && <> · <span className="today-row__extra">{extra}</span></>}
+          </span>
+        </span>
+        {fill && <span className="today-fill mono">{fill}</span>}
+        <Chevron />
+      </Link>
+    </li>
   );
 }
 
-function UpcomingEvents({ events, desk, wsSlug }) {
-  // The brief doesn't say which events are public, and /e/:ws/:slug is 404
-  // for a private one. GET /api/campaign-events (shared with Outreach) does.
-  const needsPublic = events.some((e) => e.public === undefined);
-  const list = useQuery({
-    queryKey: ['campaign-events'],
-    queryFn: () => apiGet('/campaign-events'),
-    enabled: needsPublic,
-  });
-  const publicById = Object.fromEntries((list.data?.events ?? []).map((e) => [e.id, !!e.public]));
-  const isPublic = (e) => (e.public !== undefined ? !!e.public : publicById[e.id] === true);
+// Desk: the campaign's next shift. Short shifts are already in "Needs you",
+// so this is just what and when.
+function ShiftRow({ shift }) {
+  if (!shift) return <LinkRow to="/shifts?new=1" main={<span className="muted">No shifts planned</span>} chip="Plan one" />;
+  return <WhenRow to={`/shifts/${shift.id}`} kicker="Next shift" title={shift.title} when={shift.starts_at} />;
+}
+
+function EventRow({ event }) {
   return (
-    <section className="card today-events" aria-labelledby="today-events-h">
-      <div className="today-card-head">
-        <span className="eyebrow" id="today-events-h">Upcoming events</span>
-        {desk && <Link to="/outreach/events" className="today-more">All events →</Link>}
-      </div>
-      <ul className="list-plain">
-        {events.map((e) => (
-          <li key={e.id}>
-            <span className="today-event-info">
-              {desk
-                ? <Link to="/outreach/events" className="today-event-title">{e.title}</Link>
-                : <span className="today-event-title">{e.title}</span>}
-              <span className="when">{fmtWhen(e.starts_at)}{e.location ? ` · ${e.location}` : ''}</span>
-              {wsSlug && e.slug && isPublic(e) && (
-                <a className="today-rsvp" href={`/e/${encodeURIComponent(wsSlug)}/${encodeURIComponent(e.slug)}`}
-                  target="_blank" rel="noopener noreferrer">
-                  RSVP page <span aria-hidden="true">↗</span>
-                  <span className="ops-sr"> for {e.title} (opens in a new tab)</span>
-                </a>
-              )}
-            </span>
-            <Going going={e.going} capacity={e.capacity} />
-          </li>
-        ))}
+    <WhenRow to="/outreach/events" kicker="Next event" title={event.title} when={event.starts_at}
+      fill={`${num(event.going)} going`} />
+  );
+}
+
+// ── Volunteer: which shifts am I on? ──
+// Same lookup (and query keys) as the Shifts screen: a volunteer's login and
+// their supporter record share an email, and that record lists their shifts.
+function useMyNextShift(me) {
+  const email = String(me?.user?.email || '').trim().toLowerCase();
+  const search = useQuery({
+    queryKey: ['persons', 'search', email],
+    queryFn: () => apiGet(`/persons?q=${encodeURIComponent(email)}&limit=8`),
+    enabled: !!email,
+  });
+  const self = (search.data?.persons ?? []).find((p) => String(p.email || '').toLowerCase() === email);
+  const person = useQuery({
+    queryKey: ['person', self?.id],
+    queryFn: () => apiGet(`/persons/${self.id}`),
+    enabled: !!self,
+  });
+  const ready = !email || search.isError || (search.isSuccess && (!self || !person.isPending));
+  const now = Date.now();
+  const next = (person.data?.shifts ?? [])
+    .filter((a) => a.status !== 'declined' && new Date(a.starts_at).getTime() >= now)
+    .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0] ?? null;
+  return { ready, next };
+}
+
+// One line: the shift they're booked on — or, if none, the next shift that
+// still needs people ("5 spots open" → the Shifts list). Never someone else's
+// shift dressed up as theirs.
+function VolunteerShiftRow({ shifts, me }) {
+  const { ready, next } = useMyNextShift(me);
+  if (!ready) return <li className="today-need today-row--wait" aria-hidden="true" />;
+  if (next) {
+    return <WhenRow to={`/shifts/${next.id}`} kicker="Your next shift" title={next.title} when={next.starts_at} />;
+  }
+  const open = shifts.find((s) => !s.capacity || (Number(s.filled) || 0) < s.capacity);
+  if (!open) return <LinkRow to="/shifts" main={<span className="muted">No open shifts</span>} />;
+  const left = open.capacity ? open.capacity - (Number(open.filled) || 0) : 0;
+  return (
+    <WhenRow to="/shifts" kicker="Open shift" title={open.title} when={open.starts_at}
+      extra={left ? `${spots(left)} open` : null} />
+  );
+}
+
+// ── Getting started: only the steps left, only while the campaign is new ──
+function GettingStarted({ steps, role, navigate }) {
+  return (
+    <section className="card today-steps" aria-labelledby="today-steps-h">
+      <h2 className="today-h" id="today-steps-h">Getting started</h2>
+      <ul className="today-rows">
+        {steps.map((s) => {
+          const can = (STEP_ROLES[s.key] ?? []).includes(role);
+          return (
+            <li key={s.key} className="today-step">
+              <span>{s.label}</span>
+              {can
+                ? <button type="button" className="btn today-tap" onClick={() => navigate(STEP_ROUTES[s.key])}>Do it</button>
+                : <span className="muted today-step-who">A manager adds this</span>}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
 }
 
-function DaysLeft({ n }) {
-  if (n < 0) return <span className="chip chip-danger">{-n}d overdue</span>;
-  if (n === 0) return <span className="chip chip-warn">due today</span>;
-  return <span className="chip">{n}d left</span>;
+// ── Walk lists (doors left from the shared ['turfs'] cache) ──
+function useTurfStats(enabled) {
+  const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs'), enabled });
+  return Object.fromEntries((turfsQ.data?.turfs ?? []).map((t) => [t.id, t]));
+}
+const doorsLeft = (stats) => {
+  if (!stats) return null;
+  const doors = Number(stats.doors) || 0;
+  const done = Math.min(doors, Number(stats.doorsDone) || 0);
+  return { doors, done, left: doors - done, pct: doors ? Math.round((done / doors) * 100) : 0 };
+};
+const leftLabel = (d) => {
+  if (!d) return null;
+  if (d.doors === 0) return 'No doors yet';
+  return d.left === 0 ? 'All done' : `${d.left} ${plural(d.left, 'door')} left`;
+};
+
+function TurfRows({ turfs, statsById }) {
+  return (
+    <ul className="today-rows">
+      {turfs.map((t) => (
+        <LinkRow key={t.id} to={`/turfs/${t.id}`} main={t.name} chip={leftLabel(doorsLeft(statsById[t.id]))} />
+      ))}
+    </ul>
+  );
 }
 
-export default function Today() {
-  const { me } = useOutletContext();
+function EventList({ events, wsSlug }) {
+  return (
+    <ul className="today-rows">
+      {events.map((e) => (
+        <li key={e.id} className="today-event">
+          <span className="today-row__main">
+            <span className="today-row__title">{e.title}</span>
+            <span className="today-row__when">{fmtWhen(e.starts_at)}{e.location ? ` · ${e.location}` : ''}</span>
+          </span>
+          <span className="today-fill mono">{num(e.going)} going</span>
+          {wsSlug && e.slug && e.public && (
+            <a className="today-rsvp" href={`/e/${encodeURIComponent(wsSlug)}/${encodeURIComponent(e.slug)}`}
+              target="_blank" rel="noopener noreferrer">
+              RSVP page <span aria-hidden="true">↗</span>
+              <span className="today-sr"> for {e.title} (opens in a new tab)</span>
+            </a>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Quiet disclosure at the bottom. Its contents aren't rendered until opened.
+function More({ children }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <section className="today-morebox">
+      <button type="button" className="today-morebox__toggle" aria-expanded={open} aria-controls={id}
+        onClick={() => setOpen((v) => !v)}>
+        More <span className="today-chev is-toggle" aria-hidden="true">›</span>
+      </button>
+      {open && <div className="today-morebox__body" id={id}>{children}</div>}
+    </section>
+  );
+}
+
+// ── Volunteer Today ──
+function VolunteerToday({ b, me, toast }) {
+  const myTurfs = b.myTurfs ?? [];
+  const statsById = useTurfStats(myTurfs.length > 0);
+  // Start where there are doors left; otherwise the first turf; else the map.
+  const firstOpen = myTurfs.find((t) => (doorsLeft(statsById[t.id])?.left ?? 1) > 0) ?? myTurfs[0];
+  const d = firstOpen ? doorsLeft(statsById[firstOpen.id]) : null;
+  const others = myTurfs.filter((t) => t !== firstOpen);
+  const events = b.events ?? [];
+  const f = b.field ?? {};
+
+  return (
+    <div className="today today--field">
+      <span className="eyebrow">{greeting()}</span>
+      <h1>{me.workspace.name}</h1>
+      {b.sampleLoaded && <SampleLoadedLine canClear={false} onToast={toast.show} />}
+
+      <section className="today-go" aria-label="Canvass">
+        <Link to={firstOpen ? `/turfs/${firstOpen.id}` : '/map'} className="btn btn-primary today-start">
+          Start canvassing <span aria-hidden="true">→</span>
+        </Link>
+        {firstOpen ? (
+          <div className="today-go__meta">
+            <span className="today-go__turf">{firstOpen.name}</span>
+            {d && <span className="mono">{leftLabel(d)}</span>}
+            {d && d.doors > 0 && <span className="today-progress" aria-hidden="true"><span style={{ width: `${d.pct}%` }} /></span>}
+          </div>
+        ) : (
+          <p className="today-go__meta muted">No walk list yet — doors near you on the map.</p>
+        )}
+      </section>
+
+      <ul className="today-rows today-next">
+        <VolunteerShiftRow shifts={b.shifts ?? []} me={me} />
+      </ul>
+
+      <p className="today-fieldline mono">
+        {num(f.doors)} doors this week · {num(f.calls)} {plural(Number(f.calls) || 0, 'call')}
+      </p>
+
+      <More>
+        <p className="today-fieldline mono">{num(f.texts)} {plural(Number(f.texts) || 0, 'text')} this week</p>
+        {others.length > 0 && (
+          <>
+            <h3 className="today-subh">Your other turfs</h3>
+            <TurfRows turfs={others} statsById={statsById} />
+          </>
+        )}
+        {events.length > 0 && (
+          <>
+            <h3 className="today-subh">Events</h3>
+            <EventList events={events} wsSlug={me.workspace.slug} />
+          </>
+        )}
+      </More>
+    </div>
+  );
+}
+
+// ── Desk Today ──
+function DeskToday({ b, me, toast }) {
   const navigate = useNavigate();
-  const toast = useToast();
   const [verify, setVerify] = useState(null);
-  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief') });
+  const isManager = me?.role === 'manager';
+  const myTurfs = b.myTurfs ?? [];
+  const events = b.events ?? [];
+  const peopleTotal = Number(b.people?.total) || 0;
+  const offerSample = isManager && !b.sampleLoaded && peopleTotal < 5;
+  const pic = supportPicture(b.ratings);
+  const statsById = useTurfStats(myTurfs.length > 0);
+  const f = b.field ?? {};
+
+  // Only the steps left; the card goes once only the filing is left, or the
+  // campaign has five people (it's past the first day by then).
+  const stepsLeft = (b.activation?.steps ?? []).filter((s) => !s.done);
+  const showSteps = !b.activation?.complete && peopleTotal < 5 && stepsLeft.some((s) => s.key !== 'filing');
 
   const onVerify = async () => {
     setVerify({ busy: true });
@@ -419,6 +615,65 @@ export default function Today() {
       setVerify({ error: e.message });
     }
   };
+
+  return (
+    <div className="today">
+      <span className="eyebrow">{greeting()}</span>
+      <h1>{me.workspace.name}</h1>
+
+      {offerSample && <SampleCard onToast={toast.show} />}
+      {b.sampleLoaded && <SampleLoadedLine canClear={isManager} onToast={toast.show} />}
+      {showSteps && <GettingStarted steps={stepsLeft} role={me?.role} navigate={navigate} />}
+
+      <Numbers b={b} pic={pic} />
+
+      <NeedsYou b={b} />
+
+      <section className="today-section" aria-labelledby="today-next-h">
+        <h2 className="today-h" id="today-next-h">Coming up</h2>
+        <ul className="today-rows">
+          <ShiftRow shift={(b.shifts ?? [])[0]} />
+          {events[0] && <EventRow event={events[0]} />}
+        </ul>
+      </section>
+
+      <More>
+        <p className="today-fieldline mono">
+          This week: {num(f.calls)} {plural(Number(f.calls) || 0, 'call')} · {num(f.texts)} {plural(Number(f.texts) || 0, 'text')}
+          {b.money && <> · {fmtMoney(b.money.weekCents)} raised</>}
+        </p>
+        <p className="today-fieldline mono">
+          In all: {num(peopleTotal)} people
+          {b.money && <> · {num(b.money.gifts)} {plural(b.money.gifts, 'gift')} · {fmtMoney(b.money.totalCents)}</>}
+        </p>
+        {myTurfs.length > 0 && (
+          <>
+            <h3 className="today-subh">{myTurfs.length === 1 ? 'Your walk list' : 'Your walk lists'}</h3>
+            <TurfRows turfs={myTurfs} statsById={statsById} />
+          </>
+        )}
+        <ul className="today-rows">
+          <LinkRow to="/filings" main="Filings" />
+          {b.providers && (!b.providers.email || !b.providers.text) && (
+            <LinkRow to="/outreach/website" main="Connect email & texting" />
+          )}
+        </ul>
+        <div className="today-actions today-morebox__tools">
+          <button type="button" className="btn today-tap" onClick={onVerify} disabled={verify?.busy}>Verify my books</button>
+          <a className="btn today-tap" href="/api/export">Export all data</a>
+        </div>
+        {verify?.ok && <p className="mono ok-text" role="status">✓ {verify.checked} entries check out</p>}
+        {verify?.ok === false && <p className="error" role="alert">The books don’t check out</p>}
+        {verify?.error && <p className="error" role="alert">{verify.error}</p>}
+      </More>
+    </div>
+  );
+}
+
+export default function Today() {
+  const { me } = useOutletContext();
+  const toast = useToast();
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief') });
 
   // No signal: the query is paused (react-query knew it was offline) or the
   // fetch itself failed (a TypeError, not an ApiError). Either way it refetches
@@ -432,156 +687,36 @@ export default function Today() {
       <div className="today">
         <span className="eyebrow">{greeting()}</span>
         <h1>{me.workspace.name}</h1>
-        <p className="today-offline" role="status">No signal — today’s numbers load by themselves when you’re back online.</p>
+        <p className="today-offline" role="status">No signal — this fills in when you’re back online.</p>
+        {me.role === 'volunteer' && (
+          <Link to="/map" className="btn btn-primary today-start">Start canvassing <span aria-hidden="true">→</span></Link>
+        )}
       </div>
     );
   }
   if (brief.isError && !brief.data) {
     return (
-      <p className="error" role="alert">
-        Couldn’t load today’s brief — {brief.error.message}.{' '}
+      <div className="today">
+        <p className="error" role="alert">Couldn’t load Today — {brief.error.message}</p>
         <button type="button" className="btn today-tap" onClick={() => brief.refetch()}>Try again</button>
-      </p>
+      </div>
     );
   }
   // isPending, not isLoading: a query paused offline is pending but not
   // fetching, and brief.data would be undefined below.
-  if (brief.isPending) return <p className="muted">Loading the brief…</p>;
+  if (brief.isPending) return <p className="muted">Loading…</p>;
   const b = brief.data;
-  const canDesk = me?.role !== 'volunteer'; // shift.create is desk-only
-  const isManager = me?.role === 'manager';
-  const myTurfs = b.myTurfs ?? [];
-  const events = b.events ?? [];
-  const peopleTotal = Number(b.people?.total) || 0;
-  const offerSample = isManager && !b.sampleLoaded && peopleTotal < 5;
-  const openPledges = Number(b.pledges?.n) || 0;
-
-  const turfCard = myTurfs.length > 0
-    ? <YourTurf turfs={myTurfs} lead={!canDesk} />
-    : (!canDesk && <NoTurfYet />);
+  const desk = me?.role !== 'volunteer';
 
   return (
-    <div className="today">
-      <span className="eyebrow">{greeting()}</span>
-      <h1>{me.workspace.name}</h1>
-
-      {offerSample && <SampleCard onToast={toast.show} />}
-      {b.sampleLoaded && <SampleLoadedLine canClear={isManager} onToast={toast.show} />}
-
-      {/* Volunteers: the walk list is the job for the day, so it leads. */}
-      {!canDesk && turfCard}
-
-      <FieldStrip field={b.field} ratings={b.ratings} />
-
-      {b.money && (
-        <div className="stat-hero">
-          <span className="eyebrow">Total raised</span>
-          <div className="amount">{fmtMoney(b.money.totalCents)}</div>
-          <div className="sub">
-            {fmtMoney(b.money.weekCents)} this week · {b.money.gifts} gift{b.money.gifts === 1 ? '' : 's'} · {peopleTotal} people
-          </div>
-          {canDesk && openPledges > 0 && (
-            <Link to="/money" className="today-pledges">
-              <span className="mono">{openPledges}</span> open {plural(openPledges, 'pledge')} ·{' '}
-              <span className="mono">{fmtMoney(b.pledges.cents)}</span>
-              <span aria-hidden="true"> →</span>
-            </Link>
-          )}
-        </div>
-      )}
-
-      {canDesk && turfCard}
-
-      {canDesk && !b.activation.complete && (
-        <section className="card">
-          <span className="eyebrow">Getting started</span>
-          <ul className="list-plain">
-            {b.activation.steps.map((s) => (
-              <li key={s.key}>
-                <span className={s.done ? 'done' : ''}>
-                  <span className="check mono">{s.done ? '☑' : '☐'}</span> {s.label}
-                </span>
-                {!s.done && (STEP_ROLES[s.key] ?? []).includes(me?.role) && (
-                  <button type="button" className="btn today-tap" onClick={() => navigate(STEP_ROUTES[s.key])}>Do it</button>
-                )}
-                {!s.done && STEP_ROUTES[s.key] && !(STEP_ROLES[s.key] ?? []).includes(me?.role) && (
-                  <span className="muted today-step-who">A manager or treasurer adds these</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {b.flagged.length > 0 && (
-        <section className="card">
-          <span className="eyebrow">Needs attention</span>
-          <ul className="list-plain">
-            {b.flagged.map((g) => (
-              <li key={g.id}>
-                <span>
-                  <Link to="/money"><strong className="mono">{fmtMoney(g.amount_cents)}</strong> — {g.donor}</Link>
-                  <br />
-                  <span className="muted">{g.flag_reason}</span>
-                </span>
-                <span className="chip chip-warn">flagged</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <UpcomingShifts shifts={b.shifts ?? []} canPlan={canDesk} />
-
-      {events.length > 0 && <UpcomingEvents events={events} desk={canDesk} wsSlug={me.workspace.slug} />}
-
-      <Link to="/signs" className="ops-signs-line">
-        <span className="eyebrow">Signs</span>
-        <span>
-          <span className="mono">{b.signs?.requested ?? 0}</span> requested ·{' '}
-          <span className="mono">{b.signs?.installed ?? 0}</span> installed
-        </span>
-        <span aria-hidden="true">→</span>
-      </Link>
-
-      {canDesk && b.providers && (!b.providers.email || !b.providers.text) && (
-        <p className="ops-providers">
-          <Link to="/outreach/website">Connect email/SMS providers to send notifications →</Link>
-        </p>
-      )}
-
-      {b.filings.length > 0 && (
-        <section className="card">
-          <span className="eyebrow">Upcoming filings</span>
-          <ul className="list-plain">
-            {b.filings.map((f) => (
-              <li key={f.id}>
-                <span>
-                  <Link to="/filings">{f.name}</Link>{' '}
-                  <span className="muted mono">{fmtDate(f.due_date)}</span>
-                </span>
-                <DaysLeft n={f.days_left} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {canDesk && <div className="footer-row">
-        <button type="button" className="btn today-tap" onClick={onVerify} disabled={verify?.busy}>Verify my books</button>
-        {verify?.ok && <span className="mono ok-text">✓ {verify.checked} events verified</span>}
-        {verify?.ok === false && <span className="error">audit chain check failed</span>}
-        {verify?.error && <span className="error">{verify.error}</span>}
-        <span className="spacer" />
-        <a className="btn today-tap" href="/api/export">Export all data</a>
-      </div>}
-
+    <>
+      {desk ? <DeskToday b={b} me={me} toast={toast} /> : <VolunteerToday b={b} me={me} toast={toast} />}
       {toast.msg && (
         <div className="toast today-toast" role="status">
           <span>{toast.msg}</span>
           <button type="button" className="btn" onClick={toast.clear}>OK</button>
         </div>
       )}
-    </div>
+    </>
   );
 }

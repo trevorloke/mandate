@@ -5,7 +5,8 @@
 //   Stop button. Desk roles only: renders nothing for volunteers.
 //   summary = { located, missed, errored, remaining, unmatched, stopped, error }
 // compact: one pill-sized button + a short status line (the map's
-// "not on the map yet" pill). Full: primary button, progress bar, summary.
+// "not on the map yet" pill). Full: one primary button, a progress bar, and
+// a one-line summary.
 import { useEffect, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -109,8 +110,8 @@ function Geocoder({ onDone, compact = false }) {
     let error = requestError;
     if (!error && stalled) {
       error = /turned off/i.test(lastError || '')
-        ? 'Address lookup is turned off on this server. Place people by hand from the map, or ask whoever runs Starbase to turn it on.'
-        : `The address lookup isn’t answering${lastError ? ` (${lastError})` : ''}. Nothing is lost — try again in a few minutes.`;
+        ? 'Address lookup is turned off on this server. Place people by hand from the map.'
+        : `Address lookup isn’t answering${lastError ? ` (${lastError})` : ''}. Nothing is lost — try again later.`;
     }
     const result = {
       located: tot.located,
@@ -135,7 +136,7 @@ function Geocoder({ onDone, compact = false }) {
   const s = summary;
   // Another run only helps if lookups are still waiting (stopped, failed, or never run).
   const canRun = !running && (!s || s.remaining > 0 || s.error);
-  const runLabel = compact ? 'Find on map' : s?.error ? 'Try again' : s?.stopped ? 'Carry on' : 'Place everyone on the map';
+  const runLabel = compact ? 'Find on map' : s?.error ? 'Try again' : s?.stopped ? 'Carry on' : 'Place on map';
 
   // ── Compact: fits inside the map's "not on the map yet" pill ──
   if (compact) {
@@ -196,18 +197,15 @@ function Geocoder({ onDone, compact = false }) {
           {s.error ? (
             <p className="geo-summary__lead">{s.located ? `Placed ${people(s.located)} on the map, then stopped. ` : ''}{s.error}</p>
           ) : s.stopped ? (
-            <p className="geo-summary__lead">
-              Stopped. Placed {people(s.located)} — {fmtN(s.remaining)} still to look up. Carry on whenever you’re ready.
-            </p>
+            <p className="geo-summary__lead">Stopped · placed {fmtN(s.located)} · {fmtN(s.remaining)} left</p>
           ) : s.nothingToDo ? (
-            <p className="geo-summary__lead">Everyone with an address has already been looked up.</p>
+            <p className="geo-summary__lead">Everyone is already placed.</p>
           ) : (
-            <p className="geo-summary__lead">Done — placed {people(s.located)} on the map.</p>
+            <p className="geo-summary__lead">Placed {people(s.located)} on the map.</p>
           )}
           {s.unmatched > 0 && !s.error?.startsWith('Address lookup is turned off') && (
             <p className="geo-summary__note">
-              {people(s.unmatched)} couldn’t be matched to a street address. Place them by hand: open the map, tap{' '}
-              <strong>Place</strong> on the “not on the map yet” bar, and tap where they live.
+              {people(s.unmatched)} not found — tap <strong>Place</strong> on the map to pin them by hand.
             </p>
           )}
         </div>

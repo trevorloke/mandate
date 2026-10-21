@@ -21,7 +21,7 @@
 }
 
 .btn.imp-tap {
-  min-height: 44px;
+  min-height: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -123,7 +123,7 @@
 }
 .imp-map__arrow { color: var(--text-4); font-family: var(--font-mono); }
 .imp-map__row.is-used .imp-map__arrow { color: var(--mark-deep); }
-.imp-map__select { min-height: 44px; }
+.imp-map__select { min-height: 48px; }
 .imp-map__row:not(.is-used) .imp-map__select { color: var(--text-3); }
 .imp-map__note { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--text-2); }
 .imp-map__note.is-warn { color: var(--text-1); border-left: 3px solid var(--mark-deep); padding-left: var(--s-2); }
@@ -272,3 +272,20 @@
 .imp-matches summary::-webkit-details-marker { display: none; }
 .imp-matches summary::before { content: '+'; display: inline-block; width: 1em; text-align: center; font-size: 14px; color: var(--text-3); }
 .imp-matches[open] summary::before { content: '−'; }
+
+/* ── Simple pass: one line per step, reveals, the map step ── */
+.imp-line { margin: 0 0 var(--s-3); color: var(--text-3); }
+.imp-line--inline { margin: 0; font-size: 14px; }
+.imp-step.is-todo { padding: var(--s-4) 0; }
+.imp-step.is-todo .imp-step__body h2 { margin-bottom: 0; }
+.imp-step.is-done .imp-step__body h2 { color: var(--text-2); }
+.imp-reveal { margin: 0 0 var(--s-2); }
+.btn.imp-reveal__btn { margin-left: calc(-1 * var(--s-4)); gap: var(--s-2); }
+.imp-reveal__body { padding: var(--s-1) 0 var(--s-3); }
+.imp-reveal__body .imp-tagfield { margin-bottom: 0; }
+.imp-matches__list { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
+.imp-matches__list li { padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 14px; overflow-wrap: anywhere; }
+.imp-matches__list li .mono { font-size: 11px; margin-right: var(--s-2); }
+.imp-place { margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--rule); }
+.imp-place__title { font-size: 16px; margin: 0 0 var(--s-2); }
+.imp-result .imp-actions { margin-top: var(--s-4); }

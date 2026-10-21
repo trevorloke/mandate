@@ -1,6 +1,6 @@
-// Import people — the first thing a new campaign does. Choose a CSV (or paste
-// it), match its columns to Starbase fields, check it (a dry run: nothing is
-// saved), import it in chunks of 1,000, then place everyone on the map.
+// Import people — three steps, one button each: choose a CSV (or paste it),
+// match its columns to Starbase fields and check it (a dry run: nothing is
+// saved), then import it in chunks of 1,000 and place everyone on the map.
 // The CSV is parsed here in the browser; the server validates, dedupes against
 // people already on file (email → name+phone → name+address) and merges by
 // filling blanks only. Desk roles only — volunteers are sent back to People.
@@ -322,14 +322,15 @@ function remapInvalid(msg, part) {
 // Small pieces
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Step({ n, title, state, children }) {
-  // state: 'todo' | 'now' | 'done'
+function Step({ n, title, line, state, children }) {
+  // state: 'todo' | 'now' | 'done'. A step that isn't reached yet is just its title.
   return (
     <section className={`imp-step is-${state}`} aria-labelledby={`imp-step-${n}`}>
       <div className="imp-step__num" aria-hidden="true">{state === 'done' ? '✓' : n}</div>
       <div className="imp-step__body">
         <h2 id={`imp-step-${n}`}><span className="imp-sr">Step {n}: </span>{title}</h2>
-        {children}
+        {state === 'now' && line && <p className="imp-line">{line}</p>}
+        {state !== 'todo' && children}
       </div>
     </section>
   );
@@ -347,16 +348,26 @@ function Bar({ value, max, label }) {
 function Counts({ items }) {
   return (
     <dl className="imp-counts">
-      {items.map(([label, value, tone, note]) => (
+      {items.map(([label, value, tone]) => (
         <div key={label} className={`imp-count${tone ? ` is-${tone}` : ''}`}>
           <dt className="eyebrow">{label}</dt>
-          <dd>
-            <span className="imp-count__n mono">{fmtN(value)}</span>
-            {note && <span className="imp-count__note">{note}</span>}
-          </dd>
+          <dd><span className="imp-count__n mono">{fmtN(value)}</span></dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+// A quiet "+ Label" toggle; the body is only rendered when open.
+function Reveal({ label, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="imp-reveal">
+      <button type="button" className="btn btn-quiet imp-tap imp-reveal__btn" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span aria-hidden="true">{open ? '−' : '+'}</span> {label}
+      </button>
+      {open && <div className="imp-reveal__body">{children}</div>}
+    </div>
   );
 }
 
@@ -385,7 +396,7 @@ function InvalidList({ invalid, intro }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The screen
+// The screen: 1 Choose a file · 2 Match columns (then check) · 3 Import
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function ImportPeople() {
@@ -407,14 +418,12 @@ function ImportFlow() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
-  // Step 2 — mapping
+  // Step 2 — mapping, then the check (a dry run). Any mapping/tag change throws the check away.
   const [mapping, setMapping] = useState([]);
   const [bumped, setBumped] = useState(null); // { col, key } — a column switched off by a pick
   const [tag, setTag] = useState('');
-
-  // Step 3 — check (dry run). Any mapping/tag change throws it away.
   const [check, setCheck] = useState(null); // { phase, done, total, created, merged, unchanged, invalid, matches, parts, error }
-  // Step 4 — import
+  // Step 3 — import (then place on the map)
   const [imp, setImp] = useState(null); // { phase, sent, total, created, merged, unchanged, invalid, error, resumeAt }
 
   const busy = reading || check?.phase === 'running' || imp?.phase === 'running';
@@ -444,14 +453,14 @@ function ImportFlow() {
     if (!file) return;
     setLoadError(null);
     if (file.size > MAX_FILE_BYTES) {
-      setLoadError('That file is over 30 MB. Split it into smaller files and import them one at a time.');
+      setLoadError('That file is over 30 MB. Split it and import the parts one at a time.');
       return;
     }
     setReading(true);
     try {
       const buf = await file.arrayBuffer();
       if (isSpreadsheetBinary(buf, file.name)) {
-        setLoadError('That’s a spreadsheet file, not a CSV. In Excel or Google Sheets choose File → Save as (or Download) → CSV, then choose that file here.');
+        setLoadError('That’s a spreadsheet, not a CSV. Save it as CSV (File → Download → CSV), then choose that.');
         return;
       }
       loadText(decodeBytes(buf), file.name);
@@ -516,7 +525,7 @@ function ImportFlow() {
     () => (source ? source.headers.map((_, i) => columnValues(source.records, i, 3)) : []),
     [source],
   );
-  // A column mapped to Rating whose values aren't on the scale: those rows fail.
+  // A column mapped to Rating whose values aren't on the scale: those people come in unrated.
   const badRatings = useMemo(() => {
     const col = ratingCol;
     if (!source || col === -1) return 0;
@@ -535,7 +544,7 @@ function ImportFlow() {
     mapping.includes('rating') && ['rating', 'Rating'],
   ].filter(Boolean);
 
-  // ── Step 3: check ──
+  // ── Check (dry run: nothing is saved) ──
   const runCheck = async () => {
     const total = rows.length;
     const acc = { ...ZERO, invalid: [], matches: [] };
@@ -562,7 +571,7 @@ function ImportFlow() {
     }
   };
 
-  // ── Step 4: import, 1,000 rows a call; each call is its own transaction ──
+  // ── Import, 1,000 rows a call; each call is its own transaction ──
   const accRef = useRef(null);
   const runImport = async (from = 0) => {
     const total = rows.length;
@@ -591,8 +600,9 @@ function ImportFlow() {
     }
   };
 
-  const willWrite = check?.phase === 'done' ? check.created + check.merged : 0;
-  const nothingNew = check?.phase === 'done' && willWrite === 0;
+  const checked = check?.phase === 'done';
+  const willWrite = checked ? check.created + check.merged : 0;
+  const nothingNew = checked && willWrite === 0;
   // Nothing to write because everyone is already on file (vs. every row failed).
   const nothingToDo = nothingNew && check.unchanged > 0;
   const nothingValid = nothingNew && check.unchanged === 0;
@@ -600,11 +610,8 @@ function ImportFlow() {
   const imported = imp?.phase === 'done';
   const peopleLink = tagClean ? `/people?tag=${encodeURIComponent(tagClean)}` : '/people';
 
-  const stepState = (n) => {
-    const at = !source ? 1 : !check || check.phase !== 'done' ? (check ? 3 : 2) : nothingValid ? 3 : !imported && !nothingToDo ? 4 : 5;
-    if (n < at) return 'done';
-    return n === at ? 'now' : 'todo';
-  };
+  const at = !source ? 1 : !checked ? 2 : 3;
+  const stepState = (n) => (n < at ? 'done' : n === at ? 'now' : 'todo');
 
   return (
     <div className="imp-page">
@@ -614,29 +621,22 @@ function ImportFlow() {
           <h1>Import people</h1>
         </div>
       </div>
-      <p className="imp-lead">
-        Bring in a voters list, a donor list or a sign-up sheet. People you already have are matched by email,
-        phone or address — Starbase fills in blanks and never overwrites what’s on file.
-      </p>
 
       {/* ── 1. Choose ── */}
-      <Step n={1} title="Choose your list" state={stepState(1)}>
+      <Step n={1} title="Choose a file" line="A CSV with column names on top." state={stepState(1)}>
         {source ? (
           <div className="imp-source">
             <p>
               <strong>{source.name}</strong>
-              <span className="muted">
-                {' '}· {plural(source.records.length, 'row', 'rows')} · {plural(source.headers.length, 'column', 'columns')}
-                {' '}· {DELIM_NAMES[source.delimiter]}-separated
-              </span>
+              <span className="muted"> · {plural(source.records.length, 'row', 'rows')}</span>
             </p>
-            <button type="button" className="btn imp-tap" onClick={startOver} disabled={busy}>
-              {imported ? 'Import another file' : 'Choose a different file'}
+            <button type="button" className="btn btn-quiet imp-tap" onClick={startOver} disabled={busy}
+              title={`${plural(source.headers.length, 'column', 'columns')}, ${DELIM_NAMES[source.delimiter]}-separated`}>
+              {imported ? 'Import another' : 'Change file'}
             </button>
           </div>
         ) : (
           <>
-            <p className="imp-hint">A CSV from Excel, Google Sheets or another campaign tool. The first row should be the column names.</p>
             <label
               htmlFor="imp-file"
               className={`imp-drop${dragOver ? ' is-over' : ''}${reading ? ' is-busy' : ''}`}
@@ -653,18 +653,18 @@ function ImportFlow() {
                 disabled={reading}
               />
               <span className="btn btn-primary imp-tap imp-drop__btn">
-                {reading ? 'Reading…' : 'Choose a CSV file'}
+                {reading ? 'Reading…' : 'Choose CSV file'}
               </span>
-              <span className="imp-drop__or">or drag it here</span>
+              <span className="imp-drop__or">or drop it here</span>
             </label>
             {!pasteOpen ? (
               <button type="button" className="btn btn-quiet imp-tap" onClick={() => setPasteOpen(true)}>
-                Paste CSV text instead
+                Paste text
               </button>
             ) : (
               <div className="imp-paste">
                 <div className="field">
-                  <label htmlFor="imp-paste">Paste CSV text (header row first)</label>
+                  <label htmlFor="imp-paste">CSV text, header row first</label>
                   <textarea
                     id="imp-paste"
                     className="input mono imp-paste__text"
@@ -676,7 +676,7 @@ function ImportFlow() {
                   />
                 </div>
                 <div className="imp-actions">
-                  <button type="button" className="btn btn-primary imp-tap" onClick={usePaste}>Use this text</button>
+                  <button type="button" className="btn imp-tap" onClick={usePaste}>Use this text</button>
                   <button type="button" className="btn btn-quiet imp-tap" onClick={() => setPasteOpen(false)}>Cancel</button>
                 </div>
               </div>
@@ -686,177 +686,164 @@ function ImportFlow() {
         {loadError && <p className="error" role="alert">{loadError}</p>}
       </Step>
 
-      {source && (
-        <>
-          {/* ── 2. Match columns ── */}
-          <Step n={2} title="Match your columns" state={stepState(2)}>
-            {imp ? (
-              <p className="imp-summary">
-                {fmtN(usedCount)} of {plural(source.headers.length, 'column', 'columns')} imported as{' '}
-                {usedFields.join(', ')}
-                {tagClean ? <> · everyone tagged <span className="chip imp-chip">{tagClean}</span></> : null}
-              </p>
-            ) : (
-              <>
-                <p className="imp-hint">
-                  We guessed where each column goes. Check them and fix any that are wrong — {fmtN(usedCount)} of{' '}
-                  {plural(source.headers.length, 'column', 'columns')} will be imported.
-                </p>
-                <ul className="imp-map">
-                  {source.headers.map((h, i) => {
-                    const id = `imp-col-${i}`;
-                    const ex = examples[i] || [];
-                    return (
-                      <li key={i} className={`imp-map__row${mapping[i] ? ' is-used' : ''}`}>
-                        <div className="imp-map__src">
-                          <label htmlFor={id} className="imp-map__head">{h}</label>
-                          <span className="imp-map__ex">{ex.length ? ex.join(' · ') : 'empty column'}</span>
-                        </div>
-                        <span className="imp-map__arrow" aria-hidden="true">→</span>
-                        <select
-                          id={id}
-                          className="input imp-map__select"
-                          value={mapping[i] || SKIP}
-                          disabled={locked}
-                          onChange={(e) => setField(i, e.target.value)}
-                        >
-                          <option value={SKIP}>Don’t import</option>
-                          {FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-                        </select>
-                        {bumped?.col === i && (
-                          <p className="imp-map__note" role="status">
-                            Switched to Don’t import — {fieldLabel(bumped.key)} can only come from one column.
-                          </p>
-                        )}
-                        {mapping[i] === 'rating' && badRatings > 0 && (
-                          <p className="imp-map__note is-warn">
-                            {plural(badRatings, 'rating isn’t', 'ratings aren’t')} on the scale ({SCALE}).{' '}
-                            {badRatings === 1 ? 'That person comes' : 'Those people come'} in without a rating.
-                          </p>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-                {!hasName && (
-                  <p className="imp-need" role="alert">
-                    Everyone needs a name. Match a column to <strong>Full name</strong>, or to <strong>First name</strong> and{' '}
-                    <strong>Last name</strong>.
-                  </p>
-                )}
-
-                <div className="field imp-tagfield">
-                  <label htmlFor="imp-tag">Tag everyone in this file (optional)</label>
-                  <div className="imp-tagrow">
-                    <input
-                      id="imp-tag"
-                      className="input"
-                      maxLength={TAG_MAX}
-                      placeholder="voters-list-2026"
-                      value={tag}
-                      disabled={locked}
-                      onChange={(e) => onTag(e.target.value)}
-                    />
-                    {fileTag && tagClean !== fileTag && !locked && (
-                      <button type="button" className="btn btn-quiet imp-tap" onClick={() => onTag(fileTag)}>
-                        Use “{fileTag}”
-                      </button>
-                    )}
-                  </div>
-                  <span className="imp-hint imp-hint--sm">Makes this list easy to find later in People.</span>
-                </div>
-
-                {hasName && rows.length > 0 && (
-                  <div className="imp-preview">
-                    <span className="eyebrow">Preview — first {Math.min(5, rows.length)} of {fmtN(rows.length)}</span>
-                    <div className="imp-preview__scroll">
-                      <table className="table imp-preview__table">
-                        <thead>
-                          <tr>
-                            <th className="mono">Row</th>
-                            {previewCols.map(([k, label]) => <th key={k}>{label}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.slice(0, 5).map(({ data, row, cells }) => {
-                            const tags = [...new Set([...splitTags(data.tags), ...(tagClean ? [tagClean] : [])])];
-                            const rawRating = ratingCol === -1 ? '' : String(cells[ratingCol] ?? '').trim();
-                            return (
-                              <tr key={row}>
-                                <td className="mono muted">{row}</td>
-                                {previewCols.map(([k]) => (
-                                  <td key={k}>
-                                    {k === 'name' ? (displayName(data) || <span className="danger-text">no name</span>)
-                                      : k === 'address' ? (displayAddress(data) || <span className="muted">—</span>)
-                                      : k === 'tags' ? (tags.length
-                                        ? <span className="imp-tags">{tags.map((t) => <span key={t} className="chip">{t}</span>)}</span>
-                                        : <span className="muted">—</span>)
-                                      : k === 'rating' ? (data.rating
-                                        ? <RatingChip code={data.rating} />
-                                        : rawRating
-                                          ? <span className="muted" title="Not on the scale — comes in without a rating"><s>{rawRating}</s> unrated</span>
-                                          : <span className="muted">—</span>)
-                                      : (data[k] || <span className="muted">—</span>)}
-                                  </td>
-                                ))}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+      {/* ── 2. Match columns, then check ── */}
+      <Step n={2} title="Match columns" line="Check where each column goes." state={stepState(2)}>
+        {source && (checked ? (
+          <div className="imp-source">
+            <p className="imp-summary">
+              {usedFields.join(' · ')}
+              {tagClean ? <> · <span className="chip imp-chip">{tagClean}</span></> : null}
+            </p>
+            {!imp && (
+              <button type="button" className="btn btn-quiet imp-tap" onClick={() => setCheck(null)}>Change</button>
+            )}
+          </div>
+        ) : (
+          <>
+            <ul className="imp-map">
+              {source.headers.map((h, i) => {
+                const id = `imp-col-${i}`;
+                const ex = examples[i] || [];
+                return (
+                  <li key={i} className={`imp-map__row${mapping[i] ? ' is-used' : ''}`}>
+                    <div className="imp-map__src">
+                      <label htmlFor={id} className="imp-map__head">{h}</label>
+                      <span className="imp-map__ex">{ex.length ? ex.join(' · ') : 'empty'}</span>
                     </div>
-                  </div>
-                )}
-              </>
-            )}
-          </Step>
-
-          {/* ── 3. Check ── */}
-          <Step n={3} title="Check before you import" state={stepState(3)}>
-            {imp && check?.phase === 'done' ? (
-              <p className="imp-summary">
-                Checked: {fmtN(check.created)} new · {fmtN(check.merged)} to update · {fmtN(check.unchanged)} already up to date
-                {check.invalid.length ? ` · ${fmtN(check.invalid.length)} can’t import` : ''}
+                    <span className="imp-map__arrow" aria-hidden="true">→</span>
+                    <select
+                      id={id}
+                      className="input imp-map__select"
+                      value={mapping[i] || SKIP}
+                      disabled={locked}
+                      onChange={(e) => setField(i, e.target.value)}
+                    >
+                      <option value={SKIP}>Don’t import</option>
+                      {FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </select>
+                    {bumped?.col === i && (
+                      <p className="imp-map__note" role="status">
+                        Now “Don’t import” — {fieldLabel(bumped.key)} comes from one column.
+                      </p>
+                    )}
+                    {mapping[i] === 'rating' && badRatings > 0 && (
+                      <p className="imp-map__note is-warn">
+                        {plural(badRatings, 'rating isn’t', 'ratings aren’t')} on the scale ({SCALE}) — {badRatings === 1 ? 'comes' : 'they come'} in unrated.
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {!hasName && (
+              <p className="imp-need" role="alert">
+                Match a column to <strong>Full name</strong>, or <strong>First</strong> + <strong>Last name</strong>.
               </p>
-            ) : (
-              <>
-                {(!check || check.phase === 'error') && (
-                  <>
-                    <p className="imp-hint">See what will happen first. Nothing is saved yet.</p>
-                    <button type="button" className="btn btn-primary imp-tap" onClick={runCheck} disabled={!hasName || busy || locked}>
-                      Check {plural(rows.length, 'row', 'rows')}
-                    </button>
-                    {check?.phase === 'error' && <p className="error" role="alert">The check didn’t finish. {check.error}</p>}
-              </>
             )}
-            {check?.phase === 'running' && (
+
+            <Reveal label={tagClean ? `Tag: ${tagClean}` : 'Tag everyone'} defaultOpen={Boolean(tagClean)}>
+              <div className="field imp-tagfield">
+                <label htmlFor="imp-tag">Tag (optional)</label>
+                <div className="imp-tagrow">
+                  <input
+                    id="imp-tag"
+                    className="input"
+                    maxLength={TAG_MAX}
+                    placeholder="voters-list-2026"
+                    value={tag}
+                    disabled={locked}
+                    onChange={(e) => onTag(e.target.value)}
+                  />
+                  {fileTag && tagClean !== fileTag && !locked && (
+                    <button type="button" className="btn btn-quiet imp-tap" onClick={() => onTag(fileTag)}>
+                      Use “{fileTag}”
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Reveal>
+
+            {hasName && rows.length > 0 && (
+              <Reveal label="Preview">
+                <div className="imp-preview__scroll">
+                  <table className="table imp-preview__table">
+                    <thead>
+                      <tr>
+                        <th className="mono">Row</th>
+                        {previewCols.map(([k, label]) => <th key={k}>{label}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 5).map(({ data, row, cells }) => {
+                        const tags = [...new Set([...splitTags(data.tags), ...(tagClean ? [tagClean] : [])])];
+                        const rawRating = ratingCol === -1 ? '' : String(cells[ratingCol] ?? '').trim();
+                        return (
+                          <tr key={row}>
+                            <td className="mono muted">{row}</td>
+                            {previewCols.map(([k]) => (
+                              <td key={k}>
+                                {k === 'name' ? (displayName(data) || <span className="danger-text">no name</span>)
+                                  : k === 'address' ? (displayAddress(data) || <span className="muted">—</span>)
+                                  : k === 'tags' ? (tags.length
+                                    ? <span className="imp-tags">{tags.map((t) => <span key={t} className="chip">{t}</span>)}</span>
+                                    : <span className="muted">—</span>)
+                                  : k === 'rating' ? (data.rating
+                                    ? <RatingChip code={data.rating} />
+                                    : rawRating
+                                      ? <span className="muted" title="Not on the scale — comes in without a rating"><s>{rawRating}</s> unrated</span>
+                                      : <span className="muted">—</span>)
+                                  : (data[k] || <span className="muted">—</span>)}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Reveal>
+            )}
+
+            {check?.phase === 'running' ? (
               <div className="imp-running" role="status" aria-live="polite">
                 <Bar value={check.done} max={check.total} label="Checking" />
-                <p className="imp-hint">Checking {fmtN(check.done)} of {fmtN(check.total)}…</p>
+                <p className="imp-line mono">Checking {fmtN(check.done)} of {fmtN(check.total)}…</p>
+              </div>
+            ) : (
+              <div className="imp-actions">
+                <button type="button" className="btn btn-primary imp-tap" onClick={runCheck} disabled={!hasName || busy || locked}>
+                  Check {plural(rows.length, 'row', 'rows')}
+                </button>
+                <span className="imp-line imp-line--inline">{fmtN(usedCount)} of {fmtN(source.headers.length)} columns</span>
               </div>
             )}
-            {check?.phase === 'done' && (
+            {check?.phase === 'error' && <p className="error" role="alert">The check didn’t finish. {check.error}</p>}
+          </>
+        ))}
+      </Step>
+
+      {/* ── 3. Import, then place on the map ── */}
+      <Step n={3} title={imported ? 'Done' : 'Import'} line={!imp && !nothingNew ? 'Nothing is saved until you tap Import.' : null} state={imported ? 'done' : stepState(3)}>
+        {checked && (
+          <>
+            {!imp && (
               <div className="imp-result" role="status">
                 <Counts
                   items={[
-                    ['New people', check.created, 'ok'],
-                    ['Matched — will update', check.merged, null, 'already here; blanks filled, tags added'],
-                    ['Already up to date', check.unchanged],
+                    ['New', check.created, 'ok'],
+                    ['Update', check.merged],
+                    ['Same', check.unchanged],
                     ['Can’t import', check.invalid.length, check.invalid.length ? 'danger' : null],
                   ]}
                 />
-                {check.parts > 1 && (
-                  <p className="imp-hint imp-hint--sm">
-                    Big file, so it was checked in parts — a few repeats far apart in the file may show as new here.
-                  </p>
-                )}
+                {check.parts > 1 && <p className="imp-hint imp-hint--sm">Checked in parts — a few far-apart repeats may count as new.</p>}
                 {check.matches.length > 0 && (
-                  <details className="imp-matches">
-                    <summary>Who matches people already in Starbase</summary>
+                  <Reveal label="See matches">
+                    <p className="imp-hint imp-hint--sm">Blanks get filled. Nothing is overwritten.</p>
                     {check.merged > check.matches.length && (
-                      <p className="imp-hint imp-hint--sm">The first {fmtN(check.matches.length)} of {fmtN(check.merged)}.</p>
+                      <p className="imp-hint imp-hint--sm">First {fmtN(check.matches.length)} of {fmtN(check.merged)}.</p>
                     )}
-                    <ul>
+                    <ul className="imp-matches__list">
                       {check.matches.map((d) => (
                         <li key={`${d.row}-${d.id}`}>
                           <span className="mono muted">Row {fmtN(d.row)}</span> {d.name}
@@ -864,106 +851,82 @@ function ImportFlow() {
                         </li>
                       ))}
                     </ul>
-                  </details>
+                  </Reveal>
                 )}
                 <InvalidList
                   invalid={check.invalid}
-                  intro={`${plural(check.invalid.length, 'row', 'rows')} can’t be imported. Fix ${check.invalid.length === 1 ? 'it' : 'them'} in your spreadsheet and import the file again later${nothingValid ? '.' : ' — the rest import fine now.'}`}
+                  intro={`${plural(check.invalid.length, 'row', 'rows')} can’t be imported. Fix ${check.invalid.length === 1 ? 'it' : 'them'} in the spreadsheet.`}
                 />
+                {nothingToDo && <p className="imp-line">Everyone is already up to date.</p>}
+                {nothingValid && <p className="imp-line">Nothing to import yet. Fix the rows above, or change a column.</p>}
+                {!nothingNew && (
+                  <div className="imp-actions">
+                    <button type="button" className="btn btn-primary imp-tap" onClick={() => runImport(0)}>
+                      Import {plural(willWrite, 'person', 'people')}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
-              </>
-            )}
-          </Step>
 
-          {/* ── 4. Import ── */}
-          {check?.phase === 'done' && (
-            <Step n={4} title="Import" state={stepState(4)}>
-              {nothingToDo && !imp && (
-                <p className="imp-hint">Nothing new to import — everyone in this file is already up to date.</p>
-              )}
-              {nothingValid && !imp && (
-                <p className="imp-hint">
-                  None of these rows can be imported yet. Fix the rows listed above — or match a different column — then
-                  check again.
-                </p>
-              )}
-              {!nothingNew && !imp && (
-                <>
-                  <p className="imp-hint">
-                    This adds {plural(check.created, 'new person', 'new people')}
-                    {check.merged ? ` and updates ${plural(check.merged, 'person', 'people')} already here` : ''}.
-                  </p>
-                  <button type="button" className="btn btn-primary imp-tap" onClick={() => runImport(0)}>
-                    Import now
-                  </button>
-                </>
-              )}
-              {imp && (
-                <div className="imp-running" role="status" aria-live="polite">
-                  {imp.phase !== 'done' && <Bar value={imp.sent} max={imp.total} label="Importing" />}
-                  {imp.phase === 'running' && (
-                    <p className="imp-hint">Imported {fmtN(imp.sent)} of {fmtN(imp.total)} rows… keep this page open.</p>
-                  )}
-                  {imp.phase === 'error' && (
-                    <>
-                      <p className="error" role="alert">
-                        Stopped at row {fmtN(source.records[imp.resumeAt]?.row ?? imp.resumeAt + 1)}. {imp.error}
-                        {imp.sent > 0 ? ' Everything before it is saved.' : ''} People already imported won’t be doubled.
-                      </p>
+            {imp && (
+              <div className="imp-running" role="status" aria-live="polite">
+                {imp.phase !== 'done' && <Bar value={imp.sent} max={imp.total} label="Importing" />}
+                {imp.phase === 'running' && (
+                  <p className="imp-line mono">{fmtN(imp.sent)} of {fmtN(imp.total)} · keep this page open</p>
+                )}
+                {imp.phase === 'error' && (
+                  <>
+                    <p className="error" role="alert">
+                      Stopped at row {fmtN(source.records[imp.resumeAt]?.row ?? imp.resumeAt + 1)}. {imp.error}
+                      {imp.sent > 0 ? ' Rows before it are saved.' : ''}
+                    </p>
+                    <div className="imp-actions">
                       <button type="button" className="btn btn-primary imp-tap" onClick={() => runImport(imp.resumeAt)}>
                         Try the rest again
                       </button>
-                    </>
-                  )}
-                  {imp.phase === 'done' && (
-                    <>
-                      <p className="imp-done">
-                        Done. Added {plural(imp.created, 'person', 'people')}
-                        {imp.merged ? `, updated ${fmtN(imp.merged)}` : ''}
-                        {imp.unchanged ? `, ${fmtN(imp.unchanged)} already up to date` : ''}.
-                      </p>
-                      <InvalidList
-                        invalid={imp.invalid}
-                        intro={`${plural(imp.invalid.length, 'row was', 'rows were')} skipped. Fix ${imp.invalid.length === 1 ? 'it' : 'them'} in your spreadsheet and import the file again — no one will be doubled.`}
-                      />
-                    </>
-                  )}
-                  {(imp.phase === 'done' || imp.phase === 'error') && imp.created + imp.merged > 0 && (
-                    <Link className="btn imp-tap" to={peopleLink}>
-                      {tagClean ? `See “${tagClean}” in People` : 'See them in People'}
-                    </Link>
-                  )}
-                </div>
-              )}
-            </Step>
-          )}
-
-          {/* ── 5. Place on the map ── */}
-          {(imported || nothingToDo) && (
-            <Step n={5} title="Place them on the map" state="now">
-              {hasAddress ? (
-                <>
-                  <p className="imp-hint">
-                    Starbase looks up each street address and drops a pin, so people show up on the map and in walk lists.
-                    Big lists take a few minutes — keep this page open.
-                  </p>
-                  <GeocodeButton />
-                </>
-              ) : (
-                <p className="imp-hint">
-                  This list has no street addresses, so there’s nothing to place yet. Add someone’s address on their page in
-                  People, then place them from the map.
-                </p>
-              )}
-              <div className="imp-actions imp-next">
-                <Link className="btn imp-tap" to="/map">Open the map</Link>
-                <Link className="btn btn-quiet imp-tap" to="/turfs">Turfs and walk lists</Link>
+                    </div>
+                  </>
+                )}
+                {imp.phase === 'done' && (
+                  <>
+                    <Counts
+                      items={[
+                        ['Added', imp.created, 'ok'],
+                        ['Updated', imp.merged],
+                        ['Same', imp.unchanged],
+                      ]}
+                    />
+                    <InvalidList
+                      invalid={imp.invalid}
+                      intro={`${plural(imp.invalid.length, 'row', 'rows')} skipped. Fix and import the file again — no one is doubled.`}
+                    />
+                  </>
+                )}
               </div>
-            </Step>
-          )}
-        </>
-      )}
+            )}
+
+            {(imported || (nothingToDo && !imp)) && (
+              <div className="imp-place">
+                <h3 className="imp-place__title">Place them on the map</h3>
+                {hasAddress
+                  ? <GeocodeButton />
+                  : <p className="imp-line">No street addresses in this file.</p>}
+              </div>
+            )}
+
+            {(imported || imp?.phase === 'error' || (nothingToDo && !imp)) && (
+              <div className="imp-actions imp-next">
+                {(imp?.created || 0) + (imp?.merged || 0) > 0 && (
+                  <Link className="btn imp-tap" to={peopleLink}>{tagClean ? `See “${tagClean}”` : 'See them'}</Link>
+                )}
+                <Link className="btn btn-quiet imp-tap" to="/map">Map</Link>
+                <Link className="btn btn-quiet imp-tap" to="/turfs">Turfs</Link>
+              </div>
+            )}
+          </>
+        )}
+      </Step>
     </div>
   );
 }

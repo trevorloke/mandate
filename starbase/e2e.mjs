@@ -1,8 +1,9 @@
 // Starbase release E2E — one fresh Imagine Surrey workspace, end to end across
 // every screen: signup → seed Surrey doors → map (rate, outcome, sign, deep
-// link, filters) → people (tags, phone bank) → profile → shifts (assign +
-// notify) → signs → outreach (newsletter, press, petition, website bridge)
-// → public pages → Today → volunteer view → mobile → audit chain.
+// link, filters) → people (tags) → Calls → profile → shifts (assign +
+// notify) → outreach (newsletter, press, petition, website bridge) → public
+// pages → Today → team invite → volunteer on a phone (map, shifts, signs,
+// what they can't reach) → audit chain.
 //
 //   node server/index.js   (in-memory DB, serves web/dist)  then  node e2e.mjs
 import { chromium } from 'playwright-core';
@@ -93,7 +94,9 @@ await page.waitForSelector('.map-pin-wrap', { timeout: 10000 }).catch(() => {});
 const pins = await page.$$('.map-pin-wrap');
 check('map shows one pin per door (5 located doors)', pins.length === 5, `pins=${pins.length}`);
 let t = await text();
-check('map counter + unlocated pill', /5 doors/i.test(t) && /6 people/i.test(t) && /1 (person|people) not on the map/i.test(t), t.slice(0, 200));
+const filterLabel = await page.$eval('.map-filter-btn', (el) => el.getAttribute('aria-label')).catch(() => '');
+const unlocLabel = await page.$eval('.map-unloc__chip', (el) => el.getAttribute('aria-label')).catch(() => '');
+check('map counter + unlocated chip', /5 doors/.test(filterLabel) && /1 person not on the map/.test(unlocLabel), `${filterLabel} | ${unlocLabel}`);
 await shot('1-map');
 
 await go(`/map?person=${P.harjit.id}`);
@@ -104,6 +107,8 @@ await page.click('aside.door-card button[aria-label="1: Strong support"]');
 await sleep(800);
 let prof = (await api(`/persons/${P.harjit.id}`)).json;
 check('rating 1 at the door is saved', prof.person.rating === '1' && prof.contacts[0].channel === 'door', prof.person.rating);
+check('door card: rating confirmed in a toast', /Rated 1/.test(await text()));
+await page.click('aside.door-card .fk-more__btn');
 await page.click('aside.door-card button:has-text("Lawn")');
 await sleep(800);
 const signs = (await api('/signs')).json.signs;
@@ -116,14 +121,18 @@ await page.click('aside.door-card button:has-text("No answer")');
 await sleep(800);
 prof = (await api(`/persons/${P.dev.id}`)).json;
 check('no-answer logged without a rating', prof.contacts[0]?.outcome === 'no_answer' && prof.person.rating === null);
+// 4 asks "Voting for?" before anything is logged.
+await page.click('aside.door-card button[aria-label^="4: Opposed"]');
 await page.click('aside.door-card button[aria-label^="4B:"]');
 await sleep(800);
 prof = (await api(`/persons/${P.dev.id}`)).json;
-check('4B opposed variant saved', prof.person.rating === '4B', prof.person.rating);
+check('4 → Voting for? → Locke saves 4B', prof.person.rating === '4B', prof.person.rating);
+check('toast names the candidate', /Locke/.test(await text()));
 
 await go('/map');
 await page.waitForSelector('.map-pin-wrap', { timeout: 8000 }).catch(() => {});
-await page.click('.map-filters button:has-text("Opposed")');
+await page.click('.map-filter-btn');
+await page.click('.map-fsheet .map-fopt:has-text("Opposed")');
 await sleep(500);
 const opposedPins = (await page.$$('.map-pin-wrap')).length;
 check('Opposed filter narrows pins', opposedPins === 2, `pins=${opposedPins}`); // Tom 4D, Dev 4B
@@ -132,27 +141,39 @@ check('Opposed filter narrows pins', opposedPins === 2, `pins=${opposedPins}`); 
 await go('/people?tag=media');
 t = await text();
 check('media tag filter', /Lin Reporter/.test(t) && !/Harjit Gill/.test(t));
+// The old phone-bank link still works: it lands on Calls.
 await go('/people?bank=phone&has=phone');
-t = await text();
-check('phone bank lists callable people', /Call Grace/i.test(t) && /Call Tom/i.test(t), t.slice(0, 200));
-const graceRow = page.locator('li', { hasText: 'Grace Kim' }).first();
-await graceRow.locator('a:has-text("Call Grace")').evaluate((a) => a.addEventListener('click', (e) => e.preventDefault(), { once: true }));
-await graceRow.locator('a:has-text("Call Grace")').click();
-await graceRow.locator('button[aria-label="Lean support"]').click();
+check('old phone-bank link redirects to Calls', new URL(page.url()).pathname === '/calls' && !/channel=text/.test(page.url()), page.url());
+await page.waitForSelector('section.cl-card', { timeout: 8000 }).catch(() => {});
+const current = await page.$eval('section.cl-card', (el) => el.getAttribute('aria-label')).catch(() => '');
+if (current !== 'Grace Kim') {
+  await page.click('.cl-next__btn');
+  t = await text();
+  check('Calls queue lists callable people', /Grace Kim/.test(t) && /Tom Riley/.test(t), t.slice(0, 200));
+  await page.click('.cl-next__list button:has-text("Grace Kim")');
+  await sleep(300);
+} else {
+  check('Calls queue lists callable people', true);
+}
+check('Calls shows one person with a Call button', /Call Grace/i.test(await text()) && (await page.$$('section.cl-card')).length === 1);
+await page.click('section.cl-card button[aria-label="2: Lean support"]');
 await sleep(800);
 prof = (await api(`/persons/${P.grace.id}`)).json;
-check('phone bank: rating 2 logged as a phone contact', prof.person.rating === '2' && prof.contacts[0]?.channel === 'phone', JSON.stringify(prof.contacts[0]));
-await shot('3-phone-bank');
+check('Calls: rating 2 logged as a phone contact', prof.person.rating === '2' && prof.contacts[0]?.channel === 'phone', JSON.stringify(prof.contacts[0]));
+await shot('3-calls');
 
 // ── 5. Profile: socials, roles, tier ──
 await act('gift.log', { person_id: P.sam.id, amount_cents: 25000, date: new Date().toISOString().slice(0, 10), cadence: 'monthly' });
 await go(`/people/${P.sam.id}`);
+await page.click('.pf-sec__btn:has-text("Volunteer roles")');
+await page.click('.pf-sec__btn:has-text("Tags")');
 t = await text();
 check('profile: roles with detail', /Doorknocking/i.test(t) && /Punjabi/.test(t));
 check('profile: superstar donor tier', /superstar/i.test(t));
 check('profile: VIP tag', /VIP/.test(t));
 await shot('4-profile');
 await go(`/people/${P.lin.id}`);
+await page.click('.pf-sec__btn:has-text("Details")');
 t = await text();
 check('profile: social handle linked', (await page.$('a[href*="x.com/linreports"]')) !== null, t.slice(0, 120));
 
@@ -166,9 +187,10 @@ await act('shift.assign', { shift_id: shift.id, person_id: P.sam.id });
 await go(`/shifts/${shift.id}`);
 await page.click('button:has-text("Notify everyone")');
 await sleep(300);
-const confirm = await page.$('button:has-text("Send to 1 person")');
-if (confirm) await confirm.click();
+check('notify asks in place before sending', /Email \+ text 1 person\?/.test(await text()));
+await page.click('.ops-confirm button:has-text("Send")');
 await sleep(900);
+await page.click('.ops-notify button:has-text("Details")').catch(() => {});
 t = await text();
 check('shift notify shows per-channel results', /email queued/i.test(t) && /text queued/i.test(t), (t.match(/Sam Ortiz.{0,80}/) || [''])[0]);
 await shot('5-shift');
@@ -177,6 +199,9 @@ await shot('5-shift');
 await act('workspace.update', { website: 'https://imaginesurrey.ca' });
 await act('petition.create', { slug: 'skytrain-to-newton', title: 'Bring SkyTrain to Newton', body: 'Surrey deserves rapid transit south of 72nd.' });
 await go('/outreach/website');
+// The public links are rows with Copy; their addresses + the form endpoint sit under "For your web developer".
+await page.click('button.ot-more:has-text("For your web developer")');
+await sleep(300);
 t = await text();
 check('website tab: bridge snippet + public links', /\/api\/public\/imagine-surrey\/signup/.test(t) && /\/v\/imagine-surrey/.test(t) && /\/n\/imagine-surrey/.test(t));
 await shot('6-website-bridge');
@@ -210,8 +235,13 @@ await go('/people?tag=volunteer-prospect');
 check('website volunteer landed in People', /Website Volunteer/.test(await text()));
 
 await go('/outreach/newsletter');
+// Subscribers sit under "More"; the compose form opens from "Write newsletter".
+await page.click('button.ot-more:has-text("More")');
+await sleep(300);
 t = await text();
 check('newsletter list includes the petition opt-in', /priya@example\.org/.test(t));
+await page.click('button:has-text("Write newsletter")');
+await page.waitForSelector('#newsletter-subject', { timeout: 5000 });
 await page.fill('#newsletter-subject', 'This week in Surrey');
 await page.fill('#newsletter-body', 'Hello neighbours — here is what we heard at the doors this week.');
 await page.click('button:has-text("Send")');
@@ -231,7 +261,10 @@ check('press tab counts media contacts', /Media contacts:?\s*1/i.test(t) || /1 m
 await go('/');
 t = await text();
 check('Today: doors this week', /doors this week/i.test(t));
-check('Today: support bar', /support/i.test(t) && /opposed/i.test(t));
+await page.click('button.today-num');
+await sleep(300);
+t = await text();
+check('Today: support breakdown opens in place', /support/i.test(t) && /opposed/i.test(t) && /support=1/.test(page.url()));
 check('Today: upcoming shift', /Saturday canvass — Newton/.test(t));
 check('Today: money hero (desk role)', /total raised/i.test(t));
 await shot('9-today');
@@ -278,9 +311,15 @@ if (moved) {
   check('volunteer has no add-door button', (await volPage.$('button[aria-label="Add a door"]')) === null);
   const tabbar = await volPage.$('nav.tabbar');
   check('phone tab bar visible', tabbar && await tabbar.isVisible());
+  const tabs = tabbar ? (await tabbar.innerText()).replace(/\s+/g, ' ') : '';
+  check('volunteer tabs: Today · Map · Calls · Shifts', /today/i.test(tabs) && /map/i.test(tabs) && /calls/i.test(tabs) && /shifts/i.test(tabs) && !/money|outreach|signs/i.test(tabs), tabs);
   const overflow = await volPage.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check('no sideways scroll at 390px', overflow <= 0, overflow);
   await volPage.screenshot({ path: `${SHOTS}/11-volunteer-phone-map.png` });
+  await volPage.goto(`${BASE}/money`, { waitUntil: 'domcontentloaded' });
+  await sleep(900);
+  check('volunteer typing /money lands on Today', new URL(volPage.url()).pathname === '/', volPage.url());
+  await volPage.screenshot({ path: `${SHOTS}/12-volunteer-today.png` });
 }
 await vctx.close();
 

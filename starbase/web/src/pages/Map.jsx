@@ -1,5 +1,12 @@
 // Map — field mode. Houses as pins (one per address + unit), colored by the
-// household's strongest signal; tap a pin for the door card. Place mode drops
+// household's strongest signal; tap a pin for the door card. Every pin is a
+// 48px tap target; the number on a colored pin is always a rating (a
+// household's head-count is a small white badge on its corner). Doors that
+// would overlap at the current zoom merge into one white count bubble — tap
+// it to zoom in. Volunteers open on their own turf ("My turf"). The chrome is
+// one row: a single filter button (its sheet holds the filters, the turf
+// outline switch, walk lists and "Draw turf"), the desk-only "not on the
+// map" count chip, and two round buttons (Locate me, + Add door). Place mode drops
 // people who have an address but no pin, "add door" creates a person at a
 // tapped spot, and ?person=<id> deep-links to (and selects) a door. Turfs are
 // translucent polygons (the Turfs chip shows/hides them); tap one for its
@@ -15,10 +22,14 @@ import 'leaflet/dist/leaflet.css';
 import { apiGet, action } from '../api.js';
 import { ratingByCode } from '@starbase/shared/canvass';
 import DoorCard, { AddDoorForm, SIGN_LABEL, doorTitle, patchDoors } from '../components/DoorCard.jsx';
+import { More, ratingWho } from '../components/RatingButtons.jsx';
 import GeocodeButton from '../components/GeocodeButton.jsx';
 import './map.css';
 
 const SURREY = [49.1913, -122.849];
+// "My turf" (volunteers with a turf) comes first and is where they start:
+// their walk list's doors, not the whole city's.
+const MINE = { key: 'mine', label: 'My turf' };
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'support', label: 'Support' },
@@ -27,8 +38,10 @@ const FILTERS = [
   { key: 'unrated', label: 'Unrated' },
   { key: 'signs', label: 'Signs' },
 ];
+const FILTER_LABEL = Object.fromEntries([MINE, ...FILTERS].map((f) => [f.key, f.label]));
 
 const isPhone = () => window.matchMedia('(max-width: 720px)').matches;
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const norm = (s) => String(s || '').trim().toLowerCase();
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -138,7 +151,7 @@ function spreadStacked(doors) {
     if (group.length < 2) continue;
     group.sort((a, b) => String(a.unit || '').localeCompare(String(b.unit || ''), undefined, { numeric: true }));
     group.forEach((door, i) => {
-      const r = 28 * Math.sqrt(i);
+      const r = 36 * Math.sqrt(i); // ≥ CLUSTER_PX apart once zoomed all the way in
       const t = i * 2.39996; // golden angle
       door.offset = [Math.round(r * Math.cos(t)), Math.round(r * Math.sin(t))];
     });
@@ -147,27 +160,108 @@ function spreadStacked(doors) {
 
 const EMPTY_MODEL = { doors: [], byPerson: new Map(), orphanSigns: [] };
 
+// ── Pins, count bubbles, sign flags ──
+// Every marker is a 48x48 transparent hit box (field rule) around the
+// visible glyph. Doors closer than CLUSTER_PX on screen merge into one
+// bubble, so a tap always lands on the door it looks like it lands on.
+const CLUSTER_PX = 36;
+// A volunteer's turf opens as close as its doors allow: just room for the
+// edge pins (half a 48px hit box), so neighbours land far enough apart.
+const PIN_INSET = 20;
+const CLUSTER_OFF_ZOOM = 19; // the tile layer's max zoom: everything apart
+const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: 'Removed' };
+const HOUSE_SVG = '<svg viewBox="0 0 12 10" aria-hidden="true"><path d="M6 0 0 5h1.6v5h3.2V7h2.4v3h3.2V5H12z"/></svg>';
+const PEOPLE_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1"/><path d="M1.8 15.5c0-3.6 2.8-6.2 6.2-6.2s6.2 2.6 6.2 6.2z"/></svg>';
+
+// The rating that sets a pin's color — so the number on a colored pin is
+// always a rating, never a head-count. Opposed is always plain "4" (the red
+// says it); who they vote for is in the pin's title and on the door card.
+function doorCode(door) {
+  const inBand = door.persons.map((p) => ratingByCode(p.rating)).filter((r) => r && r.band === door.band);
+  if (!inBand.length) return '·';
+  if (door.band === 'opposed') return '4';
+  return inBand.map((r) => r.short).sort()[0];
+}
+// "Rosa Delgado (4 · Locke)" for a pin's title.
+function personTitle(p) {
+  const r = ratingByCode(p.rating);
+  if (!r) return p.name;
+  return `${p.name} (${r.band === 'opposed' && r.code !== '4' ? `4 · ${ratingWho(r.code)}` : r.short})`;
+}
+
+// A door pin; its signs fly as little flags at the top-right, inside the
+// same hit box, so tapping a flag opens the door.
 function pinIcon(door, selected) {
-  const single = door.persons.length === 1;
-  const label = single ? ratingByCode(door.persons[0].rating)?.short || '·' : String(door.persons.length);
-  const cls = ['map-pin', `map-pin--${door.band}`, single ? '' : 'map-pin--multi', selected ? 'map-pin--selected' : ''].filter(Boolean).join(' ');
+  const n = door.persons.length;
+  const cls = ['map-pin', `map-pin--${door.band}`, n > 1 ? 'map-pin--multi' : '', selected ? 'map-pin--selected' : ''].filter(Boolean).join(' ');
+  const household = n > 1 ? `<span class="map-pin__hh">${PEOPLE_SVG}${n}</span>` : '';
+  const flags = door.signs.slice(0, 3).map((s, i) =>
+    `<i class="map-flag map-flag--${esc(s.status)}" style="left:${34 + i * 10}px;top:-6px"><i class="map-flag__face"></i><i class="map-flag__post"></i></i>`).join('');
   return L.divIcon({
     className: 'map-pin-wrap',
-    html: `<div class="${cls}"><span class="map-pin__label">${esc(label)}</span></div>`,
-    iconSize: [30, 40],
-    iconAnchor: [15 - door.offset[0], 38 - door.offset[1]],
+    html: `<div class="${cls}"><span class="map-pin__label">${esc(doorCode(door))}</span>${household}</div>${flags}`,
+    iconSize: [48, 48],
+    iconAnchor: [24 - door.offset[0], 42 - door.offset[1]],
   });
 }
 
-// Sign glyphs sit at the top-right of their door pin (i staggers several);
-// i < 0 means a sign with no door — anchor it on its own spot.
-function signIcon(status, i, offset = [0, 0]) {
+// A bubble for several nearby doors: the count, ringed by their bands.
+function clusterIcon(doors, offset) {
+  const c = { support: 0, undecided: 0, opposed: 0, unrated: 0 };
+  for (const d of doors) c[d.band] += 1;
+  const pct = (k) => `${((k / doors.length) * 100).toFixed(1)}%`;
+  const a = c.support;
+  const b = a + c.undecided;
+  const o = b + c.opposed;
+  return L.divIcon({
+    className: 'map-cluster-wrap',
+    html: `<div class="map-cluster" style="--a:${pct(a)};--b:${pct(b)};--c:${pct(o)}"><span class="map-cluster__n">${HOUSE_SVG}${doors.length}</span></div>`,
+    iconSize: [48, 48],
+    iconAnchor: [24 - offset[0], 44 - offset[1]], // bubble where the pin bodies would be
+  });
+}
+
+// A sign with no door: its own 48px tap target.
+function signIcon(status) {
   return L.divIcon({
     className: 'map-sign-wrap',
-    html: `<div class="map-sign map-sign--${esc(status)}"><i class="map-sign__face"></i><i class="map-sign__post"></i></div>`,
-    iconSize: [16, 20],
-    iconAnchor: i < 0 ? [8, 20] : [-12 - i * 12 - offset[0], 46 - offset[1]],
+    html: `<i class="map-flag map-flag--${esc(status)}"><i class="map-flag__face"></i><i class="map-flag__post"></i></i>`,
+    iconSize: [48, 48],
+    iconAnchor: [24, 34],
   });
+}
+
+// Group doors whose pins would sit closer than CLUSTER_PX at this zoom.
+// Projection math only (no map instance needed); offsets are the stacked
+// units' fan-out, in pixels.
+function clusterDoors(doors, zoom) {
+  if (zoom == null) return EMPTY_LIST;
+  if (zoom >= CLUSTER_OFF_ZOOM) return doors.map((d) => [d]);
+  const R2 = CLUSTER_PX * CLUSTER_PX;
+  const cells = new Map();
+  const groups = [];
+  for (const d of doors) {
+    const pt = L.CRS.EPSG3857.latLngToPoint(L.latLng(d.lat, d.lng), zoom);
+    const x = pt.x + d.offset[0];
+    const y = pt.y + d.offset[1];
+    const cx = Math.floor(x / CLUSTER_PX);
+    const cy = Math.floor(y / CLUSTER_PX);
+    let hit = null;
+    for (let i = -1; i <= 1 && !hit; i += 1) {
+      for (let j = -1; j <= 1 && !hit; j += 1) {
+        for (const g of cells.get(`${cx + i},${cy + j}`) || EMPTY_LIST) {
+          if ((g.x - x) ** 2 + (g.y - y) ** 2 < R2) { hit = g; break; }
+        }
+      }
+    }
+    if (hit) { hit.doors.push(d); continue; }
+    const g = { x, y, doors: [d] };
+    groups.push(g);
+    const k = `${cx},${cy}`;
+    if (!cells.has(k)) cells.set(k, []);
+    cells.get(k).push(g);
+  }
+  return groups.map((g) => g.doors);
 }
 
 const meIcon = () => L.divIcon({ className: 'map-me-wrap', html: '<div class="map-me-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
@@ -201,7 +295,8 @@ function revealLatLng(map, ll, page) {
 // Fit a turf into the part of the map the overlays leave free (filter strip
 // on top, the sheet on the right on desktop or along the bottom on phones).
 // onlyIfHidden: leave the view alone when every corner is already in sight.
-function fitTurf(map, ring, page, { onlyIfHidden = false, maxZoom = 17 } = {}) {
+// inset: extra pixels on every side (room for the pins at the edges).
+function fitTurf(map, ring, page, { onlyIfHidden = false, maxZoom = 17, pad = 0, inset = 0 } = {}) {
   const size = map.getSize();
   const box = map.getContainer().getBoundingClientRect();
   const topEl = page?.querySelector('.map-top');
@@ -223,7 +318,13 @@ function fitTurf(map, ring, page, { onlyIfHidden = false, maxZoom = 17 } = {}) {
     const pt = map.latLngToContainerPoint(ll);
     return pt.x >= gap && pt.x <= size.x - right && pt.y >= top && pt.y <= size.y - bottom;
   })) return;
-  map.fitBounds(L.latLngBounds(ring), { paddingTopLeft: [gap, top], paddingBottomRight: [right, bottom], maxZoom, animate: false });
+  const bounds = pad ? L.latLngBounds(ring).pad(pad) : L.latLngBounds(ring);
+  map.fitBounds(bounds, {
+    paddingTopLeft: [gap + inset, top + inset],
+    paddingBottomRight: [right + inset, bottom + inset],
+    maxZoom,
+    animate: false,
+  });
 }
 
 // The first corner of a turf being drawn: a 44px tap target (tap it to close
@@ -244,6 +345,23 @@ function TurfGlyph() {
       <circle cx="20" cy="10" r="1.6" fill="currentColor" stroke="none" />
       <circle cx="17" cy="19" r="1.6" fill="currentColor" stroke="none" />
       <circle cx="6" cy="17" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function FilterGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="map-glyph">
+      <path d="M4 6h16M7 12h10M10 18h4" />
+    </svg>
+  );
+}
+
+function PinGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="map-glyph">
+      <path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z" />
+      <circle cx="12" cy="10" r="2.2" />
     </svg>
   );
 }
@@ -271,16 +389,13 @@ function PlacePicker({ unlocated, onPick, onClose }) {
   return (
     <aside className="map-sheet map-place-picker" aria-label="People not on the map yet">
       <header className="mapsheet-head">
-        <div>
-          <span className="eyebrow">Place on the map</span>
-          <h2 className="mapsheet-title">Who are we placing?</h2>
-        </div>
+        <h2 className="mapsheet-title">Place on the map · {unlocated}</h2>
         <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close">✕</button>
       </header>
       <div className="field">
-        <label htmlFor="place-q">Search</label>
+        <label htmlFor="place-q" className="fk-sr">Search</label>
         <input
-          id="place-q" className="input" type="search" autoFocus placeholder="Name, address or phone…"
+          id="place-q" className="input" type="search" autoFocus placeholder="Search name or street"
           value={q} onChange={(e) => setQ(e.target.value)}
         />
       </div>
@@ -295,17 +410,13 @@ function PlacePicker({ unlocated, onPick, onClose }) {
           </li>
         ))}
         {partial && rows.length > 0 && (
-          <li className="muted map-place-empty">
-            Showing {rows.length} of {unlocated} — search by name or street to find the rest.
-          </li>
+          <li className="muted map-place-empty">{rows.length} of {unlocated} · search for more</li>
         )}
         {persons.isPending && persons.fetchStatus === 'paused' && (
-          <li className="muted map-place-empty">You’re offline — this list loads when you have signal.</li>
+          <li className="muted map-place-empty">Offline — loads with signal</li>
         )}
         {rows.length === 0 && !persons.isPending && (
-          <li className="muted map-place-empty">
-            {q ? `No one unplaced matches “${q}”.` : 'Everyone with an address is already on the map.'}
-          </li>
+          <li className="muted map-place-empty">{q ? 'No match' : 'Everyone is on the map'}</li>
         )}
       </ul>
     </aside>
@@ -324,14 +435,18 @@ function TurfBar({ done, total }) {
   );
 }
 
-// The sheet for one turf: progress, canvassers (desk roles assign/remove),
-// the walk list, and delete with an in-place confirm.
+// The sheet for one turf: progress and the walk list up front; canvassers
+// (desk roles assign/remove) and the rest (numbers, delete with an in-place
+// confirm, all turfs) one tap away.
 function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [pick, setPick] = useState('');
   const [confirming, setConfirming] = useState(false);
+  // A turf nobody walks yet: open the canvassers straight away for desk roles.
+  const [whoOpen, setWhoOpen] = useState(() => desk && turf.members.length === 0);
+  const [moreOpen, setMoreOpen] = useState(false);
   const membersQ = useQuery({ queryKey: ['members'], queryFn: () => apiGet('/members'), enabled: desk, staleTime: 60_000 });
   const assigned = new Set(turf.members.map((m) => m.id));
   const options = (membersQ.data?.members ?? []).filter((m) => !assigned.has(m.id));
@@ -346,7 +461,7 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
       await Promise.all(['turfs', 'brief'].map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
       return true;
     } catch (err) {
-      setError(err.message || 'That didn’t save — try again');
+      setError(err.message || 'Not saved — try again');
       return false;
     } finally {
       setBusy(false);
@@ -359,12 +474,12 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
     const who = options.find((m) => m.id === pick);
     if (await run('turf.assign', { turf_id: turf.id, user_id: pick })) {
       setPick('');
-      toast(`${who?.name || 'They'} can now open this walk list`);
+      toast(`${who?.name || 'They'} added`);
     }
   };
 
   const unassign = async (m) => {
-    if (await run('turf.unassign', { turf_id: turf.id, user_id: m.id })) toast(`Took ${m.name} off ${turf.name}`);
+    if (await run('turf.unassign', { turf_id: turf.id, user_id: m.id })) toast(`${m.name} removed`);
   };
 
   const remove = async () => {
@@ -377,7 +492,7 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
       queryClient.setQueryData(['turfs'], (d) => (d ? { ...d, turfs: d.turfs.filter((t) => t.id !== turf.id) } : d));
       for (const key of ['turfs', 'brief']) queryClient.invalidateQueries({ queryKey: [key] });
     } catch (err) {
-      setError(err.message || 'Could not delete it — try again');
+      setError(err.message || 'Not deleted — try again');
       setBusy(false);
     }
   };
@@ -385,31 +500,22 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
   return (
     <aside className="map-sheet turf-sheet" aria-label={`Turf: ${turf.name}`} style={{ '--turf': turfColor(turf) }}>
       <header className="mapsheet-head">
-        <div>
-          <span className="eyebrow"><i className="turf-swatch" aria-hidden="true" />Turf</span>
-          <h2 className="mapsheet-title">{turf.name}</h2>
-        </div>
+        <h2 className="mapsheet-title"><i className="turf-swatch" aria-hidden="true" />{turf.name}</h2>
         <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close turf">✕</button>
       </header>
 
       <div className="turf-sheet__body">
         <div className="turf-progress">
-          <span className="turf-progress__text mono"><strong>{turf.doorsDone}</strong> of {plural(turf.doors, 'door', 'doors')} done</span>
+          <span className="turf-progress__text mono"><strong>{turf.doorsDone}</strong> of {plural(turf.doors, 'door', 'doors')}</span>
           <TurfBar done={turf.doorsDone} total={turf.doors} />
         </div>
-        <dl className="turf-stats">
-          <div><dt>Doors left</dt><dd>{left}</dd></div>
-          <div><dt>People</dt><dd>{turf.people}</dd></div>
-          <div><dt>Rated</dt><dd>{turf.rated}</dd></div>
-        </dl>
         <Link className="btn btn-primary turf-act" to={`/turfs/${turf.id}`}>Open walk list</Link>
 
-        <section className="turf-sec" aria-labelledby="turf-canvassers">
-          <span className="eyebrow" id="turf-canvassers">Canvassers</span>
+        {/* Assignment is desk work; a volunteer gets the names under More. */}
+        {desk && (
+        <More id="turf-who" label={`Canvassers · ${turf.members.length}`} open={whoOpen} onToggle={() => setWhoOpen((o) => !o)}>
           {turf.members.length === 0 ? (
-            <p className="muted turf-none">
-              {desk ? 'No one yet. Volunteers only see turfs assigned to them.' : 'No one assigned yet.'}
-            </p>
+            <p className="muted turf-none">No one yet</p>
           ) : (
             <ul className="turf-members">
               {turf.members.map((m) => (
@@ -433,7 +539,7 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
           {desk && (
             <form className="turf-assign" onSubmit={assign}>
               <div className="field">
-                <label htmlFor="turf-assign">Assign a team member</label>
+                <label htmlFor="turf-assign" className="fk-sr">Add a canvasser</label>
                 <select
                   id="turf-assign" className="input" value={pick} disabled={busy || !options.length}
                   onChange={(e) => setPick(e.target.value)}
@@ -442,36 +548,44 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
                     {/* isPending, not isLoading: offline the fetch is paused, and
                         "everyone is on it" would be a wrong answer. */}
                     {membersQ.isPending
-                      ? (membersQ.fetchStatus === 'paused' ? 'Offline — the team loads with signal' : 'Loading the team…')
+                      ? (membersQ.fetchStatus === 'paused' ? 'Offline' : 'Loading…')
                       : membersQ.isError ? 'Couldn’t load the team'
-                        : options.length ? 'Choose someone…' : 'Everyone on the team is on it'}
+                        : options.length ? 'Add a canvasser…' : 'Everyone is on it'}
                   </option>
                   {options.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
                 </select>
               </div>
-              <button type="submit" className="btn turf-act" disabled={busy || !pick}>Assign</button>
+              <button type="submit" className="btn turf-act" disabled={busy || !pick}>Add</button>
             </form>
           )}
           {desk && membersQ.data && !options.length && me?.role === 'manager' && (
-            <p className="muted turf-none">Need more canvassers? <Link to="/team">Invite them from Team</Link>.</p>
+            <Link className="btn btn-quiet turf-act" to="/team">Invite more</Link>
           )}
-          {membersQ.isError && <p className="error">Couldn’t load the team — {membersQ.error.message}</p>}
-        </section>
+          {membersQ.isError && <p className="error">{membersQ.error.message}</p>}
+        </More>
+        )}
 
-        {desk && (
-          <section className="turf-sec">
-            {confirming ? (
+        <More id="turf-more" open={moreOpen} onToggle={() => setMoreOpen((o) => !o)}>
+          <dl className="turf-stats">
+            <div><dt>Left</dt><dd>{left}</dd></div>
+            <div><dt>People</dt><dd>{turf.people}</dd></div>
+            <div><dt>Rated</dt><dd>{turf.rated}</dd></div>
+          </dl>
+          {!desk && turf.members.length > 0 && (
+            <p className="turf-crew">
+              {turf.members.map((m) => (m.id === me?.user?.id ? `${m.name} (you)` : m.name)).join(' · ')}
+            </p>
+          )}
+          {desk && (
+            confirming ? (
               <div className="turf-confirm" role="group" aria-label="Confirm delete">
-                <p>
-                  Delete <strong>{turf.name}</strong>? Its walk list and assignments go with it.
-                  People and their knocks stay.
-                </p>
+                <p>Delete this turf? Knocks stay.</p>
                 <div className="turf-confirm__btns">
                   <button type="button" className="btn turf-act turf-danger" disabled={busy} onClick={remove}>
-                    {busy ? 'Deleting…' : 'Delete turf'}
+                    {busy ? 'Deleting…' : 'Yes, delete'}
                   </button>
                   <button type="button" className="btn turf-act" disabled={busy} autoFocus onClick={() => setConfirming(false)}>
-                    Keep it
+                    No
                   </button>
                 </div>
               </div>
@@ -479,12 +593,33 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
               <button type="button" className="btn btn-quiet turf-act turf-delete" onClick={() => { setConfirming(true); setError(null); }}>
                 Delete turf
               </button>
-            )}
-          </section>
-        )}
+            )
+          )}
+          <Link className="btn btn-quiet turf-act" to="/turfs">All turfs</Link>
+        </More>
 
         {error && <p className="error" role="alert">{error}</p>}
-        <Link className="turf-all muted" to="/turfs">All turfs</Link>
+      </div>
+    </aside>
+  );
+}
+
+// A sign that isn't at a known door: what it is, where, and (desk) the list.
+function SignSheet({ sign, desk, onClose }) {
+  return (
+    <aside className="map-sheet sign-sheet" aria-label="Sign">
+      <header className="mapsheet-head">
+        <div className="door-head">
+          <h2 className="mapsheet-title door-head__name">{SIGN_LABEL[sign.kind] || 'Sign'}</h2>
+          {sign.address && <span className="door-head__addr">{sign.address}</span>}
+        </div>
+        <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close sign">✕</button>
+      </header>
+      <div className="turf-sheet__body">
+        <span className={`chip sign-sheet__chip ${sign.status === 'installed' ? 'chip-ok' : 'chip-warn'}`}>
+          {SIGN_STATUS[sign.status] || sign.status}
+        </span>
+        {desk && <Link className="btn turf-act sign-sheet__act" to="/signs">All signs</Link>}
       </div>
     </aside>
   );
@@ -498,7 +633,7 @@ function NameTurfForm({ points, doors, busy, error, onSave, onBack, onCancel }) 
   const submit = (e) => {
     e.preventDefault();
     const n = name.trim();
-    if (!n) { setLocalError('Give it a name canvassers will recognize, like “Newton — 72 Ave north”'); return; }
+    if (!n) { setLocalError('Add a name'); return; }
     setLocalError(null);
     onSave(n);
   };
@@ -507,28 +642,86 @@ function NameTurfForm({ points, doors, busy, error, onSave, onBack, onCancel }) 
     <form className="door-card door-form turf-name-form" onSubmit={submit} aria-label="Name this turf">
       <header className="mapsheet-head">
         <div>
-          <span className="eyebrow">New turf · {plural(points.length, 'point', 'points')}</span>
           <h2 className="mapsheet-title">Name this turf</h2>
+          <span className="door-head__addr">{plural(inside.doors, 'door', 'doors')} · {plural(inside.people, 'person', 'people')}</span>
         </div>
         <button type="button" className="btn btn-quiet mapsheet-close" onClick={onCancel} disabled={busy} aria-label="Discard this turf">✕</button>
       </header>
-      <p className="muted door-form__where">
-        {inside.doors ? `${plural(inside.doors, 'door', 'doors')} · ${plural(inside.people, 'person', 'people')} inside` : 'No doors inside yet — people show up once they’re on the map'}
-      </p>
-      <div className="field">
-        <label htmlFor="turf-name">Turf name</label>
-        <input
-          id="turf-name" className="input" autoFocus required maxLength={200} autoComplete="off"
-          placeholder="Newton — 72 Ave north" value={name} onChange={(e) => setName(e.target.value)}
-        />
-      </div>
-      {shown && <p className="error turf-form-error" role="alert">{shown}</p>}
-      <div className="door-form__actions">
-        <button type="submit" className="btn btn-primary door-act" disabled={busy}>{busy ? 'Saving…' : 'Save turf'}</button>
-        <button type="button" className="btn door-act" disabled={busy} onClick={onBack}>Keep drawing</button>
-        <button type="button" className="btn btn-quiet door-act" disabled={busy} onClick={onCancel}>Discard</button>
+      <div className="door-form__body">
+        <div className="field">
+          <label htmlFor="turf-name" className="fk-sr">Turf name</label>
+          <input
+            id="turf-name" className="input" autoFocus required maxLength={200} autoComplete="off"
+            placeholder="Newton — 72 Ave north" value={name} onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        {shown && <p className="error turf-form-error" role="alert">{shown}</p>}
+        <div className="door-form__actions">
+          <button type="submit" className="btn btn-primary door-act" disabled={busy}>{busy ? 'Saving…' : 'Save turf'}</button>
+          <button type="button" className="btn door-act" disabled={busy} onClick={onBack}>Keep drawing</button>
+          <button type="button" className="btn btn-quiet door-act" disabled={busy} onClick={onCancel}>Discard</button>
+        </div>
       </div>
     </form>
+  );
+}
+
+// The one filter button's sheet: which doors to show, turf outlines, and
+// the turf tools (walk lists, drawing) that used to crowd the map.
+function FilterSheet({
+  filters, filter, onFilter, counts, showTurfs, onTurfs, turfCount, walkTo, walkLabel,
+  canCreate, onDraw, unlocated, onPlace, onClose,
+}) {
+  return (
+    <>
+      <button type="button" className="map-scrim" aria-label="Close" tabIndex={-1} onClick={onClose} />
+      <div className="map-fsheet" role="dialog" aria-label="Show on the map">
+        <header className="map-fsheet__head">
+          <h2 className="mapsheet-title">Show</h2>
+          <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close">✕</button>
+        </header>
+        <div className="map-fsheet__grid" role="radiogroup" aria-label="Doors to show">
+          {filters.map((f, i) => (
+            <button
+              key={f.key}
+              type="button"
+              role="radio"
+              aria-checked={filter === f.key}
+              className={`map-fopt${filter === f.key ? ' is-on' : ''}`}
+              data-band={f.key}
+              autoFocus={filter === f.key || (i === 0 && !filters.some((x) => x.key === filter))}
+              onClick={() => onFilter(f.key)}
+            >
+              <span className="map-fopt__dot" aria-hidden="true" />
+              <span className="map-fopt__label">{f.label}</span>
+              <span className="map-fopt__n mono">{counts[f.key] ?? 0}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showTurfs}
+            className={`map-fopt map-fopt--turfs${showTurfs ? ' is-on' : ''}`}
+            onClick={() => onTurfs(!showTurfs)}
+          >
+            <span className="map-fopt__dot" aria-hidden="true" />
+            <span className="map-fopt__label">Turfs</span>
+            <span className="map-fopt__n mono">{turfCount}</span>
+          </button>
+        </div>
+        {(turfCount > 0 || canCreate || unlocated > 0) && (
+          <div className="map-fsheet__acts">
+            {turfCount > 0 && <Link className="btn map-fsheet__act" to={walkTo}>{walkLabel}</Link>}
+            {canCreate && (
+              <button type="button" className="btn map-fsheet__act" onClick={onDraw}><TurfGlyph /> Draw turf</button>
+            )}
+            {!canCreate && unlocated > 0 && (
+              <button type="button" className="btn map-fsheet__act" onClick={onPlace}>Place {unlocated} on map</button>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -552,6 +745,8 @@ export default function MapPage() {
   const onMapClickRef = useRef(null);
   const onLongPressRef = useRef(null);
   const onPinClickRef = useRef(null);
+  const onClusterClickRef = useRef(null);
+  const onSignClickRef = useRef(null);
   const setParamsRef = useRef(null);
   const onTurfClickRef = useRef(null);
   const onDraftStartRef = useRef(null);
@@ -559,7 +754,7 @@ export default function MapPage() {
   const focusedTurfRef = useRef(null); // turf id the map was last fitted to (or tapped)
   const canCreate = CREATE_ROLES.includes(me?.role);
 
-  const [filter, setFilter] = useState('all');
+  const [filterPick, setFilter] = useState(null); // null: the role's default (below)
   const [showTurfs, setShowTurfs] = useState(readTurfsPref);
   const [draft, setDraft] = useState(EMPTY_DRAFT); // turf being drawn: [lat, lng] points
   const [turfBusy, setTurfBusy] = useState(false);
@@ -569,13 +764,25 @@ export default function MapPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [addAt, setAddAt] = useState(null);     // { lat, lng } for a brand-new door
   const [locating, setLocating] = useState(false);
-  const [toastMsg, setToastMsg] = useState(null);
+  const [zoom, setZoom] = useState(null);        // drives the count bubbles
+  const [signSel, setSignSel] = useState(null);  // an orphan sign's sheet
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterBtnRef = useRef(null);
+  // Closing the filter sheet hands focus back to the button that opened it.
+  const closeFilter = useCallback(() => {
+    setFilterOpen(false);
+    requestAnimationFrame(() => filterBtnRef.current?.focus({ preventScroll: true }));
+  }, []);
+  const [unlocOpen, setUnlocOpen] = useState(false);
+  const [toastMsg, setToastMsg] = useState(null); // { text, act: { label, onClick } | null }
   const toastTimer = useRef(null);
 
-  const toast = useCallback((msg) => {
-    setToastMsg(msg);
+  // toast(text, act?) — act is an optional { label, onClick } button
+  // (the door card's "Change rating").
+  const toast = useCallback((text, act = null) => {
+    setToastMsg({ text, act });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMsg(null), 3500);
+    toastTimer.current = setTimeout(() => setToastMsg(null), act ? 5000 : 3500);
   }, []);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
@@ -598,11 +805,39 @@ export default function MapPage() {
   // Declared before the marker effects so Leaflet handlers see the current key.
   useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
 
-  const visible = useMemo(
-    () => doors.filter((d) => (filter === 'all' ? true : filter === 'signs' ? d.signs.length > 0 : d.band === filter)),
-    [doors, filter],
-  );
-  const visiblePeople = visible.reduce((n, d) => n + d.persons.length, 0);
+  // Turfs (volunteers get only the ones assigned to them).
+  const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs') });
+  const turfs = turfsQ.data?.turfs ?? EMPTY_LIST;
+
+  // A volunteer's own doors: inside any turf they walk (the walk list's doors).
+  const mineKeys = useMemo(() => {
+    if (canCreate) return null;
+    const rings = turfs.filter((t) => validRing(t.polygon)).map((t) => t.polygon.map(([lat, lng]) => [Number(lat), Number(lng)]));
+    if (!rings.length) return null;
+    return new Set(doors.filter((d) => rings.some((r) => pointInPolygon(d.lat, d.lng, r))).map((d) => d.key));
+  }, [canCreate, turfs, doors]);
+  const filters = mineKeys?.size ? [MINE, ...FILTERS] : FILTERS;
+  // Volunteers start on their turf; everyone else on all doors.
+  const filter = filterPick && filters.some((f) => f.key === filterPick) ? filterPick : mineKeys?.size ? 'mine' : 'all';
+
+  const shows = useCallback((d) => (
+    filter === 'all' ? true
+      : filter === 'mine' ? Boolean(mineKeys?.has(d.key))
+        : filter === 'signs' ? d.signs.length > 0
+          : d.band === filter), [filter, mineKeys]);
+  // The open door always keeps its pin, whatever the filter. (Only a door
+  // the filter hides changes the list, so a tap doesn't rebuild every pin.)
+  const extraKey = selectedDoor && !shows(selectedDoor) ? selectedDoor.key : null;
+  const visible = useMemo(() => doors.filter((d) => d.key === extraKey || shows(d)), [doors, shows, extraKey]);
+  // Doors per filter, for the filter sheet (numbers, not sentences).
+  const counts = useMemo(() => {
+    const c = { all: doors.length, mine: mineKeys?.size || 0, support: 0, undecided: 0, opposed: 0, unrated: 0, signs: 0 };
+    for (const d of doors) {
+      c[d.band] += 1;
+      if (d.signs.length) c.signs += 1;
+    }
+    return c;
+  }, [doors, mineKeys]);
 
   // Deep link to someone who has no pin yet → offer to place them.
   const wantsMissing = Boolean(personParam && doorsQ.data && !selectedDoor && !doorsQ.isFetching);
@@ -614,9 +849,6 @@ export default function MapPage() {
   const missingPerson = wantsMissing ? missingQ.data?.person || null : null;
   const missingGone = wantsMissing && missingQ.isError;
 
-  // Turfs (volunteers get only the ones assigned to them).
-  const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs') });
-  const turfs = turfsQ.data?.turfs ?? EMPTY_LIST;
   const turfById = useMemo(() => new Map(turfs.map((t) => [t.id, t])), [turfs]);
   const selectedTurf = turfParam ? turfById.get(turfParam) || null : null;
   const turfMissing = Boolean(turfParam && turfsQ.data && !selectedTurf && !turfsQ.isFetching);
@@ -627,20 +859,24 @@ export default function MapPage() {
   // every marker on the map.
   useLayoutEffect(() => { setParamsRef.current = setParams; });
   const select = useCallback((personId) => {
+    setSignSel(null);
     setParamsRef.current(personId ? { person: personId } : {}, { replace: true });
   }, []);
   const selectTurf = useCallback((turfId) => {
+    setSignSel(null);
     setParamsRef.current(turfId ? { turf: turfId } : {}, { replace: true });
   }, []);
 
   const cancelMode = () => { setMode(null); setPlacing(null); setDraft(EMPTY_DRAFT); setTurfError(null); };
-  const toggleAdd = () => { setMode((m) => (m === 'add' ? null : 'add')); setPlacing(null); setPickerOpen(false); setDraft(EMPTY_DRAFT); };
+  const toggleAdd = () => { setMode((m) => (m === 'add' ? null : 'add')); setPlacing(null); setPickerOpen(false); setFilterOpen(false); setDraft(EMPTY_DRAFT); };
   const startPlacing = (person) => { setPlacing(person); setMode('place'); setPickerOpen(false); setAddAt(null); setDraft(EMPTY_DRAFT); };
 
   const setTurfsShown = (on) => { setShowTurfs(on); writeTurfsPref(on); };
 
   // ── Drawing a turf ──
   const startDraw = () => {
+    setFilterOpen(false);
+    setUnlocOpen(false);
     setMode('draw');
     setPlacing(null);
     setPickerOpen(false);
@@ -652,7 +888,7 @@ export default function MapPage() {
   };
   const addPoint = (latlng) => {
     if (draft.naming) return;
-    if (draft.points.length >= MAX_TURF_POINTS) { toast(`A turf can have up to ${MAX_TURF_POINTS} points — tap Finish`); return; }
+    if (draft.points.length >= MAX_TURF_POINTS) { toast(`${MAX_TURF_POINTS} points max — tap Finish`); return; }
     const { lat, lng } = wrapped(latlng);
     const pt = [Number(lat.toFixed(6)), Number(lng.toFixed(6))];
     setDraft((d) => {
@@ -690,9 +926,9 @@ export default function MapPage() {
       cancelMode();
       focusedTurfRef.current = id; // it's already on screen — no refit
       selectTurf(id);
-      toast(`Saved ${res.turf.name || name} — assign a canvasser next`);
+      toast(`Saved ${res.turf.name || name}`);
     } catch (err) {
-      setTurfError(err.message || 'Could not save the turf — try again');
+      setTurfError(err.message || 'Not saved — try again');
     } finally {
       setTurfBusy(false);
     }
@@ -709,7 +945,7 @@ export default function MapPage() {
   const locatePerson = async (person, latlng) => {
     try {
       await action('person.locate', { id: person.id, lat: latlng.lat, lng: latlng.lng });
-      toast(`Placed ${person.name} on the map`);
+      toast(`Placed ${person.name}`);
       // Drop the pin now; the refetch below confirms it.
       patchDoors(queryClient, (d) => ({
         ...d,
@@ -731,14 +967,14 @@ export default function MapPage() {
       refresh(person.id);
       select(person.id);
     } catch (err) {
-      toast(err.message || 'Could not place them');
+      toast(err.message || 'Not placed — try again');
     }
   };
 
   const locateMe = () => {
     const map = mapRef.current;
     if (!map) return;
-    if (!navigator.geolocation) { toast('Location is not available on this device'); return; }
+    if (!navigator.geolocation) { toast('No location on this device'); return; }
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -756,7 +992,7 @@ export default function MapPage() {
       },
       (err) => {
         setLocating(false);
-        toast(err.code === 1 ? 'Location permission was denied' : 'Could not get your location');
+        toast(err.code === 1 ? 'Location is blocked' : 'Couldn’t find you');
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
     );
@@ -768,11 +1004,11 @@ export default function MapPage() {
       if (mode === 'draw') { addPoint(latlng); return; }
       if (mode === 'place' && placing) { locatePerson(placing, wrapped(latlng)); return; }
       if (mode === 'add') { setAddAt(wrapped(latlng)); setMode(null); return; }
-      if (personParam || turfParam) select(null); // tap on empty map closes the card
+      if (personParam || turfParam || signSel) select(null); // tap on empty map closes the card
     };
     onLongPressRef.current = (latlng) => {
       if (mode === 'draw' || (mode === 'place' && placing)) return;
-      if (!canCreate) { toast('Only staff can add new people — rate, log and place pins instead'); return; }
+      if (!canCreate) { toast('Only staff can add doors'); return; }
       setAddAt(wrapped(latlng));
       setMode(null);
       setPickerOpen(false);
@@ -786,6 +1022,23 @@ export default function MapPage() {
       if (mode === 'add') setMode(null);
       if (selectedKeyRef.current === door.key) return;
       select(door.persons[0].id);
+    };
+    // A count bubble: zoom in until its doors come apart (any mode — the
+    // person being placed or the new door needs a single pin to land on).
+    onClusterClickRef.current = (group) => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (!mode && (personParam || turfParam || signSel)) select(null);
+      const b = L.latLngBounds(group.map((d) => [d.lat, d.lng]));
+      const z = Math.min(CLUSTER_OFF_ZOOM, Math.max(map.getZoom() + 2, map.getBoundsZoom(b.pad(0.5))));
+      map.setView(b.getCenter(), z, { animate: !reducedMotion() });
+    };
+    onSignClickRef.current = (sign) => {
+      if (mode) { onMapClickRef.current?.(L.latLng(Number(sign.lat), Number(sign.lng))); return; }
+      if (personParam || turfParam) select(null);
+      setPickerOpen(false);
+      setAddAt(null);
+      setSignSel(sign);
     };
     // Turf polygons don't bubble to the map, so they mirror its rules: in a
     // mode the tap is a map tap; an open door card closes like on empty map.
@@ -805,11 +1058,13 @@ export default function MapPage() {
         if (e.key === 'Backspace' || (e.key === 'z' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); undoPoint(); return; }
       }
       if (e.key !== 'Escape') return;
-      if (mode === 'draw' && draft.naming) backToDrawing();
+      if (filterOpen) closeFilter();
+      else if (unlocOpen) setUnlocOpen(false);
+      else if (mode === 'draw' && draft.naming) backToDrawing();
       else if (mode) cancelMode();
       else if (pickerOpen) setPickerOpen(false);
       else if (addAt) setAddAt(null);
-      else if (personParam || turfParam) select(null);
+      else if (personParam || turfParam || signSel) select(null);
     };
   });
 
@@ -838,7 +1093,9 @@ export default function MapPage() {
 
   // ── Leaflet map ──
   useEffect(() => {
-    const map = L.map(canvasRef.current, { center: SURREY, zoom: 12, zoomControl: false, attributionControl: false });
+    // zoomSnap 0.25: a turf can fill the screen exactly, so its doors open
+    // far enough apart that every 48px pin is its own tap.
+    const map = L.map(canvasRef.current, { center: SURREY, zoom: 12, zoomSnap: 0.25, zoomControl: false, attributionControl: false });
     L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -857,6 +1114,8 @@ export default function MapPage() {
       me: L.layerGroup().addTo(map),
     };
     map.on('click', (e) => onMapClickRef.current?.(e.latlng));
+    map.on('zoomend', () => setZoom(map.getZoom()));
+    setZoom(map.getZoom());
     map.on('contextmenu', (e) => { e.originalEvent?.preventDefault?.(); onLongPressRef.current?.(e.latlng); });
     mapRef.current = map;
     layersRef.current = layers;
@@ -938,44 +1197,59 @@ export default function MapPage() {
     else map.doubleClickZoom.enable();
   }, [mode]);
 
-  // Pins + sign glyphs for the filtered doors.
+  // Pins (or count bubbles) for the filtered doors, at this zoom. A selected
+  // door inside a bubble is pulled out so its pin always shows.
+  const groups = useMemo(() => clusterDoors(visible, zoom), [visible, zoom]);
+  const pulledKey = useMemo(
+    () => (selectedKey && groups.some((g) => g.length > 1 && g.some((d) => d.key === selectedKey)) ? selectedKey : null),
+    [groups, selectedKey],
+  );
   useEffect(() => {
     const layers = layersRef.current;
     if (!layers) return;
     layers.doors.clearLayers();
     layers.signs.clearLayers();
     markersRef.current.clear();
-    for (const door of visible) {
+    const addPin = (door) => {
       const selected = door.key === selectedKeyRef.current;
       const marker = L.marker([door.lat, door.lng], {
         icon: pinIcon(door, selected),
-        title: `${doorTitle(door)} — ${door.persons.map((p) => p.name).join(', ')}`,
+        title: `${doorTitle(door)} — ${door.persons.map(personTitle).join(', ')}`,
         riseOnHover: true,
         zIndexOffset: selected ? 1000 : 0,
       });
       marker.on('click', () => onPinClickRef.current?.(door));
       marker.addTo(layers.doors);
       markersRef.current.set(door.key, marker);
-      door.signs.forEach((s, i) => {
-        L.marker([door.lat, door.lng], {
-          icon: signIcon(s.status, i, door.offset),
-          title: `${SIGN_LABEL[s.kind] || s.kind} · ${s.status}`,
-          keyboard: false,
-          zIndexOffset: 500,
+    };
+    for (const group of groups) {
+      const rest = pulledKey ? group.filter((d) => d.key !== pulledKey) : group;
+      if (rest.length !== group.length) addPin(group.find((d) => d.key === pulledKey));
+      if (rest.length === 1) addPin(rest[0]);
+      else if (rest.length > 1) {
+        const seed = rest[0];
+        L.marker([seed.lat, seed.lng], {
+          icon: clusterIcon(rest, seed.offset),
+          title: `${plural(rest.length, 'door', 'doors')} — tap to zoom in`,
+          riseOnHover: true,
+          zIndexOffset: 200,
         })
-          .on('click', () => onPinClickRef.current?.(door))
-          .addTo(layers.signs);
-      });
+          .on('click', () => onClusterClickRef.current?.(rest))
+          .addTo(layers.doors);
+      }
     }
     if (filter === 'all' || filter === 'signs') {
       for (const s of orphanSigns) {
-        // String tooltip content is set as innerHTML — escape the address.
-        L.marker([Number(s.lat), Number(s.lng)], { icon: signIcon(s.status, -1), keyboard: false, zIndexOffset: 500 })
-          .bindTooltip(esc(`${SIGN_LABEL[s.kind] || s.kind} · ${s.status}${s.address ? ` · ${s.address}` : ''}`))
+        L.marker([Number(s.lat), Number(s.lng)], {
+          icon: signIcon(s.status),
+          title: `${SIGN_LABEL[s.kind] || s.kind} · ${SIGN_STATUS[s.status] || s.status}${s.address ? ` · ${s.address}` : ''}`,
+          zIndexOffset: 500,
+        })
+          .on('click', () => onSignClickRef.current?.(s))
           .addTo(layers.signs);
       }
     }
-  }, [visible, orphanSigns, filter]);
+  }, [groups, pulledKey, orphanSigns, filter]);
 
   // Highlight the selected pin without rebuilding every marker.
   useEffect(() => {
@@ -988,35 +1262,59 @@ export default function MapPage() {
     paint(prevSelectedRef.current, false);
     paint(selectedKey, true);
     prevSelectedRef.current = selectedKey;
-  }, [selectedKey, visible]);
+  }, [selectedKey, groups, pulledKey]);
 
   const naming = mode === 'draw' && draft.naming;
   const turfSheetOpen = Boolean(selectedTurf && !mode && !pickerOpen && !addAt && !selectedDoor);
-  const hasSheet = Boolean(pickerOpen || addAt || naming || (selectedDoor && !mode) || turfSheetOpen);
+  const signSheetOpen = Boolean(signSel && !mode && !pickerOpen && !addAt && !selectedDoor && !turfSheetOpen);
+  const hasSheet = Boolean(pickerOpen || addAt || naming || (selectedDoor && !mode) || turfSheetOpen || signSheetOpen);
   const showEmpty = doorsQ.data && doors.length === 0 && !hasSheet && !mode;
 
+  // Fit a turf: desk roles see the whole shape; a volunteer sees its doors
+  // close enough that each is its own pin (the shape runs past the edges).
+  const fitTurfView = (map, turf) => {
+    if (!canCreate) {
+      const ring = turf.polygon.map(([lat, lng]) => [Number(lat), Number(lng)]);
+      const inside = doors.filter((d) => pointInPolygon(d.lat, d.lng, ring));
+      if (inside.length) { fitTurf(map, inside.map((d) => [d.lat, d.lng]), pageRef.current, { maxZoom: 18, inset: PIN_INSET }); return; }
+    }
+    fitTurf(map, turf.polygon, pageRef.current);
+  };
+
   // First data: fit the deep-linked turf, else center on the deep-linked
-  // door, else fit every door.
+  // door, else (volunteers) fit the doors of their own turf, else fit every door.
+  const ownTurf = !canCreate && !personParam && !turfParam;
   useEffect(() => {
     const map = mapRef.current;
     if (!map || fittedRef.current) return;
-    if (turfParam && turfsQ.isPending) return; // wait to learn the turf's shape
+    // Wait to learn the turf shapes (unless offline — then go with the doors).
+    if ((turfParam || ownTurf) && turfsQ.isPending && turfsQ.fetchStatus !== 'paused') return;
     if (selectedTurf && validRing(selectedTurf.polygon)) {
+      // Volunteers get the turf's doors close up — wait for them (unless offline).
+      if (!canCreate && !doorsQ.data && doorsQ.fetchStatus !== 'paused') return;
       fittedRef.current = true;
       focusedTurfRef.current = turfParam;
-      fitTurf(map, selectedTurf.polygon, pageRef.current);
+      fitTurfView(map, selectedTurf);
       return;
     }
     if (!doorsQ.data) return;
     fittedRef.current = true;
+    const mine = ownTurf ? turfs.filter((t) => validRing(t.polygon)) : EMPTY_LIST;
     if (selectedDoor) {
       map.setView([selectedDoor.lat, selectedDoor.lng], 17, { animate: false });
       revealLatLng(map, L.latLng(selectedDoor.lat, selectedDoor.lng), pageRef.current);
       centeredOnRef.current = personParam;
+    } else if (mine.length) {
+      // Their doors, close enough that each is its own pin.
+      const rings = mine.map((t) => t.polygon.map(([lat, lng]) => [Number(lat), Number(lng)]));
+      const inside = doors.filter((d) => rings.some((r) => pointInPolygon(d.lat, d.lng, r)));
+      const pts = inside.length ? inside.map((d) => [d.lat, d.lng]) : rings.flat();
+      fitTurf(map, pts, pageRef.current, { maxZoom: 18, inset: inside.length ? PIN_INSET : 0 });
     } else if (doors.length) {
       map.fitBounds(L.latLngBounds(doors.map((d) => [d.lat, d.lng])).pad(0.15), { maxZoom: 16, animate: false });
     }
-  }, [doorsQ.data, doors, selectedDoor, personParam, turfParam, turfsQ.isPending, selectedTurf]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doorsQ.data, doorsQ.fetchStatus, doors, selectedDoor, personParam, turfParam, turfsQ.isPending, turfsQ.fetchStatus, selectedTurf, ownTurf, turfs]);
 
   // A new selection that is off-screen or under the drawer → bring it into view.
   useEffect(() => {
@@ -1033,7 +1331,8 @@ export default function MapPage() {
     const map = mapRef.current;
     if (!map || !fittedRef.current || !selectedTurf || focusedTurfRef.current === turfParam) return;
     focusedTurfRef.current = turfParam;
-    if (validRing(selectedTurf.polygon)) fitTurf(map, selectedTurf.polygon, pageRef.current);
+    if (validRing(selectedTurf.polygon)) fitTurfView(map, selectedTurf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turfParam, selectedTurf]);
 
   // Naming a new turf: if the sheet covers part of the shape, slide it into
@@ -1068,13 +1367,11 @@ export default function MapPage() {
             <div className="map-mode map-mode--draw">
               <span role="status">
                 {drawCount === 0
-                  ? 'Tap the map to drop the first corner of the turf'
-                  : drawCount < 3
-                    ? <>Keep tapping corners — <strong>{plural(drawCount, 'point', 'points')}</strong> so far</>
-                    : <><strong>{plural(drawCount, 'point', 'points')}</strong> — tap Finish (or the first point) to close it</>}
+                  ? 'Tap the first corner'
+                  : <><strong>{plural(drawCount, 'point', 'points')}</strong>{drawCount < 3 ? ' — keep tapping' : ''}</>}
               </span>
               <span className="map-mode__btns">
-                <button type="button" className="btn" onClick={undoPoint} disabled={!drawCount}>Undo point</button>
+                <button type="button" className="btn" onClick={undoPoint} disabled={!drawCount}>Undo</button>
                 <button type="button" className="btn map-mode__go" onClick={finishDraw} disabled={drawCount < 3}>Finish</button>
                 <button type="button" className="btn" onClick={cancelMode}>Cancel</button>
               </span>
@@ -1084,126 +1381,134 @@ export default function MapPage() {
           <div className="map-mode" role="status">
             <span>
               Tap where <strong>{placing.name}</strong> lives
-              {placing.address ? ` — ${placing.unit ? `${placing.unit} – ` : ''}${placing.address}` : ''}
+              {placing.address ? <span className="map-mode__sub">{placing.unit ? `${placing.unit} – ` : ''}{placing.address}</span> : null}
             </span>
             <button type="button" className="btn" onClick={cancelMode}>Cancel</button>
           </div>
         ) : mode === 'add' ? (
           <div className="map-mode" role="status">
-            <span>Tap the map where the new door is</span>
+            <span>Tap the new door</span>
             <button type="button" className="btn" onClick={cancelMode}>Cancel</button>
           </div>
         ) : missingPerson ? (
           <div className="map-mode" role="status">
-            <span><strong>{missingPerson.name}</strong> isn't on the map yet</span>
+            <span><strong>{missingPerson.name}</strong> isn’t on the map</span>
             <span className="map-mode__btns">
               <button type="button" className="btn" onClick={() => { startPlacing(missingPerson); select(null); }}>Place</button>
-              <button type="button" className="btn" onClick={() => select(null)}>Dismiss</button>
+              <button type="button" className="btn" onClick={() => select(null)} aria-label="Dismiss">✕</button>
             </span>
           </div>
         ) : missingGone ? (
           <div className="map-mode" role="status">
-            <span>That person isn't in this workspace (or was removed)</span>
-            <button type="button" className="btn" onClick={() => select(null)}>Dismiss</button>
+            <span>Person not found</span>
+            <button type="button" className="btn" onClick={() => select(null)} aria-label="Dismiss">✕</button>
           </div>
         ) : turfMissing ? (
           <div className="map-mode" role="status">
-            <span>
-              {canCreate ? 'That turf was deleted or the link is wrong' : 'That turf isn’t assigned to you — ask your organizer'}
-            </span>
-            <button type="button" className="btn" onClick={() => select(null)}>Dismiss</button>
+            <span>{canCreate ? 'Turf not found' : 'Not your turf — ask your organizer'}</span>
+            <button type="button" className="btn" onClick={() => select(null)} aria-label="Dismiss">✕</button>
           </div>
         ) : (
-          <>
-            <div className="map-filters" role="group" aria-label="Map filters">
-              {FILTERS.map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  className={`map-fchip${filter === f.key ? ' is-on' : ''}`}
-                  data-band={f.key}
-                  aria-pressed={filter === f.key}
-                  onClick={() => setFilter(f.key)}
-                >
-                  {f.label}
-                </button>
-              ))}
-              <button
-                type="button"
-                className={`map-fchip map-fchip--toggle${showTurfs ? ' is-on' : ''}`}
-                data-band="turfs"
-                aria-pressed={showTurfs}
-                title={showTurfs ? 'Hide turf outlines' : 'Show turf outlines'}
-                onClick={() => setTurfsShown(!showTurfs)}
-              >
-                Turfs{turfs.length ? ` · ${turfs.length}` : ''}
-              </button>
-            </div>
-            <div className="map-meta">
-              <span className="map-pill" aria-live="polite">
-                {doorsQ.isPending
-                  ? (doorsQ.fetchStatus === 'paused' ? 'Offline — doors load with signal' : 'Loading doors…')
-                  : `${plural(visible.length, 'door', 'doors')} · ${plural(visiblePeople, 'person', 'people')}`}
+          <div className="map-bar">
+            <button
+              type="button"
+              ref={filterBtnRef}
+              className={`map-filter-btn${filter !== 'all' ? ' is-filtered' : ''}`}
+              data-band={filter}
+              aria-haspopup="dialog"
+              aria-expanded={filterOpen}
+              aria-label={`Show: ${FILTER_LABEL[filter]}, ${plural(counts[filter] ?? 0, 'door', 'doors')}`}
+              onClick={() => { setFilterOpen((o) => !o); setUnlocOpen(false); }}
+            >
+              <FilterGlyph />
+              <span className="map-filter-btn__label">{FILTER_LABEL[filter]}</span>
+              <span className="map-filter-btn__n mono" aria-live="polite">
+                {doorsQ.isPending ? (doorsQ.fetchStatus === 'paused' ? 'Offline' : '…') : counts[filter] ?? 0}
               </span>
-              {turfs.length > 0 && (
-                <Link className="map-pill map-pill--action" to={!canCreate && turfs.length === 1 ? `/turfs/${turfs[0].id}` : '/turfs'}>
-                  {canCreate ? 'Walk lists' : turfs.length === 1 ? 'My walk list' : 'My walk lists'}
-                </Link>
-              )}
-              {canCreate && (
-                <button type="button" className="map-pill map-pill--action" onClick={startDraw}>
-                  <TurfGlyph /> Draw turf
+            </button>
+            {canCreate && unlocated > 0 && (
+              <div className={`map-unloc${unlocOpen ? ' is-open' : ''}`}>
+                <button
+                  type="button"
+                  className="map-unloc__chip"
+                  aria-expanded={unlocOpen}
+                  aria-label={`${plural(unlocated, 'person', 'people')} not on the map`}
+                  onClick={() => { setUnlocOpen((o) => !o); setFilterOpen(false); }}
+                >
+                  <PinGlyph /> <span className="mono">{unlocated}</span>
+                  {unlocOpen && <span className="map-unloc__label">not on map</span>}
                 </button>
-              )}
-              {unlocated > 0 && (
-                <span className="map-pill map-pill--warn">
-                  {plural(unlocated, 'person', 'people')} not on the map yet
-                  <span className="map-pill__btns">
-                    <button type="button" className="btn btn-primary map-pill__btn" onClick={() => { setPickerOpen(true); setAddAt(null); cancelMode(); }}>
+                {unlocOpen && (
+                  <span className="map-unloc__btns">
+                    <button type="button" className="btn map-unloc__btn" onClick={() => { setPickerOpen(true); setAddAt(null); setUnlocOpen(false); cancelMode(); }}>
                       Place
                     </button>
-                    {canCreate && <GeocodeButton compact onDone={onGeocoded} />}
+                    <GeocodeButton compact onDone={onGeocoded} />
                   </span>
-                </span>
-              )}
-            </div>
-          </>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
+      {filterOpen && !mode && (
+        <FilterSheet
+          filters={filters}
+          filter={filter}
+          onFilter={(key) => { setFilter(key); closeFilter(); }}
+          counts={counts}
+          showTurfs={showTurfs}
+          onTurfs={setTurfsShown}
+          turfCount={turfs.length}
+          walkTo={!canCreate && turfs.length === 1 ? `/turfs/${turfs[0].id}` : '/turfs'}
+          walkLabel={canCreate ? 'Walk lists' : turfs.length === 1 ? 'Open walk list' : 'My walk lists'}
+          canCreate={canCreate}
+          onDraw={startDraw}
+          unlocated={unlocated}
+          onPlace={() => { setFilterOpen(false); setPickerOpen(true); setAddAt(null); cancelMode(); }}
+          onClose={closeFilter}
+        />
+      )}
+
       <div className="map-fabs">
+        <button type="button" className="map-fab" title="Locate me" aria-label="Locate me" onClick={locateMe} disabled={locating}>
+          <LocateGlyph />
+        </button>
         {canCreate && mode !== 'draw' && (
           <button
             type="button"
-            className={`map-fab${mode === 'add' ? ' is-on' : ''}`}
+            className={`map-fab map-fab--add${mode === 'add' ? ' is-on' : ''}`}
             title="Add a door (or long-press the map)"
             aria-label="Add a door"
             aria-pressed={mode === 'add'}
             onClick={toggleAdd}
           >
-            +
+            <span className="map-fab__plus" aria-hidden="true">+</span> Door
           </button>
         )}
-        <button type="button" className="map-fab" title="Locate me" aria-label="Locate me" onClick={locateMe} disabled={locating}>
-          <LocateGlyph />
-        </button>
       </div>
 
       {doorsQ.isError ? (
         <p className="error map-error">{doorsQ.error.message}</p>
       ) : turfsQ.isError && !turfsQ.data ? (
-        <p className="error map-error">Turfs didn’t load — {turfsQ.error.message}</p>
+        <p className="error map-error">Turfs didn’t load</p>
       ) : null}
       {showEmpty && (
         <div className="card map-empty">
-          <span className="eyebrow">Nothing on the map yet</span>
-          <p>
-            {unlocated > 0
-              ? `${plural(unlocated, 'person has', 'people have')} an address but no pin — tap Place to drop them.`
-              : canCreate
-                ? 'Tap + (or long-press the map) to add the first door.'
-                : 'Doors appear here once staff add people with an address.'}
-          </p>
+          {unlocated > 0 ? (
+            <>
+              <p>{plural(unlocated, 'person needs', 'people need')} a pin</p>
+              <button type="button" className="btn btn-primary map-empty__btn" onClick={() => { setPickerOpen(true); setAddAt(null); cancelMode(); }}>Place</button>
+            </>
+          ) : canCreate ? (
+            <>
+              <p>No doors yet</p>
+              <button type="button" className="btn btn-primary map-empty__btn" onClick={toggleAdd}>+ Add door</button>
+            </>
+          ) : (
+            <p>No doors yet — ask your organizer</p>
+          )}
         </div>
       )}
 
@@ -1261,7 +1566,22 @@ export default function MapPage() {
         />
       )}
 
-      {toastMsg && <div className="toast map-toast" role="status">{toastMsg}</div>}
+      {signSheetOpen && <SignSheet sign={signSel} desk={canCreate} onClose={() => setSignSel(null)} />}
+
+      {toastMsg && (
+        <div className="toast map-toast" role="status">
+          <span>{toastMsg.text}</span>
+          {toastMsg.act && (
+            <button
+              type="button"
+              className="btn map-toast__btn"
+              onClick={() => { const { onClick } = toastMsg.act; setToastMsg(null); clearTimeout(toastTimer.current); onClick(); }}
+            >
+              {toastMsg.act.label}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
