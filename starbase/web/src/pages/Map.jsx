@@ -1,12 +1,16 @@
 // Map — field mode. Houses as pins (one per address + unit), colored by the
 // household's strongest signal; tap a pin for the door card. Every pin is a
-// 48px tap target; the number on a colored pin is always a rating (a
-// household's head-count is a small white badge on its corner). Doors that
-// would overlap at the current zoom merge into one white count bubble — tap
-// it to zoom in. Volunteers open on their own turf ("My turf"). The chrome is
-// one row: a single filter button (its sheet holds the filters, the turf
-// outline switch, walk lists and "Draw turf"), the desk-only "not on the
-// map" count chip, and two round buttons (Locate me, + Add door). Place mode drops
+// 48px tap target. Pins carry no numbers (a rated door has a white dot, the
+// color says the band; a household's head-count is a small people badge on
+// its corner) — the only number on the map is a group's door count: doors
+// that would overlap at the current zoom merge into one white bubble with a
+// house and the count — tap it to zoom in. Volunteers open on their own turf
+// ("My turf"). The chrome is one row: the "Show: …" filter pill (its sheet:
+// which doors, then — desk — the turf outlines switch, walk lists and
+// "Draw turf"), then a volunteer's "Walk list" chip, or for desk roles the
+// "Draw turf" control and the "Not on map" count chip, and two round
+// buttons (Locate me, + Add door). No signal and no doors loaded: one line
+// and the walk list kept on the phone. Place mode drops
 // people who have an address but no pin, "add door" creates a person at a
 // tapped spot, and ?person=<id> deep-links to (and selects) a door. Turfs are
 // translucent polygons (the Turfs chip shows/hides them); tap one for its
@@ -24,19 +28,22 @@ import { ratingByCode } from '@starbase/shared/canvass';
 import DoorCard, { AddDoorForm, SIGN_LABEL, doorTitle, patchDoors } from '../components/DoorCard.jsx';
 import { More, ratingWho } from '../components/RatingButtons.jsx';
 import GeocodeButton from '../components/GeocodeButton.jsx';
+import { cachedWalkLists, useOnline } from './Turfs.jsx';
 import './map.css';
 
 const SURREY = [49.1913, -122.849];
 // "My turf" (volunteers with a turf) comes first and is where they start:
 // their walk list's doors, not the whole city's.
 const MINE = { key: 'mine', label: 'My turf' };
+// Which doors to show (one at a time). "Yes (1–2)" says what the rating
+// buttons say; "Has a sign" is a which-doors choice too (doors with a sign).
 const FILTERS = [
   { key: 'all', label: 'All' },
-  { key: 'support', label: 'Support' },
+  { key: 'support', label: 'Yes (1–2)' },
   { key: 'undecided', label: 'Undecided' },
   { key: 'opposed', label: 'Opposed' },
   { key: 'unrated', label: 'Unrated' },
-  { key: 'signs', label: 'Signs' },
+  { key: 'signs', label: 'Has a sign' },
 ];
 const FILTER_LABEL = Object.fromEntries([MINE, ...FILTERS].map((f) => [f.key, f.label]));
 
@@ -173,15 +180,6 @@ const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: '
 const HOUSE_SVG = '<svg viewBox="0 0 12 10" aria-hidden="true"><path d="M6 0 0 5h1.6v5h3.2V7h2.4v3h3.2V5H12z"/></svg>';
 const PEOPLE_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1"/><path d="M1.8 15.5c0-3.6 2.8-6.2 6.2-6.2s6.2 2.6 6.2 6.2z"/></svg>';
 
-// The rating that sets a pin's color — so the number on a colored pin is
-// always a rating, never a head-count. Opposed is always plain "4" (the red
-// says it); who they vote for is in the pin's title and on the door card.
-function doorCode(door) {
-  const inBand = door.persons.map((p) => ratingByCode(p.rating)).filter((r) => r && r.band === door.band);
-  if (!inBand.length) return '·';
-  if (door.band === 'opposed') return '4';
-  return inBand.map((r) => r.short).sort()[0];
-}
 // "Rosa Delgado (4 · Locke)" for a pin's title.
 function personTitle(p) {
   const r = ratingByCode(p.rating);
@@ -199,7 +197,9 @@ function pinIcon(door, selected) {
     `<i class="map-flag map-flag--${esc(s.status)}" style="left:${34 + i * 10}px;top:-6px"><i class="map-flag__face"></i><i class="map-flag__post"></i></i>`).join('');
   return L.divIcon({
     className: 'map-pin-wrap',
-    html: `<div class="${cls}"><span class="map-pin__label">${esc(doorCode(door))}</span>${household}</div>${flags}`,
+    // No digit on a pin (a "3" would read as 3 doors next to a count bubble):
+    // a rated door gets a white dot, the color says the band.
+    html: `<div class="${cls}">${door.band === 'unrated' ? '' : '<span class="map-pin__dot"></span>'}${household}</div>${flags}`,
     iconSize: [48, 48],
     iconAnchor: [24 - door.offset[0], 42 - door.offset[1]],
   });
@@ -357,6 +357,17 @@ function FilterGlyph() {
   );
 }
 
+// A walk list: a list with tick boxes.
+function WalkGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="map-glyph">
+      <path d="M10 6h10M10 12h10M10 18h10" />
+      <path d="M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11" />
+      <circle cx="5.5" cy="18" r="1.6" />
+    </svg>
+  );
+}
+
 function PinGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="map-glyph">
@@ -389,7 +400,7 @@ function PlacePicker({ unlocated, onPick, onClose }) {
   return (
     <aside className="map-sheet map-place-picker" aria-label="People not on the map yet">
       <header className="mapsheet-head">
-        <h2 className="mapsheet-title">Place on the map · {unlocated}</h2>
+        <h2 className="mapsheet-title">Drop pins by hand · {unlocated}</h2>
         <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close">✕</button>
       </header>
       <div className="field">
@@ -451,6 +462,7 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
   const assigned = new Set(turf.members.map((m) => m.id));
   const options = (membersQ.data?.members ?? []).filter((m) => !assigned.has(m.id));
   const left = Math.max(0, turf.doors - turf.doorsDone);
+  const invite = me?.role === 'manager'; // the Team screen is manager-only
 
   // Assignment changes the turf list and Today's "my turfs".
   const run = async (name, input) => {
@@ -505,8 +517,11 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
       </header>
 
       <div className="turf-sheet__body">
+        {/* One phrase everywhere (sheet, walk list, turf list, Today): "1 door left" + the bar. */}
         <div className="turf-progress">
-          <span className="turf-progress__text mono"><strong>{turf.doorsDone}</strong> of {plural(turf.doors, 'door', 'doors')}</span>
+          <span className={`turf-progress__text mono${turf.doors && !left ? ' is-done' : ''}`}>
+            {turf.doors === 0 ? 'No doors' : left === 0 ? <>All done <span aria-hidden="true">✓</span></> : <><strong>{left}</strong> {left === 1 ? 'door' : 'doors'} left</>}
+          </span>
           <TurfBar done={turf.doorsDone} total={turf.doors} />
         </div>
         <Link className="btn btn-primary turf-act" to={`/turfs/${turf.id}`}>Open walk list</Link>
@@ -536,30 +551,36 @@ function TurfSheet({ turf, me, desk, onClose, onDeleted, toast }) {
               ))}
             </ul>
           )}
-          {desk && (
-            <form className="turf-assign" onSubmit={assign}>
-              <div className="field">
-                <label htmlFor="turf-assign" className="fk-sr">Add a canvasser</label>
-                <select
-                  id="turf-assign" className="input" value={pick} disabled={busy || !options.length}
-                  onChange={(e) => setPick(e.target.value)}
-                >
-                  <option value="">
-                    {/* isPending, not isLoading: offline the fetch is paused, and
-                        "everyone is on it" would be a wrong answer. */}
-                    {membersQ.isPending
-                      ? (membersQ.fetchStatus === 'paused' ? 'Offline' : 'Loading…')
-                      : membersQ.isError ? 'Couldn’t load the team'
-                        : options.length ? 'Add a canvasser…' : 'Everyone is on it'}
-                  </option>
-                  {options.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
-                </select>
-              </div>
-              <button type="submit" className="btn turf-act" disabled={busy || !pick}>Add</button>
-            </form>
-          )}
-          {desk && membersQ.data && !options.length && me?.role === 'manager' && (
-            <Link className="btn btn-quiet turf-act" to="/team">Invite more</Link>
+          {/* Nobody left to add: no dead picker, just the line (and the invite). */}
+          {membersQ.data && !options.length ? (
+            <p className="turf-everyone">
+              Everyone is on it
+              {invite && <> · <Link className="turf-invite" to="/team">Invite someone</Link></>}
+            </p>
+          ) : (
+            <>
+              <form className="turf-assign" onSubmit={assign}>
+                <div className="field">
+                  <label htmlFor="turf-assign" className="fk-sr">Add a canvasser</label>
+                  <select
+                    id="turf-assign" className="input" value={pick} disabled={busy || !options.length}
+                    onChange={(e) => setPick(e.target.value)}
+                  >
+                    <option value="">
+                      {/* isPending, not isLoading: offline the fetch is paused, and
+                          "everyone is on it" would be a wrong answer. */}
+                      {membersQ.isPending
+                        ? (membersQ.fetchStatus === 'paused' ? 'Offline' : 'Loading…')
+                        : membersQ.isError ? 'Couldn’t load the team' : 'Add a canvasser…'}
+                    </option>
+                    {options.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
+                  </select>
+                </div>
+                <button type="submit" className="btn turf-act" disabled={busy || !pick}>Add</button>
+              </form>
+              {/* A new campaign's team is just the manager: the way to more people is right here. */}
+              {invite && <Link className="fk-link turf-invite-link" to="/team">Invite someone</Link>}
+            </>
           )}
           {membersQ.isError && <p className="error">{membersQ.error.message}</p>}
         </More>
@@ -625,9 +646,28 @@ function SignSheet({ sign, desk, onClose }) {
   );
 }
 
+// A name to start from, so Save works on the first tap: the street(s) most
+// of the doors inside are on ("72 Ave", "72 Ave & 128 St"), else "Turf 3";
+// a number is added when another turf already has the name.
+function suggestTurfName(doors, ring, taken) {
+  const streets = new Map();
+  for (const d of doors) {
+    if (!d.address || !pointInPolygon(d.lat, d.lng, ring)) continue;
+    const street = String(d.address).replace(/^\s*[\d-]+[A-Za-z]?\s+/, '').replace(/,.*$/, '').trim();
+    if (street) streets.set(street, (streets.get(street) || 0) + 1);
+  }
+  const top = [...streets.entries()].sort((a, b) => b[1] - a[1]).map(([st]) => st);
+  const used = new Set(taken.map((t) => norm(t)));
+  let base = top.length ? top.slice(0, 2).join(' & ') : `Turf ${taken.length + 1}`;
+  if (base.length > 120) base = base.slice(0, 120).trim();
+  let name = base;
+  for (let n = 2; used.has(norm(name)); n += 1) name = `${base} ${n}`;
+  return name;
+}
+
 // After Finish: name the drawn shape. The draft stays on the map behind it.
-function NameTurfForm({ points, doors, busy, error, onSave, onBack, onCancel }) {
-  const [name, setName] = useState('');
+function NameTurfForm({ points, doors, takenNames, busy, error, onSave, onBack, onCancel }) {
+  const [name, setName] = useState(() => suggestTurfName(doors, points, takenNames));
   const [localError, setLocalError] = useState(null);
   const inside = useMemo(() => countInside(doors, points), [doors, points]);
   const submit = (e) => {
@@ -650,9 +690,11 @@ function NameTurfForm({ points, doors, busy, error, onSave, onBack, onCancel }) 
       <div className="door-form__body">
         <div className="field">
           <label htmlFor="turf-name" className="fk-sr">Turf name</label>
+          {/* Prefilled and selected: Save works at once, typing replaces it. */}
           <input
             id="turf-name" className="input" autoFocus required maxLength={200} autoComplete="off"
-            placeholder="Newton — 72 Ave north" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Fleetwood East" value={name} onChange={(e) => setName(e.target.value)}
+            onFocus={(e) => e.target.select()}
           />
         </div>
         {shown && <p className="error turf-form-error" role="alert">{shown}</p>}
@@ -666,21 +708,21 @@ function NameTurfForm({ points, doors, busy, error, onSave, onBack, onCancel }) 
   );
 }
 
-// The one filter button's sheet: which doors to show, turf outlines, and
-// the turf tools (walk lists, drawing) that used to crowd the map.
+// The filter pill's sheet. "Show" — which doors, one at a time. "On the
+// map" (desk) — the turf outlines switch. Then the turf tools (walk lists,
+// "Draw turf"); a volunteer's walk list has its own chip on the map.
 function FilterSheet({
-  filters, filter, onFilter, counts, showTurfs, onTurfs, turfCount, walkTo, walkLabel,
-  canCreate, onDraw, unlocated, onPlace, onClose,
+  filters, filter, onFilter, counts, showTurfs, onTurfs, turfCount, desk, onDraw, unlocated, onPlace, onClose,
 }) {
   return (
     <>
       <button type="button" className="map-scrim" aria-label="Close" tabIndex={-1} onClick={onClose} />
       <div className="map-fsheet" role="dialog" aria-label="Show on the map">
         <header className="map-fsheet__head">
-          <h2 className="mapsheet-title">Show</h2>
+          <h2 className="mapsheet-title" id="map-fsheet-show">Show</h2>
           <button type="button" className="btn btn-quiet mapsheet-close" onClick={onClose} aria-label="Close">✕</button>
         </header>
-        <div className="map-fsheet__grid" role="radiogroup" aria-label="Doors to show">
+        <div className="map-fsheet__grid" role="radiogroup" aria-labelledby="map-fsheet-show">
           {filters.map((f, i) => (
             <button
               key={f.key}
@@ -697,25 +739,29 @@ function FilterSheet({
               <span className="map-fopt__n mono">{counts[f.key] ?? 0}</span>
             </button>
           ))}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={showTurfs}
-            className={`map-fopt map-fopt--turfs${showTurfs ? ' is-on' : ''}`}
-            onClick={() => onTurfs(!showTurfs)}
-          >
-            <span className="map-fopt__dot" aria-hidden="true" />
-            <span className="map-fopt__label">Turfs</span>
-            <span className="map-fopt__n mono">{turfCount}</span>
-          </button>
         </div>
-        {(turfCount > 0 || canCreate || unlocated > 0) && (
+        {desk && (
+          <div className="map-fsheet__layers">
+            <h3 className="map-fsheet__sub">On the map</h3>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showTurfs}
+              className={`map-fswitch${showTurfs ? ' is-on' : ''}`}
+              onClick={() => onTurfs(!showTurfs)}
+            >
+              <span className="map-fswitch__label">Turfs <span className="mono map-fswitch__n">{turfCount}</span></span>
+              <span className="map-fswitch__track" aria-hidden="true"><span className="map-fswitch__knob" /></span>
+            </button>
+          </div>
+        )}
+        {(desk || unlocated > 0) && (
           <div className="map-fsheet__acts">
-            {turfCount > 0 && <Link className="btn map-fsheet__act" to={walkTo}>{walkLabel}</Link>}
-            {canCreate && (
+            {desk && turfCount > 0 && <Link className="btn map-fsheet__act" to="/turfs">Walk lists</Link>}
+            {desk && (
               <button type="button" className="btn map-fsheet__act" onClick={onDraw}><TurfGlyph /> Draw turf</button>
             )}
-            {!canCreate && unlocated > 0 && (
+            {!desk && unlocated > 0 && (
               <button type="button" className="btn map-fsheet__act" onClick={onPlace}>Place {unlocated} on map</button>
             )}
           </div>
@@ -752,6 +798,7 @@ export default function MapPage() {
   const onDraftStartRef = useRef(null);
   const onKeyRef = useRef(null);
   const focusedTurfRef = useRef(null); // turf id the map was last fitted to (or tapped)
+  const drawShiftRef = useRef(0);      // px the map slid down for the draw strip
   const canCreate = CREATE_ROLES.includes(me?.role);
 
   const [filterPick, setFilter] = useState(null); // null: the role's default (below)
@@ -778,11 +825,13 @@ export default function MapPage() {
   const toastTimer = useRef(null);
 
   // toast(text, act?) — act is an optional { label, onClick } button
-  // (the door card's "Change rating").
+  // (the door card's "Change"). toast(null) clears it (the Note field got
+  // focus — the toast must not sit on what they're typing).
   const toast = useCallback((text, act = null) => {
-    setToastMsg({ text, act });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMsg(null), act ? 5000 : 3500);
+    if (text == null) { setToastMsg(null); return; }
+    setToastMsg({ text, act });
+    toastTimer.current = setTimeout(() => setToastMsg(null), act ? 4000 : 3000);
   }, []);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
@@ -808,6 +857,18 @@ export default function MapPage() {
   // Turfs (volunteers get only the ones assigned to them).
   const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs') });
   const turfs = turfsQ.data?.turfs ?? EMPTY_LIST;
+  // A volunteer's own turf outline always shows (the switch is desk-only).
+  const turfsOn = canCreate ? showTurfs : true;
+  // A volunteer's walk list, one tap from the map.
+  const myWalk = !canCreate && turfs.length > 0
+    ? (turfs.length === 1 ? { to: `/turfs/${turfs[0].id}`, label: 'Walk list' } : { to: '/turfs', label: 'Walk lists' })
+    : null;
+
+  // No signal and no doors in memory: say so, and point at the walk list
+  // kept on this phone (it opens offline). A server refusal is not this.
+  const online = useOnline();
+  const noSignal = !doorsQ.data && (doorsQ.fetchStatus === 'paused' || (doorsQ.isError && (!online || !doorsQ.error?.status)));
+  const offlineWalk = useMemo(() => (noSignal ? cachedWalkLists(me)[0] || null : null), [noSignal, me]);
 
   // A volunteer's own doors: inside any turf they walk (the walk list's doors).
   const mineKeys = useMemo(() => {
@@ -923,6 +984,7 @@ export default function MapPage() {
         }],
       } : d));
       for (const key of ['turfs', 'brief']) queryClient.invalidateQueries({ queryKey: [key] });
+      drawShiftRef.current = 0; // the new turf stays where it was drawn
       cancelMode();
       focusedTurfRef.current = id; // it's already on screen — no refit
       selectTurf(id);
@@ -1138,7 +1200,7 @@ export default function MapPage() {
     const layer = layersRef.current?.turfs;
     if (!layer) return;
     layer.clearLayers();
-    const list = (showTurfs ? turfs : turfs.filter((t) => t.id === turfParam))
+    const list = (turfsOn ? turfs : turfs.filter((t) => t.id === turfParam))
       .filter((t) => validRing(t.polygon))
       .sort((a, b) => (a.id === turfParam) - (b.id === turfParam)); // selected on top
     for (const t of list) {
@@ -1159,7 +1221,7 @@ export default function MapPage() {
       poly.on('click', (e) => onTurfClickRef.current?.(t, e.latlng));
       poly.addTo(layer);
     }
-  }, [turfs, showTurfs, turfParam]);
+  }, [turfs, turfsOn, turfParam]);
 
   // The turf being drawn: dashed outline, corner dots, a tappable first corner.
   useEffect(() => {
@@ -1169,7 +1231,7 @@ export default function MapPage() {
     if (mode !== 'draw') return;
     const pts = draft.points;
     const line = { pane: 'turfDraft', color: '#0c0c0c', weight: 2.5, dashArray: '6 6', interactive: false };
-    if (pts.length >= 3) L.polygon(pts, { ...line, fillColor: '#ffd400', fillOpacity: 0.22 }).addTo(layer);
+    if (pts.length >= 3) L.polygon(pts, { ...line, fillColor: '#0c0c0c', fillOpacity: 0.1 }).addTo(layer);
     else if (pts.length === 2) L.polyline(pts, line).addTo(layer);
     pts.forEach((p, i) => {
       if (i === 0) {
@@ -1188,6 +1250,24 @@ export default function MapPage() {
       }
     });
   }, [mode, draft]);
+
+  // Drawing starts: slide the map down by the strip's height, so what was
+  // under it can still take a corner. Cancel slides it back; a saved turf
+  // stays where it was drawn.
+  useLayoutEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (mode !== 'draw') {
+      if (drawShiftRef.current) map.panBy([0, drawShiftRef.current], { animate: false });
+      drawShiftRef.current = 0;
+      return;
+    }
+    const bar = pageRef.current?.querySelector('.map-mode--draw');
+    if (!bar) return;
+    const h = Math.round(bar.getBoundingClientRect().bottom - map.getContainer().getBoundingClientRect().top);
+    if (h > 0) { map.panBy([0, -h], { animate: false }); drawShiftRef.current = h; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // A double-tap while drawing is two points, not a zoom.
   useEffect(() => {
@@ -1364,16 +1444,16 @@ export default function MapPage() {
       <div className="map-top">
         {mode === 'draw' ? (
           naming ? null : (
+            // A slim strip, only as wide as it needs: the map under it stays
+            // tappable, and the map slides down by its height when drawing starts.
             <div className="map-mode map-mode--draw">
-              <span role="status">
-                {drawCount === 0
-                  ? 'Tap the first corner'
-                  : <><strong>{plural(drawCount, 'point', 'points')}</strong>{drawCount < 3 ? ' — keep tapping' : ''}</>}
+              <span role="status" className="map-mode__count">
+                {drawCount === 0 ? 'Tap a corner' : <><strong>{drawCount}</strong> {drawCount === 1 ? 'corner' : 'corners'}</>}
               </span>
               <span className="map-mode__btns">
                 <button type="button" className="btn" onClick={undoPoint} disabled={!drawCount}>Undo</button>
-                <button type="button" className="btn map-mode__go" onClick={finishDraw} disabled={drawCount < 3}>Finish</button>
-                <button type="button" className="btn" onClick={cancelMode}>Cancel</button>
+                <button type="button" className={`btn${drawCount >= 3 ? ' map-mode__go' : ''}`} onClick={finishDraw} disabled={drawCount < 3}>Finish</button>
+                <button type="button" className="btn map-mode__x" onClick={cancelMode} aria-label="Cancel drawing" title="Cancel">✕</button>
               </span>
             </div>
           )
@@ -1410,22 +1490,33 @@ export default function MapPage() {
           </div>
         ) : (
           <div className="map-bar">
-            <button
-              type="button"
-              ref={filterBtnRef}
-              className={`map-filter-btn${filter !== 'all' ? ' is-filtered' : ''}`}
-              data-band={filter}
-              aria-haspopup="dialog"
-              aria-expanded={filterOpen}
-              aria-label={`Show: ${FILTER_LABEL[filter]}, ${plural(counts[filter] ?? 0, 'door', 'doors')}`}
-              onClick={() => { setFilterOpen((o) => !o); setUnlocOpen(false); }}
-            >
-              <FilterGlyph />
-              <span className="map-filter-btn__label">{FILTER_LABEL[filter]}</span>
-              <span className="map-filter-btn__n mono" aria-live="polite">
-                {doorsQ.isPending ? (doorsQ.fetchStatus === 'paused' ? 'Offline' : '…') : counts[filter] ?? 0}
-              </span>
-            </button>
+            {/* Nothing to filter with no doors loaded (no signal): the card below says so. */}
+            {!noSignal && (
+              <button
+                type="button"
+                ref={filterBtnRef}
+                className={`map-filter-btn${filter !== 'all' ? ' is-filtered' : ''}`}
+                data-band={filter}
+                aria-haspopup="dialog"
+                aria-expanded={filterOpen}
+                aria-label={`Show: ${FILTER_LABEL[filter]}, ${plural(counts[filter] ?? 0, 'door', 'doors')}`}
+                onClick={() => { setFilterOpen((o) => !o); setUnlocOpen(false); }}
+              >
+                <FilterGlyph />
+                <span className="map-filter-btn__label"><span className="map-filter-btn__show">Show:</span> {FILTER_LABEL[filter]}</span>
+                <span className="map-filter-btn__n mono" aria-live="polite">
+                  {doorsQ.isPending ? '…' : counts[filter] ?? 0}
+                </span>
+              </button>
+            )}
+            {myWalk && (
+              <Link className="map-chip" to={myWalk.to}><WalkGlyph /> {myWalk.label}</Link>
+            )}
+            {canCreate && (
+              <button type="button" className="map-chip" onClick={startDraw} aria-label="Draw a turf">
+                <TurfGlyph /> Draw turf
+              </button>
+            )}
             {canCreate && unlocated > 0 && (
               <div className={`map-unloc${unlocOpen ? ' is-open' : ''}`}>
                 <button
@@ -1435,13 +1526,12 @@ export default function MapPage() {
                   aria-label={`${plural(unlocated, 'person', 'people')} not on the map`}
                   onClick={() => { setUnlocOpen((o) => !o); setFilterOpen(false); }}
                 >
-                  <PinGlyph /> <span className="mono">{unlocated}</span>
-                  {unlocOpen && <span className="map-unloc__label">not on map</span>}
+                  <PinGlyph /> <span className="map-unloc__label">Not on map</span> <span className="map-unloc__n mono">{unlocated}</span>
                 </button>
                 {unlocOpen && (
                   <span className="map-unloc__btns">
                     <button type="button" className="btn map-unloc__btn" onClick={() => { setPickerOpen(true); setAddAt(null); setUnlocOpen(false); cancelMode(); }}>
-                      Place
+                      Drop pins by hand
                     </button>
                     <GeocodeButton compact onDone={onGeocoded} />
                   </span>
@@ -1461,9 +1551,7 @@ export default function MapPage() {
           showTurfs={showTurfs}
           onTurfs={setTurfsShown}
           turfCount={turfs.length}
-          walkTo={!canCreate && turfs.length === 1 ? `/turfs/${turfs[0].id}` : '/turfs'}
-          walkLabel={canCreate ? 'Walk lists' : turfs.length === 1 ? 'Open walk list' : 'My walk lists'}
-          canCreate={canCreate}
+          desk={canCreate}
           onDraw={startDraw}
           unlocated={unlocated}
           onPlace={() => { setFilterOpen(false); setPickerOpen(true); setAddAt(null); cancelMode(); }}
@@ -1489,8 +1577,15 @@ export default function MapPage() {
         )}
       </div>
 
-      {doorsQ.isError ? (
-        <p className="error map-error">{doorsQ.error.message}</p>
+      {noSignal ? (
+        <div className="card map-empty map-offline" role="status">
+          <p>{offlineWalk ? 'No signal — your walk list still works' : 'No signal — doors load when you’re back'}</p>
+          {offlineWalk && (
+            <Link className="btn btn-primary map-empty__btn" to={`/turfs/${offlineWalk.id}`}>Open walk list</Link>
+          )}
+        </div>
+      ) : doorsQ.isError ? (
+        <p className="error map-error">{doorsQ.error?.status ? doorsQ.error.message : 'No signal — showing the doors already loaded'}</p>
       ) : turfsQ.isError && !turfsQ.data ? (
         <p className="error map-error">Turfs didn’t load</p>
       ) : null}
@@ -1545,6 +1640,7 @@ export default function MapPage() {
           <NameTurfForm
             points={draft.points}
             doors={doors}
+            takenNames={turfs.map((t) => t.name)}
             busy={turfBusy}
             error={turfError}
             onSave={saveTurf}

@@ -275,6 +275,27 @@ app.get('/v/:ws', async (c) => {
 </form>`));
 });
 
+// The thank-you names what they ticked: "doorknocking, phoning and being a
+// hi-rise building captain".
+const HELP_WORDS = {
+  driver: 'driving voters',
+  scrutineer: 'scrutineering',
+  event_hosting: 'hosting an event',
+  zone_house_captain: 'being a zone house captain',
+  highrise_captain: 'being a hi-rise building captain',
+  food: 'helping with food',
+  translation: 'translating',
+  community_committee: 'the community committee',
+  burmashave: 'sign waving',
+};
+const helpWords = (roles) => {
+  const words = roles.map((code) => HELP_WORDS[code]
+    || (VOLUNTEER_ROLES.find((r) => r.code === code)?.label || code).toLowerCase());
+  if (words.length === 0) return 'volunteering';
+  if (words.length === 1) return words[0];
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+};
+
 const asList = (v) => Array.from(new Set((Array.isArray(v) ? v : v ? [v] : []).map(String).filter((r) => VOLUNTEER_ROLE_CODES.includes(r))));
 const ROLE_HAS_DETAIL = new Set(VOLUNTEER_ROLES.filter((r) => r.detail).map((r) => r.code));
 
@@ -314,7 +335,7 @@ app.post('/v/:ws', async (c) => {
   const { id } = await upsertPersonFromPublic(db, ws, { name, email, phone, address }, ['volunteer-prospect']);
   const roles = await saveVolunteer(db, ws, id, b);
   if ((c.req.header('accept') || '').includes('application/json')) return c.json({ ok: true });
-  return c.html(page(ws, 'Thank you', `<h1>Thank you, ${esc(name.split(' ')[0])}.</h1><div class="done">We'll be in touch about ${roles.length ? roles.length + ' way' + (roles.length > 1 ? 's' : '') + ' to help' : 'volunteering'}.</div>`));
+  return c.html(page(ws, 'Thank you', `<h1>Thank you, ${esc(name.split(' ')[0])}.</h1><div class="done">We'll be in touch about ${esc(helpWords(roles))}.</div>`));
 });
 
 // ── Events + RSVP ──

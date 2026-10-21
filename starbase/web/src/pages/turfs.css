@@ -57,6 +57,23 @@
 .walk-progress { display: flex; flex-direction: column; gap: 6px; }
 .walk-progress__text { font-size: 14px; }
 .walk-progress__text strong { font-size: 22px; }
+/* All done: plain green words, not a box that looks like a button */
+.walk-progress__done { color: var(--ok); font-size: 18px; font-weight: 700; }
+.walk-calls {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-1);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.walk-calls:hover { color: var(--text-2); }
 .walk-head .fk-more { margin-top: 0; --disclose-x: 0; }
 .walk-head .fk-more__body { padding: 0 0 var(--s-2); }
 .walk-notes { margin: 0; font-size: 15px; color: var(--text-2); white-space: pre-line; }
@@ -77,18 +94,22 @@
 /* Room under the last door, so it (and its open buttons) can scroll clear
    of the docked Next door bar. The page already pads for the tab bar. */
 .walk.has-next .walk-doors { padding-bottom: var(--dock-clear); }
+/* A door is open: room for it (the last one too) to sit clear of the toast. */
+.walk.has-open .walk-doors { padding-bottom: calc(var(--dock-clear) + 56px); }
 .walk-door {
   background: var(--paper-0);
   border: 1px solid var(--rule);
   border-radius: var(--r-card);
   scroll-margin-top: var(--s-3);
-  scroll-margin-bottom: calc(var(--tabbar-h, 0px) + var(--dock-clear)); /* clear the tab bar + docked bar */
+  /* clear the tab bar, the docked bar and a toast raised over it */
+  scroll-margin-bottom: calc(var(--tabbar-h, 0px) + var(--dock-clear) + 56px);
 }
 /* "Voting for?" scrolls itself into view: keep it clear of the same bars. */
 .walk .rb-who { scroll-margin-bottom: calc(var(--tabbar-h, 0px) + var(--dock-clear)); }
 .walk-door:focus { outline: none; }
 .walk-door:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
-.walk-door.is-next { border-color: var(--mark-deep); box-shadow: inset 5px 0 0 var(--mark); }
+/* The next door: an ink edge — the yellow is only the Next door button above it. */
+.walk-door.is-next { border-color: var(--ink); box-shadow: inset 4px 0 0 var(--ink); }
 .walk-door.is-done { background: var(--paper); }
 .walk-door.is-open { border-color: var(--ink); }
 .walk-door__h { margin: 0; font-size: inherit; }
@@ -125,11 +146,17 @@
   color: transparent;
 }
 .walk-check[data-done] { background: var(--ok); border-color: var(--ok); color: var(--paper-0); }
+/* Reached only by a call or text: a phone, not a tick */
+.walk-check[data-phone] { background: var(--paper-0); color: var(--ok); }
+.walk-glyph { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linejoin: round; }
 .walk-door__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .walk-door__addr { font-family: var(--font-serif); font-size: 18px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .walk-door.is-done .walk-door__addr { color: var(--text-2); font-weight: 500; }
 .walk-door__names { font-size: 13px; font-weight: 400; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.walk-door__chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; flex-shrink: 0; max-width: 40%; }
+/* Chips stay on one line (a household shows "2 rated", not a pile of chips) */
+.walk-door__chips { display: flex; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: 4px; flex-shrink: 0; }
+.walk-door__chips .chip { font-size: 10px; }
+.chip.walk-rated { color: var(--text-2); }
 
 .walk-panel { padding: var(--s-2) var(--s-3) 0; border-top: 1px solid var(--rule); }
 .walk-panel .fk-tabs { margin-top: var(--s-1); }
@@ -166,16 +193,6 @@
   text-transform: none;
   text-align: right;
 }
-.walk-next__done {
-  margin: 0;
-  padding: var(--s-3) var(--s-4);
-  background: var(--paper-0);
-  border: 1px solid var(--ok);
-  border-radius: var(--r-card);
-  color: var(--ok);
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
 .walk-dock {
   position: fixed;
   left: 50%;
@@ -195,7 +212,8 @@
 @media (prefers-reduced-motion: reduce) { .walk-dock { animation: none; } }
 
 /* Toast after a tap, with "Change". Saved offline looks like any other
-   toast (dark) — the walk list's one yellow thing is the Next door button. */
+   toast (dark) — the walk list's one yellow thing is the Next door button,
+   so the toast's button is a light outline. */
 .toast.walk-toast {
   bottom: calc(var(--tabbar-h, 0px) + var(--s-4));
   z-index: 70;
@@ -209,4 +227,6 @@
 .toast.walk-toast.is-raised { bottom: calc(var(--tabbar-h, 0px) + var(--s-3) + 68px); }
 .toast.walk-toast--error { background: var(--danger); color: var(--paper-0); }
 .btn.walk-toast__btn { min-height: 48px; white-space: nowrap; display: inline-flex; align-items: center; }
+.toast .btn.walk-toast__btn { color: inherit; background: transparent; border-color: color-mix(in srgb, currentColor 55%, transparent); }
+.toast .btn.walk-toast__btn:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
 .toast.walk-toast--error .btn { color: inherit; border-color: currentColor; }

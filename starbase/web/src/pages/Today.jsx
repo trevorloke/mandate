@@ -1,19 +1,23 @@
 // Today — the first screen, one job per role.
 //   Volunteer: one big yellow button — "Start canvassing" (their walk list, or
-//     the map), or "Make calls" once every walk list is done — then ONE shift
-//     line: "Your next shift" only when they're on it, otherwise the next open
-//     shift with "5 spots open" (→ that shift, where they join it). Signs
-//     waiting to go up get one row (→ Signs to put up). One small line of
-//     field numbers. Turfs and the upcoming events (with their RSVP pages)
-//     sit under "More".
-//   Desk: three big numbers (doors this week · support · total raised), each a
-//     tap to its screen — support opens its breakdown in place, opposed by
-//     candidate ("McCallum 3 · Locke 2"); then "Needs you" (gifts over the
-//     limit, open pledges, filings due, short shifts, signs to put up) —
-//     every row a tap to where it's fixed — then the next shift and event.
-//     Getting started shows only the steps not done, and only while the
-//     campaign is new. Walk lists, filings, providers, "Verify my books", the
-//     export and "Clear sample data" sit under a quiet "More" at the bottom.
+//     the map), or "Make calls" once every walk list is done (the "All done"
+//     turf line still opens the walk list) — then ONE shift line: "Your next
+//     shift" only when they're on it, otherwise the next open shift with
+//     "5 spots left" (→ that shift, where they join it). Signs waiting to go
+//     up get one row (→ Signs to put up). One small line of the team's field
+//     numbers. Turfs and the upcoming events (with their RSVP pages) sit
+//     under "More". With no signal, "Start canvassing" opens the walk list
+//     kept on this phone (Turfs.jsx's offline copy), else the turf list.
+//   Desk: three big numbers (doors this week · support · total raised). Doors
+//     and money are taps to their screens (›); support opens its breakdown in
+//     place (+), opposed by candidate ("McCallum 3 · Locke 2"). Then "Needs
+//     you" (gifts over the limit, open pledges, filings due, new volunteers
+//     from the public form, short shifts, signs to put up) — name first, the
+//     amount on the right, every row a tap to where it's fixed — then the
+//     next shift and event. Getting started shows only the steps not done,
+//     and only while the campaign is new. Walk lists, filings, team (managers),
+//     providers, "Verify my books", the export and "Clear sample data" sit
+//     under a quiet "More" at the bottom.
 // A nearly empty campaign gets a one-click sample dataset (managers); a quiet
 // "Sample data is loaded" line stays at the top while it's there. Volunteers
 // never see money.
@@ -279,21 +283,22 @@ function Numbers({ b, pic }) {
   const supportPct = pic.total ? `${pic.pct(pic.counts.support)}%` : '—';
   return (
     <>
+      {/* Same shape as the rows: › goes to a screen, + opens here. */}
       <div className="today-nums">
         <Link to="/map" className="today-num">
           <span className="today-num__n">{num(doors)}</span>
-          <span className="today-num__label">Doors this week</span>
+          <span className="today-num__label">Doors this week<span className="today-num__go" aria-hidden="true">›</span></span>
         </Link>
         <button type="button" className="today-num" aria-expanded={open} aria-controls={detailId} onClick={toggle}
           aria-label={pic.total ? `Support ${supportPct} of ${num(pic.total)} rated` : 'Support — no ratings yet'}>
           <span className="today-num__n">{supportPct}</span>
           <SupportBar pic={pic} size="small" />
-          <span className="today-num__label">Support <span aria-hidden="true">{open ? '▴' : '▾'}</span></span>
+          <span className="today-num__label">Support<span className="today-num__plus" aria-hidden="true" /></span>
         </button>
         {b.money && (
           <Link to="/money" className="today-num" aria-label={`Total raised ${fmtMoney(b.money.totalCents)}`}>
             <span className="today-num__n">{fmtBigMoney(b.money.totalCents)}</span>
-            <span className="today-num__label">Total raised</span>
+            <span className="today-num__label">Total raised<span className="today-num__go" aria-hidden="true">›</span></span>
           </Link>
         )}
       </div>
@@ -304,23 +309,30 @@ function Numbers({ b, pic }) {
 
 // ── Desk: Needs you ──
 // Every row is a tap to the screen where it's dealt with (no rows that open
-// in place). The only reason a gift is flagged is the contribution limit
-// (server/lib/gifts.js), so it says so in plain words — the same label as Money.
+// in place). Name first, the amount on the right — as on Money. The only
+// reason a gift is flagged is the contribution limit (server/lib/gifts.js),
+// so it says so in plain words — the same label as Money.
 const OVER_LIMIT = 'Over limit';
+// People who signed up on the public volunteer form (/v/…) carry this tag
+// until someone follows up (server/routes/public.js).
+const PROSPECT_TAG = 'volunteer-prospect';
+const PROSPECT_MAX = 100;
 
-function LinkRow({ to, main, chip, chipCls = 'chip', title }) {
+function LinkRow({ to, main, chip, chipCls = 'chip', end, title }) {
   return (
     <li className="today-need">
       <Link to={to} className="today-row" title={title}>
         <span className="today-row__main">{main}</span>
         {chip && <span className={chipCls}>{chip}</span>}
+        {end && <span className="today-row__end mono">{end}</span>}
         <Chevron />
       </Link>
     </li>
   );
 }
 
-const spots = (n) => `${n} ${plural(n, 'spot')}`;
+// "5 spots left" — the same words as the Shifts screen.
+const spotsLeft = (n) => `${n} ${plural(n, 'spot')} left`;
 
 function filingChip(n) {
   if (n < 0) return { chip: `${-n}d overdue`, chipCls: 'chip chip-danger' };
@@ -329,6 +341,13 @@ function filingChip(n) {
 }
 
 function NeedsYou({ b }) {
+  // New volunteers from the public form. Under ['persons'], so the People
+  // screen's edits (taking the tag off) refresh the count.
+  const prospects = useQuery({
+    queryKey: ['persons', 'prospects'],
+    queryFn: () => apiGet(`/persons?tag=${PROSPECT_TAG}&limit=${PROSPECT_MAX}`),
+  });
+  const newVols = prospects.data?.persons?.length ?? 0;
   const flagged = b.flagged ?? [];
   const pledges = Number(b.pledges?.n) || 0;
   const filings = (b.filings ?? []).filter((f) => Number(f.days_left) <= 7);
@@ -338,19 +357,19 @@ function NeedsYou({ b }) {
   const signs = Number(b.signs?.requested) || 0;
   const shownFlags = flagged.length > 3 ? flagged.slice(0, 2) : flagged;
   const moreFlags = flagged.length - shownFlags.length;
-  const empty = !flagged.length && !pledges && !filings.length && !shortShifts.length && !signs;
+  const empty = !flagged.length && !pledges && !filings.length && !newVols && !shortShifts.length && !signs;
 
   return (
     <section className="today-section" aria-labelledby="today-needs-h">
       <h2 className="today-h" id="today-needs-h">Needs you</h2>
       {empty ? (
-        <p className="today-empty">All caught up.</p>
+        // Don't say "All caught up" before the volunteer count is in.
+        prospects.isPending ? <p className="today-empty" aria-hidden="true">&nbsp;</p> : <p className="today-empty">All caught up.</p>
       ) : (
         <ul className="today-rows">
           {shownFlags.map((g) => (
             <LinkRow key={g.id} to={`/money?gift=${encodeURIComponent(g.id)}`} title={g.flag_reason || undefined}
-              main={<><strong className="mono">{fmtMoney(g.amount_cents)}</strong> {g.donor}</>}
-              chip={OVER_LIMIT} chipCls="chip chip-warn" />
+              main={g.donor} chip={OVER_LIMIT} chipCls="chip chip-warn" end={fmtMoney(g.amount_cents)} />
           ))}
           {moreFlags > 0 && (
             <LinkRow to="/money" main={<><strong className="mono">{moreFlags}</strong> more {plural(moreFlags, 'gift')}</>}
@@ -359,12 +378,16 @@ function NeedsYou({ b }) {
           {pledges > 0 && (
             <LinkRow to="/money"
               main={<><strong className="mono">{pledges}</strong> open {plural(pledges, 'pledge')}</>}
-              chip={fmtMoney(b.pledges.cents)} />
+              end={fmtMoney(b.pledges.cents)} />
           )}
           {filings.map((f) => <LinkRow key={f.id} to="/filings" main={f.name} {...filingChip(Number(f.days_left))} />)}
+          {newVols > 0 && (
+            <LinkRow to={`/people?tag=${PROSPECT_TAG}`}
+              main={<><strong className="mono">{newVols >= PROSPECT_MAX ? `${PROSPECT_MAX}+` : newVols}</strong> new {plural(newVols, 'volunteer')}</>} />
+          )}
           {shortShifts.map((s) => {
-            const short = s.capacity - (Number(s.filled) || 0);
-            return <LinkRow key={s.id} to={`/shifts/${s.id}`} main={s.title} chip={`${short} short`} chipCls="chip chip-warn" />;
+            const left = s.capacity - (Number(s.filled) || 0);
+            return <WhenRow key={s.id} to={`/shifts/${s.id}`} title={s.title} when={s.starts_at} extra={spotsLeft(left)} warn />;
           })}
           {signs > 0 && (
             <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
@@ -378,17 +401,18 @@ function NeedsYou({ b }) {
 // ── Coming up: one line each ──
 // Two-line row: a small kicker, the title, the time. `fill` is a short plain
 // count on the right ("12 going"); `extra` rides on the time line ("5 spots
-// open") so a long title keeps the full width. Never a bare "3/8".
-function WhenRow({ to, kicker, title, when, fill, extra }) {
+// left", amber when `warn`) so a long title keeps the full width. Never a
+// bare "3/8".
+function WhenRow({ to, kicker, title, when, fill, extra, warn }) {
   return (
     <li className="today-need">
       <Link to={to} className="today-row">
         <span className="today-row__main">
-          <span className="today-row__kicker">{kicker}</span>
+          {kicker && <span className="today-row__kicker">{kicker}</span>}
           <span className="today-row__title">{title}</span>
           <span className="today-row__when">
             {fmtWhen(when)}
-            {extra && <> · <span className="today-row__extra">{extra}</span></>}
+            {extra && <> · <span className={`today-row__extra${warn ? ' is-warn' : ''}`}>{extra}</span></>}
           </span>
         </span>
         {fill && <span className="today-fill mono">{fill}</span>}
@@ -437,7 +461,7 @@ function useMyNextShift(me) {
 }
 
 // One line: the shift they're booked on — or, if none, the next shift that
-// still needs people ("5 spots open" → that shift, where "Join" is). Never
+// still needs people ("5 spots left" → that shift, where "Join" is). Never
 // someone else's shift dressed up as theirs.
 function VolunteerShiftRow({ shifts, me }) {
   const { ready, next } = useMyNextShift(me);
@@ -450,7 +474,7 @@ function VolunteerShiftRow({ shifts, me }) {
   const left = open.capacity ? open.capacity - (Number(open.filled) || 0) : 0;
   return (
     <WhenRow to={`/shifts/${open.id}`} kicker="Open shift" title={open.title} when={open.starts_at}
-      extra={left ? `${spots(left)} open` : null} />
+      extra={left ? spotsLeft(left) : null} />
   );
 }
 
@@ -532,6 +556,51 @@ function EventList({ events, wsSlug }) {
   );
 }
 
+// ── No signal: the walk list kept on this phone ──
+// Turfs.jsx keeps each walk list it loads (key below, one day, wiped on sign
+// out) so /turfs/:id opens with no signal. With the brief offline, Today
+// reads those keys to send "Start canvassing" to the most recently loaded
+// one — never to an empty map. Read only; Turfs.jsx owns the format.
+const FIELD_CACHE = 'starbase:field:v1:';
+const FIELD_TTL = 24 * 3600 * 1000;
+function cachedWalkList(me) {
+  if (!me?.user?.id || !me?.workspace?.id) return null;
+  const prefix = `${FIELD_CACHE}${me.workspace.id}:${me.user.id}:walk:`;
+  let best = null;
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(prefix)) continue;
+      const v = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!v?.data?.turf || !(Date.now() - v.at < FIELD_TTL)) continue;
+      if (!best || v.at > best.at) best = { id: k.slice(prefix.length), at: v.at, name: v.data.turf.name };
+    }
+  } catch { return null; }
+  return best;
+}
+
+function NoSignalToday({ me }) {
+  const field = me.role === 'volunteer';
+  const walk = field ? cachedWalkList(me) : null;
+  return (
+    <div className={`today${field ? ' today--field' : ''}`}>
+      <span className="eyebrow">{greeting()}</span>
+      <h1>{me.workspace.name}</h1>
+      <p className="today-offline" role="status">
+        {walk ? 'No signal — your walk list still works.' : 'No signal — this fills in when you’re back online.'}
+      </p>
+      {field && (
+        <section className="today-go" aria-label="Canvass">
+          <Link to={walk ? `/turfs/${walk.id}` : '/turfs'} className="btn btn-primary today-start">
+            Start canvassing <span aria-hidden="true">→</span>
+          </Link>
+          {walk?.name && <p className="today-go__meta"><span className="today-go__turf">{walk.name}</span></p>}
+        </section>
+      )}
+    </div>
+  );
+}
+
 // Quiet disclosure at the bottom. Its contents aren't rendered until opened.
 function More({ children }) {
   const [open, setOpen] = useState(false);
@@ -572,10 +641,12 @@ function VolunteerToday({ b, me }) {
           <Link to="/calls" className="btn btn-primary today-start">
             Make calls <span aria-hidden="true">→</span>
           </Link>
-          <p className="today-go__meta">
+          {/* Still the way back to the walk list: re-check a door, open a profile. */}
+          <Link to={myTurfs.length === 1 ? `/turfs/${myTurfs[0].id}` : '/turfs'} className="today-go__meta today-go__link">
             <span className="today-go__turf">{myTurfs.length === 1 ? myTurfs[0].name : `${myTurfs.length} turfs`}</span>
             <span className="today-go__done">— All done <span aria-hidden="true">✓</span></span>
-          </p>
+            <Chevron />
+          </Link>
         </section>
       ) : (
         <section className="today-go" aria-label="Canvass">
@@ -601,12 +672,13 @@ function VolunteerToday({ b, me }) {
         )}
       </ul>
 
+      {/* The whole campaign's numbers, not hers: say so. */}
       <p className="today-fieldline mono">
-        {num(f.doors)} doors this week · {num(f.calls)} {plural(Number(f.calls) || 0, 'call')}
+        Team: {num(f.doors)} doors this week · {num(f.calls)} {plural(Number(f.calls) || 0, 'call')}
       </p>
 
       <More>
-        <p className="today-fieldline mono">{num(f.texts)} {plural(Number(f.texts) || 0, 'text')} this week</p>
+        <p className="today-fieldline mono">Team: {num(f.texts)} {plural(Number(f.texts) || 0, 'text')} this week</p>
         {others.length > 0 && (
           <>
             <h3 className="today-subh">{done ? 'Your turfs' : 'Your other turfs'}</h3>
@@ -689,6 +761,7 @@ function DeskToday({ b, me, toast }) {
         )}
         <ul className="today-rows">
           <LinkRow to="/filings" main="Filings" />
+          {isManager && <LinkRow to="/team" main={<>Team <span className="muted">· invite people</span></>} />}
           {b.providers && (!b.providers.email || !b.providers.text) && (
             <LinkRow to="/outreach/website" main="Connect email & texting" />
           )}
@@ -718,18 +791,7 @@ export default function Today() {
     (brief.isPending && brief.fetchStatus === 'paused')
     || (brief.isError && !(brief.error instanceof ApiError))
   );
-  if (noSignal) {
-    return (
-      <div className="today">
-        <span className="eyebrow">{greeting()}</span>
-        <h1>{me.workspace.name}</h1>
-        <p className="today-offline" role="status">No signal — this fills in when you’re back online.</p>
-        {me.role === 'volunteer' && (
-          <Link to="/map" className="btn btn-primary today-start">Start canvassing <span aria-hidden="true">→</span></Link>
-        )}
-      </div>
-    );
-  }
+  if (noSignal) return <NoSignalToday me={me} />;
   if (brief.isError && !brief.data) {
     return (
       <div className="today">

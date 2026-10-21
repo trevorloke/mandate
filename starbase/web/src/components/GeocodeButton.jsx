@@ -6,9 +6,9 @@
 //   summary = { located, missed, errored, remaining, unmatched, stopped, error }
 // compact: one pill-sized button + a short status line (the map's
 // "not on the map yet" pill). Full: one primary button, a progress bar, and
-// a one-line summary.
+// a one-line summary; once pins are placed, "See the map" takes its place.
 import { useEffect, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { Link, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../api.js';
 import '../pages/import.css';
@@ -218,6 +218,8 @@ function Geocoder({ onDone, compact = false }) {
           </button>
         ) : canRun ? (
           <button type="button" className="btn btn-primary imp-tap" onClick={run}>{runLabel}</button>
+        ) : s && (s.located > 0 || s.unmatched > 0) ? (
+          <Link className="btn imp-tap" to="/map">See the map</Link>
         ) : null}
       </div>
     </div>

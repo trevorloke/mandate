@@ -41,9 +41,10 @@
 
 /* ── Pins (L.divIcon): a circle with a tail, colored by the household band.
    The marker element is a 48x48 transparent hit box (field rule); the
-   visible pin sits inside it. The number on a colored pin is always a
-   rating; a household's head-count is the small white badge on its corner,
-   and a group of nearby doors is a white bubble with a band ring.
+   visible pin sits inside it. Pins carry no numbers: a rated door has a
+   white dot (the color is the band); a household's head-count is the small
+   people badge on its corner, and a group of nearby doors is a white bubble
+   with a house, the door count and a band ring.
    Pin colors are literal (not tokens): the OSM basemap is light in both
    schemes, so the dark-mode pastel status tokens would wash out on it. ── */
 .map-pin-wrap, .map-sign-wrap, .map-me-wrap, .map-cluster-wrap { background: transparent; border: 0; }
@@ -76,13 +77,7 @@
   border-bottom: 0;
   border-top: 9px solid var(--pin-bg);
 }
-.map-pin__label {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1;
-}
+.map-pin__dot { display: block; width: 9px; height: 9px; border-radius: 50%; background: var(--pin-fg); }
 .map-pin--support   { --pin-bg: #2e6b3e; }
 .map-pin--undecided { --pin-bg: #e0990b; --pin-fg: #141100; }
 .map-pin--opposed   { --pin-bg: #8a1414; }
@@ -104,10 +99,11 @@
   border-radius: 999px;
 }
 .map-pin__hh svg { width: 10px; height: 10px; fill: #0c0c0c; }
+/* Selected: an ink ring — yellow is only for a screen's one primary button. */
 .map-pin--selected {
   transform: scale(1.18);
-  border-color: #0c0c0c;
-  box-shadow: 0 0 0 3px #ffd400, 0 2px 6px rgba(0, 0, 0, 0.5);
+  border-color: #faf8f1;
+  box-shadow: 0 0 0 3px #0c0c0c, 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 .leaflet-marker-icon:hover .map-pin { transform: scale(1.1); }
 .leaflet-marker-icon:hover .map-pin--selected { transform: scale(1.18); }
@@ -224,6 +220,10 @@
 .fk-out:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .fk-out:disabled { opacity: 0.55; cursor: default; }
 
+/* Waiting / not sent yet / requested: a quiet ochre chip, never the brand
+   yellow (chip-warn is --mark-soft; rule 2 keeps yellow for the one button). */
+.chip.fk-wait { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 70%, transparent); background: color-mix(in srgb, var(--warn) 8%, var(--paper-0)); }
+
 /* "More" disclosure — the shared .disclose row (app.css), edge to edge in the card */
 .fk-more { margin-top: var(--s-3); --disclose-x: var(--s-4); }
 .fk-more__body { display: flex; flex-direction: column; gap: var(--s-3); padding: 0 var(--s-4) var(--s-4); }
@@ -242,10 +242,11 @@
 }
 .map-top > * { pointer-events: auto; }
 
-/* One row: the filter button + (desk) the "not on the map" count chip */
+/* One row: the "Show:" filter pill, then a volunteer's Walk list chip, or
+   (desk) Draw turf and the "Not on map" count chip */
 .map-bar { display: flex; gap: var(--s-2); align-items: flex-start; flex-wrap: wrap; pointer-events: none; }
 .map-bar > * { pointer-events: auto; }
-.map-filter-btn, .map-unloc__chip {
+.map-filter-btn, .map-unloc__chip, .map-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
@@ -263,8 +264,12 @@
   cursor: pointer;
   touch-action: manipulation;
 }
-.map-filter-btn:focus-visible, .map-unloc__chip:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
-.map-filter-btn .map-glyph { width: 18px; height: 18px; }
+.map-filter-btn:focus-visible, .map-unloc__chip:focus-visible, .map-chip:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+.map-filter-btn .map-glyph, .map-chip .map-glyph { width: 18px; height: 18px; }
+.map-filter-btn__show { color: var(--text-3); }
+/* Quiet map controls beside the pill: Walk list (volunteers), Draw turf (desk) */
+.map-chip { padding: 0 16px 0 14px; text-decoration: none; }
+.map-chip:hover { background: var(--paper-1); color: var(--text-1); }
 .map-filter-btn__n {
   min-width: 28px;
   height: 28px;
@@ -288,9 +293,11 @@
 .map-filter-btn[data-band='unrated'], .map-fopt[data-band='unrated']     { --dot: #8f8b7c; }
 
 .map-unloc { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-.map-unloc__chip { padding: 0 14px; background: var(--mark-soft); border-color: var(--mark-deep); }
+/* "Not on map 4": the same quiet pill (not yellow), saying what the 4 is */
+.map-unloc__chip { padding: 0 8px 0 14px; }
 .map-unloc__chip .map-glyph { width: 18px; height: 18px; }
-.map-unloc__label { font-size: 11px; }
+.map-unloc__n { min-width: 28px; height: 28px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--paper-2); letter-spacing: 0; }
+.map-unloc.is-open .map-unloc__chip { background: var(--paper-1); border-width: 2px; padding-left: 13px; padding-right: 7px; }
 .map-unloc__btns { display: inline-flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; padding: 4px; background: var(--paper-0); border: 1px solid var(--rule-2); border-radius: 999px; box-shadow: 2px 2px 0 rgba(12, 12, 12, 0.12); }
 .btn.map-unloc__btn, .map-unloc .btn.geo-btn { min-height: 48px; padding: 0 16px; border-radius: 999px; display: inline-flex; align-items: center; }
 .map-unloc .geo-live:empty { display: none; }
@@ -341,10 +348,32 @@
 .map-fopt__n { font-size: 13px; color: var(--text-3); }
 .map-fopt.is-on { background: var(--ink); color: var(--paper-0); border-color: var(--ink); }
 .map-fopt.is-on .map-fopt__n { color: var(--paper-0); }
-.map-fopt--turfs .map-fopt__dot { border-radius: 2px; background: transparent; border: 2px solid #2b6cb0; }
-.map-fopt--turfs.is-on { background: var(--paper-0); color: var(--text-1); border: 2px solid #2b6cb0; padding: 0 calc(var(--s-3) - 1px); }
-.map-fopt--turfs.is-on .map-fopt__dot { background: #2b6cb0; }
-.map-fopt--turfs.is-on .map-fopt__n { color: var(--text-3); }
+/* "On the map" (desk): layer switches, plainly not one of the Show choices */
+.map-fsheet__layers { margin-top: var(--s-3); padding-top: var(--s-2); border-top: 1px solid var(--rule); }
+.map-fsheet__sub { margin: 0 0 var(--s-1); font-family: var(--font-mono); font-size: 10px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+.map-fswitch {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 48px;
+  padding: 0;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--text-1);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.map-fswitch:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+.map-fswitch__n { font-size: 13px; color: var(--text-3); margin-left: 6px; }
+.map-fswitch__track { position: relative; flex: 0 0 auto; width: 44px; height: 26px; border-radius: 999px; background: var(--paper-2); border: 1px solid var(--rule-2); transition: background 120ms ease; }
+.map-fswitch__knob { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--paper-0); border: 1px solid var(--rule-2); transition: transform 120ms ease; }
+.map-fswitch.is-on .map-fswitch__track { background: var(--ink); border-color: var(--ink); }
+.map-fswitch.is-on .map-fswitch__knob { transform: translateX(18px); border-color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .map-fswitch__track, .map-fswitch__knob { transition: none; } }
 .map-fsheet__acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--rule); }
 .btn.map-fsheet__act { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); min-height: 48px; padding: 0 var(--s-2); }
 .map-fsheet__acts > :only-child { grid-column: 1 / -1; }
@@ -363,14 +392,21 @@
   font-size: 13px;
   box-shadow: 3px 3px 0 rgba(12, 12, 12, 0.18);
 }
-.map-mode strong { color: var(--mark); font-weight: 700; }
+.map-mode strong { color: inherit; font-weight: 700; }
 .map-mode__sub { display: block; font-size: 11px; opacity: 0.8; margin-top: 2px; }
 .map-mode .map-mode__btns { display: flex; gap: var(--s-2); flex-wrap: wrap; }
-.map-mode .btn { background: transparent; color: var(--mark); border-color: var(--mark-deep); min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; justify-content: center; }
-.map-mode .btn:hover { background: var(--mark); color: var(--mark-ink); }
+/* Quiet light outlines on the dark bar; the yellow is Finish only, once it can finish. */
+.map-mode .btn { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 45%, transparent); min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; justify-content: center; }
+.map-mode .btn:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
 .map-mode .btn.map-mode__go { background: var(--mark); color: var(--mark-ink); border-color: var(--mark); }
 .map-mode .btn.map-mode__go:hover { background: var(--mark-deep); border-color: var(--mark-deep); }
-.map-mode .btn:disabled, .map-mode .btn:disabled:hover { background: transparent; color: var(--mark); border-color: var(--mark-deep); }
+.map-mode .btn:disabled, .map-mode .btn:disabled:hover { background: transparent; opacity: 0.45; }
+/* Drawing: one slim line, only as wide as it needs (taps beside it reach the map) */
+.map-mode--draw { align-self: flex-start; max-width: 100%; flex-wrap: nowrap; gap: var(--s-3); padding: 4px 4px 4px var(--s-4); }
+.map-mode--draw .map-mode__btns { flex-wrap: nowrap; gap: 6px; }
+.map-mode--draw .btn { padding: 0 12px; }
+.map-mode__count { white-space: nowrap; }
+.map-mode .btn.map-mode__x { padding: 0; font-size: 15px; }
 
 /* Two round floating buttons, bottom right */
 .map-fabs {
@@ -422,6 +458,8 @@
 .map-fab:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 
 .error.map-error { position: absolute; left: var(--s-3); bottom: var(--s-6); z-index: 2; background: var(--paper-0); padding: var(--s-2) var(--s-3); border: 1px solid var(--danger); border-radius: var(--r-ctrl); }
+/* No signal, no doors loaded: one line + the walk list kept on the phone */
+.card.map-offline { top: 40%; }
 .card.map-empty {
   position: absolute;
   left: 50%;
@@ -525,8 +563,8 @@
   align-items: center;
   flex-wrap: wrap;
   padding: var(--s-2) var(--s-3);
-  background: var(--mark-soft);
-  border: 1px dashed var(--mark-deep);
+  background: var(--paper-1);
+  border: 1px dashed var(--rule-2);
   border-radius: var(--r-ctrl);
 }
 .door-loglink__label { flex-basis: 100%; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-1); }
@@ -660,14 +698,13 @@
   line-height: 1.15;
   color: var(--text-1);
 }
-.rb-who__code { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--danger); }
 .rb-who__btn--unsure { border-style: dashed; }
 @media (hover: hover) { .rb-who__btn:hover { background: color-mix(in srgb, var(--danger) 10%, var(--paper-0)); } }
 .rb-who__btn.is-active { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); background: color-mix(in srgb, var(--danger) 14%, var(--paper-0)); }
 .rb-who__btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .rb-who__btn:disabled { opacity: 0.6; cursor: default; }
 
-/* Logging switch (bottom of More): At the door (default) · Phone call · Text */
+/* How you reached them (bottom of More): At the door (default) · Phone call · Text */
 .door-channel { display: inline-flex; align-self: flex-start; border: 1px solid var(--rule-2); border-radius: 999px; overflow: hidden; }
 .door-channel__btn {
   min-height: 48px;
@@ -724,18 +761,24 @@
   border-bottom: 1px solid var(--rule);
   cursor: pointer;
 }
-.map-place-row:hover { background: var(--mark-soft); }
+.map-place-row:hover { background: var(--paper-1); }
 .map-place-row:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
 .map-place-row__name { font-weight: 600; }
 .map-place-row__addr { font-size: 13px; }
 .map-place-empty { padding: var(--s-3) var(--s-2); }
 
-/* Toast: above Leaflet and the phone tabbar, with an optional action */
+/* Toast: above Leaflet and the phone tabbar, with an optional action. Its
+   button (Change / Undo) is a light outline, not yellow. */
 .toast.map-toast { z-index: 1000; max-width: calc(100vw - 32px); width: max-content; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); min-height: 48px; font-size: 13px; }
 .toast.map-toast:not(:has(button)) { padding-right: var(--s-4); }
 .btn.map-toast__btn { min-height: 48px; white-space: nowrap; display: inline-flex; align-items: center; }
+.toast .btn.map-toast__btn { color: inherit; background: transparent; border-color: color-mix(in srgb, currentColor 55%, transparent); }
+.toast .btn.map-toast__btn:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
 @media (max-width: 720px) {
   .toast.map-toast { bottom: calc(var(--tabbar-h, 0px) + var(--s-3)); }
+  /* A card is open along the bottom: the toast goes over the map above it,
+     never on the card's buttons. */
+  .map-page.has-sheet .toast.map-toast { position: absolute; top: var(--s-3); bottom: auto; }
 }
 
 
@@ -765,8 +808,8 @@
 .map-page.is-drawing .leaflet-marker-icon.map-draft-start.leaflet-interactive { pointer-events: auto; cursor: pointer; }
 .map-page.is-moded .map-canvas path.map-turf { pointer-events: none; }
 .map-draft-start { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; }
-.map-draft-dot { display: block; width: 16px; height: 16px; border-radius: 50%; background: #ffd400; border: 2px solid #0c0c0c; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
-.map-draft-start.is-closable .map-draft-dot { width: 22px; height: 22px; box-shadow: 0 0 0 5px rgba(255, 212, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4); }
+.map-draft-dot { display: block; width: 16px; height: 16px; border-radius: 50%; background: #faf8f1; border: 3px solid #0c0c0c; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.map-draft-start.is-closable .map-draft-dot { width: 22px; height: 22px; background: #0c0c0c; border-color: #faf8f1; box-shadow: 0 0 0 4px rgba(12, 12, 12, 0.35), 0 1px 3px rgba(0, 0, 0, 0.4); }
 
 /* The turf sheet */
 .turf-sheet { --turf: #2b6cb0; }
@@ -778,6 +821,7 @@
 .turf-progress { display: flex; flex-direction: column; gap: 6px; }
 .turf-progress__text { font-size: 14px; }
 .turf-progress__text strong { font-size: 20px; }
+.turf-progress__text.is-done { color: var(--ok); font-weight: 700; }
 .turf-bar { display: block; height: 10px; background: var(--paper-2); border-radius: 999px; overflow: hidden; }
 .turf-bar__fill { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
 .turf-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-2); margin: 0; }
@@ -795,6 +839,9 @@
 .turf-assign { display: flex; gap: var(--s-2); align-items: flex-end; }
 .turf-assign .field { flex: 1 1 auto; min-width: 0; margin: 0; }
 .turf-assign select.input { min-height: 48px; }
+.turf-everyone { margin: 0; font-size: 14px; color: var(--text-2); display: flex; align-items: center; flex-wrap: wrap; gap: 0 6px; min-height: 48px; }
+.turf-invite { color: var(--text-1); text-underline-offset: 3px; display: inline-flex; align-items: center; min-height: 48px; }
+.fk-link.turf-invite-link { align-self: flex-start; margin-left: calc(-1 * var(--s-1)); }
 .btn.turf-delete { color: var(--danger); }
 .btn.turf-delete:hover { color: var(--danger); border-color: var(--danger); }
 .turf-confirm { border: 1px solid var(--danger); border-radius: var(--r-ctrl); padding: var(--s-3); background: color-mix(in srgb, var(--danger) 7%, var(--paper-0)); }

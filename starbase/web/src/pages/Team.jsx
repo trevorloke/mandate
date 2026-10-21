@@ -1,8 +1,9 @@
-// Team (managers): one invite row (email · role · Send invite), then members
-// as rows with a role select, then pending invites. What each role can do
-// sits under "Roles". Volunteers canvass, phone and place signs; staff and
-// the treasurer also see money and lists.
-import { useId, useState } from 'react';
+// Team (managers): one invite row (email · role · the button), then members
+// as rows with a role select, then pending invites — each with "New link"
+// (and "Cancel", once the server offers it). What each role can do sits
+// under "Roles". With email not connected the button says "Get invite link":
+// the link it shows is the way in.
+import { useEffect, useId, useRef, useState } from 'react';
 import { Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, fmtDate } from '../api.js';
@@ -15,6 +16,9 @@ const ROLES = [
   { code: 'manager',   label: 'Manager',   hint: 'Everything, including the team' },
 ];
 const roleLabel = (code) => ROLES.find((r) => r.code === code)?.label || code;
+// Not on the server yet; "Cancel" appears on an invite once GET /api/actions
+// lists it (input { id }).
+const CANCEL_INVITE = 'member.cancelInvite';
 
 // "Oct 21" (with the year only when it isn't this year), like every other screen.
 const fmtDay = (ts) => {
@@ -30,6 +34,113 @@ const Email = ({ value }) => {
   if (at < 0) return value;
   return <>{value.slice(0, at + 1)}<wbr />{value.slice(at + 1)}</>;
 };
+
+// The join link, once: who it's for, Copy link, and the link itself.
+function JoinLink({ sent, testId }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef(null);
+  const linkRef = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => { setCopied(false); }, [sent.joinUrl]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(sent.joinUrl);
+      setCopied(true);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 2400);
+    } catch {
+      // No clipboard (e.g. not https): select the link so a long-press copies it.
+      setCopied(false);
+      const sel = window.getSelection?.();
+      if (sel && linkRef.current) { const r = document.createRange(); r.selectNodeContents(linkRef.current); sel.removeAllRanges(); sel.addRange(r); }
+    }
+  };
+  return (
+    <div className="ot-result" data-status="sent" role="status">
+      <div className="ot-result-head">
+        <span className="ot-status-dot" data-status="sent" aria-hidden="true" />
+        <strong>{sent.emailStatus === 'sent' ? `Emailed ${sent.email}` : `Send ${sent.email} this link`}</strong>
+        <button type="button" className="btn ot-btn-tap ot-copy" data-copied={copied ? 'true' : 'false'} onClick={copy}>
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
+      <code ref={linkRef} className="ot-joinlink" data-testid={testId}>{sent.joinUrl}</code>
+    </div>
+  );
+}
+
+// A pending invite: email, role, until when; "New link" makes a fresh link
+// (same email, same role) and shows it right here. "Cancel" asks in place.
+function InvitedRow({ inv, ids, canCancel, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [sent, setSent] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const newLink = async () => {
+    setBusy(true); setError(null); setConfirming(false);
+    try {
+      const r = await action('member.invite', { email: inv.email, role: inv.role });
+      setSent({ email: r.invite.email, joinUrl: r.joinUrl, emailStatus: r.email });
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cancel = async () => {
+    setBusy(true); setError(null);
+    try {
+      // Every pending link for this email stops working.
+      for (const id of ids) await action(CANCEL_INVITE, { id });
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="ot-item">
+      <div className="ot-row ot-row--static ot-row--wrap">
+        <span className="ot-row__main">
+          <span className="ot-row__name ot-email"><Email value={inv.email} /></span>
+          <span className="ot-row__sub">
+            <span>{roleLabel(inv.role)}</span>
+            <span>until {fmtDay(inv.expires_at)}</span>
+          </span>
+        </span>
+        {!confirming && (
+          <span className="ot-actions ot-row__acts">
+            <button type="button" className="btn ot-btn-tap" disabled={busy} onClick={newLink}>
+              {busy ? 'Making…' : 'New link'}
+            </button>
+            {canCancel && (
+              <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy}
+                onClick={() => { setConfirming(true); setSent(null); }}>Cancel</button>
+            )}
+          </span>
+        )}
+      </div>
+      {(confirming || sent || error) && (
+        <div className="ot-body">
+          {confirming && (
+            <div className="ot-confirm ot-confirm-danger" role="group" aria-label="Cancel invite">
+              <span>Cancel this invite?</span>
+              <button type="button" className="btn ot-btn-tap ot-btn-danger" disabled={busy} onClick={cancel}>
+                {busy ? 'Cancelling…' : 'Yes'}
+              </button>
+              <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={() => setConfirming(false)}>No</button>
+            </div>
+          )}
+          {sent && <JoinLink sent={sent} />}
+          {error && <p className="error">{error}</p>}
+        </div>
+      )}
+    </li>
+  );
+}
 
 function RolesHelp() {
   const [open, setOpen] = useState(false);
@@ -51,24 +162,32 @@ function RolesHelp() {
 export default function Team() {
   const { me } = useOutletContext();
   const queryClient = useQueryClient();
-  const team = useQuery({ queryKey: ['team'], queryFn: () => apiGet('/team'), enabled: me.role === 'manager' });
+  const isManager = me.role === 'manager';
+  const team = useQuery({ queryKey: ['team'], queryFn: () => apiGet('/team'), enabled: isManager });
+  // Is email connected? (Same read Today and Shifts use.)
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), enabled: isManager, staleTime: Infinity });
+  // Which actions this login may run — "Cancel" waits for the server.
+  const allowed = useQuery({ queryKey: ['actions'], queryFn: () => apiGet('/actions'), enabled: isManager, staleTime: Infinity });
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('volunteer');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(null); // { email, joinUrl, emailStatus }
-  const [copied, setCopied] = useState(false);
 
-  if (me.role !== 'manager') return <Navigate to="/" replace />;
+  if (!isManager) return <Navigate to="/" replace />;
+
+  const emailOn = brief.data?.providers?.email === true;
+  const canCancel = (allowed.data?.actions ?? []).includes(CANCEL_INVITE);
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['team'] });
 
   const invite = async (e) => {
     e.preventDefault();
-    setBusy(true); setError(null); setSent(null); setCopied(false);
+    setBusy(true); setError(null); setSent(null);
     try {
       const r = await action('member.invite', { email: email.trim(), role });
       setSent({ email: r.invite.email, role: r.invite.role, joinUrl: r.joinUrl, emailStatus: r.email });
       setEmail('');
-      queryClient.invalidateQueries({ queryKey: ['team'] });
+      refresh();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -80,18 +199,22 @@ export default function Team() {
     setError(null);
     try {
       await action('member.setRole', { user_id: userId, role: next });
-      queryClient.invalidateQueries({ queryKey: ['team'] });
+      refresh();
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(sent.joinUrl); setCopied(true); } catch { setCopied(false); }
-  };
-
   const members = team.data?.members || [];
-  const invites = team.data?.invites || [];
+  // Newest first; a re-sent invite replaces the older row for that email.
+  const invitesByEmail = new Map();
+  for (const i of team.data?.invites || []) {
+    const key = String(i.email).toLowerCase();
+    const cur = invitesByEmail.get(key);
+    if (cur) cur.ids.push(i.id);
+    else invitesByEmail.set(key, { inv: i, ids: [i.id] });
+  }
+  const invites = [...invitesByEmail.values()];
 
   return (
     <div className="ot-page">
@@ -106,21 +229,12 @@ export default function Team() {
         <select id="team-role" className="input ot-role" value={role} onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
         </select>
-        <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy}>{busy ? 'Inviting…' : 'Send invite'}</button>
+        <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy}>
+          {busy ? 'Inviting…' : emailOn ? 'Send invite' : 'Get invite link'}
+        </button>
       </form>
       {error && <p className="error">{error}</p>}
-      {sent && (
-        <div className="ot-result" data-status="sent" role="status">
-          <div className="ot-result-head">
-            <span className="ot-status-dot" data-status="sent" aria-hidden="true" />
-            <strong>{sent.emailStatus === 'sent' ? `Emailed ${sent.email}` : `Send ${sent.email} this link`}</strong>
-            <button type="button" className="btn ot-btn-tap ot-copy" data-copied={copied ? 'true' : 'false'} onClick={copy}>
-              {copied ? 'Copied' : 'Copy link'}
-            </button>
-          </div>
-          <code className="ot-joinlink" data-testid="join-url">{sent.joinUrl}</code>
-        </div>
-      )}
+      {sent && <JoinLink sent={sent} testId="join-url" />}
 
       <h2 className="ot-sec-h">Members <span className="ot-count">{members.length}</span></h2>
       <ul className="ot-list">
@@ -147,18 +261,8 @@ export default function Team() {
         <>
           <h2 className="ot-sec-h">Invited <span className="ot-count">{invites.length}</span></h2>
           <ul className="ot-list">
-            {invites.map((i) => (
-              <li key={i.id} className="ot-item">
-                <div className="ot-row ot-row--static">
-                  <span className="ot-row__main">
-                    <span className="ot-row__name ot-email"><Email value={i.email} /></span>
-                    <span className="ot-row__sub">
-                      <span>{roleLabel(i.role)}</span>
-                      <span>until {fmtDay(i.expires_at)}</span>
-                    </span>
-                  </span>
-                </div>
-              </li>
+            {invites.map(({ inv, ids }) => (
+              <InvitedRow key={String(inv.email).toLowerCase()} inv={inv} ids={ids} canCancel={canCancel} onChanged={refresh} />
             ))}
           </ul>
         </>

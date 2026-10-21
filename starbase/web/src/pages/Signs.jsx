@@ -1,14 +1,17 @@
-// Signs — every sign, from lawn sign to billboard.
-//   Desk: three big counters (Requested · Installed · Removed) are the status
-//   filter. It opens on Requested — the to-do list — when any are waiting;
+// Signs — every sign, from lawn sign to billboard. One set of words for
+// everyone: To put up · Up · Taken down; Lawn sign · Large sign · Billboard.
+//   Desk: three big counters (To put up · Up · Taken down) are the status
+//   filter. It opens on To put up — the to-do list — when any are waiting;
 //   tap the pressed counter again for every sign (?status=all). The kind
-//   toggle (Lawn / Large / Billboard) sits under "More". Both live in the URL
-//   (?status=, ?kind=). Rows: address, kind chip, status chip. Tap a row for
-//   the supporter, the status switch and the note.
-//   Volunteers (the sign crew): "Signs to put up" — only the requested signs,
-//   one "Put up ✓" per row (toast + Undo). "Add a sign" and the full desk list
-//   (?all=1) sit under "More".
-//   ?new=1 opens "Add sign" (at a supporter's address, or any address);
+//   toggle sits under "More". Both live in the URL (?status=, ?kind=). Rows:
+//   address, kind chip, status chip. Tap a row for the supporter, directions,
+//   the status switch and the note. A status change says so in a toast with
+//   Undo (the row may leave the filtered list).
+//   Volunteers (the sign crew): "Signs to put up" — only the signs waiting,
+//   the address opens directions, one "Put up ✓" per row (toast + Undo).
+//   "Add a sign" and the full list (?all=1) sit under "More"; with nothing
+//   left to put up, "Add a sign" is the one button.
+//   ?new=1 opens "Add a sign" (at a supporter's address, or any address);
 //   ?new=1&person=<id> preselects the supporter. Status and note sit under
 //   "More details".
 import { useEffect, useRef, useState } from 'react';
@@ -19,15 +22,27 @@ import { apiGet, action } from '../api.js';
 import { PersonPicker } from './Shifts.jsx';
 import './shifts.css';
 
-const kindLabel = (code) => SIGN_KINDS.find((k) => k.code === code)?.label ?? code;
+// The registry label carries the size ("Large sign (4×4)"); it rides along as a tooltip.
+const kindSize = (code) => SIGN_KINDS.find((k) => k.code === code)?.label ?? code;
 // Most common first: lawn signs, then large, then billboards.
 const KIND_ORDER = ['lawn', 'large', 'billboard'];
 const KINDS = [...SIGN_KINDS].sort((a, b) => KIND_ORDER.indexOf(a.code) - KIND_ORDER.indexOf(b.code));
-// One word per kind for chips and the toggle; the full label stays in the form.
-const KIND_SHORT = { lawn: 'Lawn', large: 'Large', billboard: 'Billboard' };
-const kindShort = (code) => KIND_SHORT[code] ?? kindLabel(code);
-const STATUS_LABEL = { requested: 'Requested', installed: 'Installed', removed: 'Removed' };
+// The same words in the chip, the toggle and the form.
+const KIND_WORD = { lawn: 'Lawn sign', large: 'Large sign', billboard: 'Billboard' };
+const kindWord = (code) => KIND_WORD[code] ?? kindSize(code);
+// The sign crew's words, everywhere.
+const STATUS_LABEL = { requested: 'To put up', installed: 'Up', removed: 'Taken down' };
 const statusLabel = (s) => STATUS_LABEL[s] ?? s;
+// What a status change says in the toast.
+const DONE_WORD = { requested: 'To put up', installed: 'Put up', removed: 'Taken down' };
+// The sample dataset tags every note "sample"; Today already says so.
+const shownNote = (n) => (n && n.trim().toLowerCase() !== 'sample' ? n : null);
+// Directions to where the sign goes (the phone's maps app).
+const mapsHref = (s) => {
+  if (s.lat != null && s.lng != null) return `https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}`;
+  if (s.address) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}`;
+  return null;
+};
 // Requested is amber outline, never the yellow of the one primary button.
 const STATUS_CHIP = { requested: 'ops-chip-amber', installed: 'chip-ok', removed: 'ops-chip-muted' };
 // GET /api/persons/:id 500s on a malformed uuid, so ?person=junk is ignored.
@@ -78,7 +93,7 @@ function SignRow({ s, open, onToggle, busy, onUpdate }) {
       <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
         <span className="ops-row__main">
           <span className="ops-row__name">{s.address || s.person_name || '—'}</span>
-          <span className="ops-row__sub"><span className="chip">{kindShort(s.kind)}</span></span>
+          <span className="ops-row__sub"><span className="chip" title={kindSize(s.kind)}>{kindWord(s.kind)}</span></span>
         </span>
         <span className="ops-row__end">
           <span className={`chip ops-chip-lg ${STATUS_CHIP[s.status] ?? ''}`.trim()}>{statusLabel(s.status)}</span>
@@ -86,10 +101,15 @@ function SignRow({ s, open, onToggle, busy, onUpdate }) {
       </button>
       {open && (
         <div className="ops-body" id={bodyId}>
-          <p>
-            {s.person_id && <><Link to={`/people/${s.person_id}`}>{s.person_name || 'Supporter'}</Link>{' · '}</>}
-            <span className="ops-meta">{kindLabel(s.kind)}</span>
-          </p>
+          {(s.person_id || mapsHref(s)) && (
+            <p className="ops-chips">
+              {s.person_id && <Link to={`/people/${s.person_id}`}>{s.person_name || 'Supporter'}</Link>}
+              {s.person_id && mapsHref(s) && <span aria-hidden="true">·</span>}
+              {mapsHref(s) && (
+                <a href={mapsHref(s)} target="_blank" rel="noopener noreferrer">Directions</a>
+              )}
+            </p>
+          )}
           <div className="ops-seg" role="group" aria-label={`Status for the sign at ${where(s)}`}>
             {SIGN_STATUSES.map((st) => (
               <button key={st} type="button" aria-pressed={s.status === st} disabled={busy}
@@ -111,10 +131,17 @@ function PutUpRow({ s, busy, onPutUp }) {
     <li className="ops-item">
       <div className="ops-row ops-row--static">
         <span className="ops-row__main">
-          <span className="ops-row__name">{s.address || s.person_name || '—'}</span>
+          <span className="ops-row__name">
+            {mapsHref(s) ? (
+              <a className="ops-addr" href={mapsHref(s)} target="_blank" rel="noopener noreferrer"
+                aria-label={`Directions to ${where(s)}`}>
+                {s.address || s.person_name}
+              </a>
+            ) : (s.address || s.person_name || '—')}
+          </span>
           <span className="ops-row__sub">
-            <span className="chip">{kindShort(s.kind)}</span>
-            {s.note && <span className="ops-row__note">{s.note}</span>}
+            <span className="chip" title={kindSize(s.kind)}>{kindWord(s.kind)}</span>
+            {shownNote(s.note) && <span className="ops-row__note">{shownNote(s.note)}</span>}
           </span>
         </span>
         <span className="ops-row__end">
@@ -172,13 +199,13 @@ function PlaceSignForm({ presetPersonId, canCreatePerson, onSaved, onClose }) {
   };
 
   return (
-    <form className="card ops-form" onSubmit={submit} aria-label="Add sign">
+    <form className="card ops-form" onSubmit={submit} aria-label="Add a sign">
       <div className="field">
         <label id="sign-kind-label">Kind</label>
         <div className="ops-seg" role="group" aria-labelledby="sign-kind-label">
           {KINDS.map((k) => (
-            <button key={k.code} type="button" aria-pressed={kind === k.code} onClick={() => setKind(k.code)}>
-              {k.label}
+            <button key={k.code} type="button" aria-pressed={kind === k.code} title={k.label} onClick={() => setKind(k.code)}>
+              {kindWord(k.code)}
             </button>
           ))}
         </div>
@@ -253,7 +280,7 @@ function PlaceSignForm({ presetPersonId, canCreatePerson, onSaved, onClose }) {
 
       {error && <p className="error" role="alert">{error}</p>}
       <div className="ops-actions">
-        <button type="submit" className="btn btn-primary ops-tap" disabled={busy}>{busy ? 'Saving…' : 'Add sign'}</button>
+        <button type="submit" className="btn btn-primary ops-tap" disabled={busy}>{busy ? 'Saving…' : 'Add a sign'}</button>
         <button type="button" className="btn btn-quiet ops-tap" onClick={onClose}>Cancel</button>
       </div>
     </form>
@@ -273,7 +300,6 @@ export default function Signs() {
   const statusParam = params.get('status');
   const [openId, setOpenId] = useState(null);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
   const [busyId, setBusyId] = useState(null);
   // Sign crew: "Put up" toast with Undo; More (Add a sign · All signs) folded.
   const crew = me?.role === 'volunteer' && params.get('all') !== '1';
@@ -305,7 +331,6 @@ export default function Signs() {
     const next = new URLSearchParams(params);
     next.set('new', '1');
     setParams(next);
-    setNotice(null);
   };
   const closeForm = () => {
     const next = new URLSearchParams(params);
@@ -335,33 +360,43 @@ export default function Signs() {
     }
   };
 
-  const onSaved = (sign, personId) => {
-    invalidateSigns(queryClient, personId);
-    setNotice(`${kindShort(sign.kind)} sign ${sign.status}${sign.address ? ` — ${sign.address}` : ''}`);
-    closeForm();
-  };
-
   const showToast = (t) => {
     clearTimeout(toastTimer.current);
     setToast(t);
     toastTimer.current = setTimeout(() => setToast(null), 7000);
   };
-  const putUp = async (sign) => {
-    setNotice(null);
-    const ok = await update(sign, { status: 'installed' });
-    if (ok) showToast({ sign, text: 'Sign put up ✓' });
+  const onSaved = (sign, personId) => {
+    invalidateSigns(queryClient, personId);
+    showToast({ text: `✓ ${kindWord(sign.kind)} added${sign.address ? ` · ${sign.address}` : ''}` });
+    closeForm();
   };
-  const undoPutUp = async () => {
-    const { sign } = toast;
+  // Every status change says what happened and where, with Undo — on a
+  // filtered list the row may leave, and it must never look deleted.
+  const changeStatus = async (sign, status) => {
+    const prev = sign.status;
+    const ok = await update(sign, { status });
+    if (ok) showToast({ sign, prev, text: `✓ ${DONE_WORD[status] ?? statusLabel(status)} · ${where(sign)}` });
+  };
+  const putUp = (sign) => changeStatus(sign, 'installed');
+  const undo = async () => {
+    const { sign, prev } = toast;
     clearTimeout(toastTimer.current);
     setToast(null);
-    await update(sign, { status: 'requested' });
+    await update(sign, { status: prev });
   };
+  const toastEl = toast && (
+    <div className="toast ops-toast" role="status">
+      <span>{toast.text}</span>
+      {toast.sign && <button type="button" className="btn ops-tap" onClick={undo}>Undo</button>}
+    </div>
+  );
 
   if (crew) {
     const toPutUp = all.filter((s) => s.status === 'requested');
+    const empty = signsQ.isSuccess && toPutUp.length === 0;
     return (
       <div className="ops-page">
+        <Link to="/" className="ops-back">← Today</Link>
         <div className="ops-head"><h1>Signs to put up</h1></div>
 
         {showNew && (
@@ -373,11 +408,15 @@ export default function Signs() {
             onClose={closeForm}
           />
         )}
-        {notice && <p className="ops-done" role="status">✓ {notice}</p>}
         {error && <p className="error" role="alert">{error}</p>}
         {signsQ.isPending && <p className="muted">Loading…</p>}
         {signsQ.isError && <p className="error">{signsQ.error.message}</p>}
-        {signsQ.isSuccess && toPutUp.length === 0 && <p className="ops-empty">Nothing to put up right now.</p>}
+        {empty && (
+          <div className="ops-empty-block">
+            <p className="ops-empty">Nothing to put up right now.</p>
+            {!showNew && <button type="button" className="btn btn-primary ops-tap" onClick={openForm}>Add a sign</button>}
+          </div>
+        )}
 
         {toPutUp.length > 0 && (
           <ul className="ops-rows">
@@ -394,7 +433,7 @@ export default function Signs() {
           </button>
           {more && (
             <div id="signs-more" className="ops-more-body ops-actions">
-              {!showNew && <button type="button" className="btn ops-tap" onClick={openForm}>Add a sign</button>}
+              {!showNew && !empty && <button type="button" className="btn ops-tap" onClick={openForm}>Add a sign</button>}
               <button type="button" className="btn btn-quiet ops-tap" onClick={() => { const next = new URLSearchParams(params); next.set('all', '1'); setParams(next); }}>
                 All signs · {all.length}
               </button>
@@ -402,12 +441,7 @@ export default function Signs() {
           )}
         </div>
 
-        {toast && (
-          <div className="toast ops-toast" role="status">
-            <span>{toast.text}</span>
-            <button type="button" className="btn ops-tap" onClick={undoPutUp}>Undo</button>
-          </div>
-        )}
+        {toastEl}
       </div>
     );
   }
@@ -420,7 +454,7 @@ export default function Signs() {
       <div className="ops-head">
         <h1>Signs</h1>
         {!showNew && (
-          <button type="button" className="btn btn-primary ops-tap" onClick={openForm}>Add sign</button>
+          <button type="button" className="btn btn-primary ops-tap" onClick={openForm}>Add a sign</button>
         )}
       </div>
 
@@ -433,8 +467,6 @@ export default function Signs() {
           onClose={closeForm}
         />
       )}
-      {notice && <p className="ops-done" role="status">✓ {notice}</p>}
-
       <div className="ops-counters" role="group" aria-label="Show signs by status">
         {SIGN_STATUSES.map((s) => (
           <button key={s} type="button" className="ops-counter" data-status={s} aria-pressed={statusFilter === s}
@@ -447,7 +479,7 @@ export default function Signs() {
 
       <button type="button" className="ops-more ops-more--tight disclose" aria-expanded={kindsOpen} aria-controls="signs-kinds"
         onClick={() => setKindsOpen((v) => !v)}>
-        More{kindFilter ? ` · ${kindShort(kindFilter)}` : ''}
+        More{kindFilter ? ` · ${kindWord(kindFilter)}` : ''}
       </button>
       {kindsOpen && (
         <div id="signs-kinds" className="ops-seg ops-filter" role="group" aria-label="Kind of sign">
@@ -455,7 +487,7 @@ export default function Signs() {
           {KINDS.map((k) => (
             <button key={k.code} type="button" aria-pressed={kindFilter === k.code} title={k.label}
               onClick={() => setFilter('kind', kindFilter === k.code ? null : k.code)}>
-              {kindShort(k.code)}
+              {kindWord(k.code)}
             </button>
           ))}
         </div>
@@ -477,11 +509,12 @@ export default function Signs() {
               open={openId === s.id}
               onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
               busy={busyId === s.id}
-              onUpdate={(patch) => update(s, patch)}
+              onUpdate={(patch) => (patch.status ? changeStatus(s, patch.status) : update(s, patch))}
             />
           ))}
         </ul>
       )}
+      {toastEl}
     </div>
   );
 }

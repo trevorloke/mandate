@@ -10,10 +10,13 @@
 //                  role float to the top), "Notify everyone" (email + text)
 //                  once it's full; the other sits quiet under the roster. Tap
 //                  a person for phone, email, status and remove. Volunteers:
-//                  "You're on this shift" (+ a quiet "Can't make it" when the
-//                  server offers shift.leave), or one "Count me in" when it
-//                  offers shift.join (else "Ask your organizer to add you");
-//                  the roster is names only — no contact details.
+//                  "✓ You're on this shift" in plain green (+ a quiet "Can't
+//                  make it" → "Can't make it? Yes · No" when the server offers
+//                  shift.leave), or one "Count me in" when it offers shift.join
+//                  (else "Ask your organizer to add you"); the roster is a
+//                  plain list of names — no contact details, nothing to tap.
+//                  While "Notify everyone" asks "Email + text N people?", its
+//                  Send is the one yellow button.
 //
 // Also exports two small building blocks:
 //   <PersonPicker onPick={(person) => …} />   type-ahead over /api/persons?q= (Signs uses it)
@@ -26,7 +29,11 @@ import { apiGet, action } from '../api.js';
 import './shifts.css';
 
 const roleLabel = (code) => VOLUNTEER_ROLES.find((r) => r.code === code)?.label ?? code;
-const statusLabel = (s) => String(s || '').replace(/_/g, ' ');
+// One set of words for a volunteer's spot (select, chip, hints).
+const STATUS_WORDS = {
+  assigned: 'Assigned', confirmed: 'Confirmed', declined: 'Can’t make it', no_show: 'No-show', completed: 'Done',
+};
+const statusLabel = (s) => STATUS_WORDS[s] ?? String(s || '').replace(/_/g, ' ');
 
 // ── Time helpers (everything on screen is local time) ──
 const pad = (n) => String(n).padStart(2, '0');
@@ -120,18 +127,21 @@ const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 const ASSIGN_TONE = { assigned: '', confirmed: 'ok', completed: 'ok', declined: 'danger', no_show: 'danger' };
 const NOTIFY_CHIP = { sent: 'chip-ok', queued: 'chip-warn', failed: 'chip-danger', skipped: '' };
+// What happened to one message, in plain words ("Email waiting to send").
+const NOTIFY_WORDS = {
+  email: { sent: 'Email sent', queued: 'Email waiting to send', failed: 'Email didn’t send', skipped: 'No email on file' },
+  text: { sent: 'Text sent', queued: 'Text waiting to send', failed: 'Text didn’t send', skipped: 'No phone on file' },
+};
 const NOTIFY_TITLE = {
-  sent: 'delivered to the provider',
-  queued: 'saved — no provider connected yet',
-  failed: 'the provider rejected it',
-  skipped: 'nothing on file for this channel',
+  queued: 'Sends once it’s connected',
+  failed: 'Try again, or reach them another way',
 };
 
 function NotifyChip({ channel, status }) {
   if (!status) return null;
   return (
-    <span className={`chip ${NOTIFY_CHIP[status] ?? ''}`.trim()} title={`${channel}: ${NOTIFY_TITLE[status] ?? status}`}>
-      {channel} {status}
+    <span className={`chip ${NOTIFY_CHIP[status] ?? ''}`.trim()} title={NOTIFY_TITLE[status]}>
+      {NOTIFY_WORDS[channel]?.[status] ?? `${channel} ${status}`}
     </span>
   );
 }
@@ -589,13 +599,12 @@ function AssigneeRow({ a, open, onToggle, canDesk, busy, onStatus, onRemove }) {
 }
 
 // Volunteers see who else is coming — names only, never contact details.
+// A plain list line, not a card: there is nothing to tap.
 function NameRow({ a, isMe }) {
   return (
-    <li className="ops-item">
-      <div className="ops-row ops-row--static">
-        <span className="ops-row__main"><span className="ops-row__name">{a.name}</span></span>
-        {isMe && <span className="ops-row__end"><span className="chip chip-ok">You</span></span>}
-      </div>
+    <li className="ops-plain">
+      <span className="ops-plain__name">{a.name}</span>
+      {isMe && <span className="chip chip-ok">You</span>}
     </li>
   );
 }
@@ -687,9 +696,9 @@ function ShiftDetail({ id, canDesk, me }) {
   const missingEmail = providers && !providers.email;
   const missingText = providers && !providers.text;
   let providerNote = null;
-  if (missingEmail && missingText) providerNote = 'Email and text not connected — saved as queued.';
-  else if (missingEmail) providerNote = 'Email not connected — saved as queued.';
-  else if (missingText) providerNote = 'Text not connected — saved as queued.';
+  if (missingEmail && missingText) providerNote = 'Will send once email and text are connected.';
+  else if (missingEmail) providerNote = 'Will send once email is connected.';
+  else if (missingText) providerNote = 'Texts will send once texting is connected.';
   // Desk: the yellow button is the job at hand. Open spots → fill them
   // ("Add volunteer"); full → tell the crew ("Notify everyone").
   const primary = over ? null : full ? 'notify' : 'add';
@@ -758,10 +767,12 @@ function ShiftDetail({ id, canDesk, me }) {
 
   // ── Desk blocks: whichever is `primary` sits under the spots number in
   // yellow; the other waits, quiet, under the roster. ──
+  // While "Email + text N people?" is open, its Send is the job at hand, so
+  // the yellow moves there and "+ Add volunteer" goes quiet.
   const addBlock = (isPrimary) => (
     <div className="ops-add" data-primary={isPrimary ? '' : undefined}>
       {!adding ? (
-        <button type="button" className={`btn ops-tap${isPrimary ? ' btn-primary ops-wide' : ''}`}
+        <button type="button" className={`btn ops-tap${isPrimary ? ' ops-wide' : ''}${isPrimary && !confirming ? ' btn-primary' : ''}`}
           onClick={() => { setAdding(true); setAdded(null); setAddError(null); }}>
           + Add volunteer
         </button>
@@ -777,7 +788,7 @@ function ShiftDetail({ id, canDesk, me }) {
             placeholder="Name, email or phone…"
             onPick={assign}
           />
-          {full && <span className="ops-meta">Full — mark someone declined to open a spot.</span>}
+          {full && <span className="ops-meta">Full. Set someone to “Can’t make it” to free a spot.</span>}
           <div className="ops-actions">
             <button type="button" className="btn btn-quiet ops-tap" onClick={() => setAdding(false)}>Done</button>
           </div>
@@ -801,7 +812,7 @@ function ShiftDetail({ id, canDesk, me }) {
       ) : (
         <div className="ops-confirm" role="group" aria-label="Send notification">
           <span>Email + text {people(active.length)}?</span>
-          <button type="button" className={`btn ops-tap ${isPrimary ? 'btn-primary' : 'ops-solid'}`}
+          <button type="button" className="btn btn-primary ops-tap"
             onClick={notify} disabled={sending}>
             {sending ? 'Sending…' : 'Send'}
           </button>
@@ -819,16 +830,17 @@ function ShiftDetail({ id, canDesk, me }) {
       ) : (
         <>
           {/* Say "Sent" only when something actually went out; without a
-              provider every message is saved as queued. */}
+              provider every message waits until one is connected. */}
           {(() => {
             const reached = results.filter((r) => r.email === 'sent' || r.text === 'sent').length;
             const waiting = results.filter((r) => r.email !== 'sent' && r.text !== 'sent'
               && (r.email === 'queued' || r.text === 'queued')).length;
+            // Green only when something actually went out.
             return (
-              <p className="ops-done" role="status">
+              <p className={reached > 0 ? 'ops-done' : 'ops-done ops-done--wait'} role="status">
                 {reached > 0 && <>✓ Sent to {people(reached)}</>}
                 {reached > 0 && waiting > 0 && ' · '}
-                {waiting > 0 && <>Saved for {people(waiting)} — sends once email and text are connected</>}
+                {waiting > 0 && <>Waiting to send · {people(waiting)}</>}
                 {reached === 0 && waiting === 0 && <>Couldn&apos;t reach anyone — see Details</>}
               </p>
             );
@@ -880,15 +892,15 @@ function ShiftDetail({ id, canDesk, me }) {
         <section className="ops-notify" aria-label="Your spot">
           {onIt ? (
             <>
-              <span className="ops-onit" role="status">✓ You’re on this shift</span>
+              <span className="ops-onit" role="status"><span aria-hidden="true">✓</span> You’re on this shift</span>
               {canLeave && !over && (!leaving ? (
                 <button type="button" className="btn btn-quiet ops-tap" disabled={joining}
                   onClick={() => { setLeaving(true); setJoinError(null); }}>
                   Can’t make it
                 </button>
               ) : (
-                <div className="ops-confirm" role="group" aria-label="Drop this shift">
-                  <span>Drop this shift?</span>
+                <div className="ops-confirm" role="group" aria-label="Can’t make it">
+                  <span>Can’t make it?</span>
                   <button type="button" className="btn ops-danger ops-tap" disabled={joining}
                     onClick={() => selfAction('shift.leave')}>
                     {joining ? 'Saving…' : 'Yes'}
@@ -920,7 +932,7 @@ function ShiftDetail({ id, canDesk, me }) {
       {(canDesk ? assignees : active).length === 0 ? (
         <p className="ops-empty">Nobody yet.</p>
       ) : !canDesk ? (
-        <ul className="ops-rows">
+        <ul className="ops-plain-list">
           {active.map((a) => <NameRow key={a.assignment_id} a={a} isMe={isMine(a)} />)}
         </ul>
       ) : (

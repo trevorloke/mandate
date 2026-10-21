@@ -5,8 +5,8 @@
 //   press       Write press release · media count · More: past releases
 //   petitions   New petition · rows with Copy · tap a row: signatures, close
 //   events      New event · rows with Copy · tap a row: RSVPs, edit, delete
-//   website     every public link with Copy · More: site link, donations ·
-//               For your web developer: embed code
+//   website     every public link with Copy · More: site link, email &
+//               texting, donations · For your web developer: embed code
 // Tabs live in the URL (/outreach/:tab); an open compose/new form is ?new=1.
 // Everything is react-query driven; every write invalidates and confirms.
 import { useEffect, useId, useRef, useState } from 'react';
@@ -173,8 +173,8 @@ function CopyButton({ text, label = 'Copy', what, onCopied, className = '' }) {
 }
 
 // "More" — a quiet toggle; what it reveals is only rendered when open.
-function More({ label = 'More', children }) {
-  const [open, setOpen] = useState(false);
+function More({ label = 'More', defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   return (
     <div className="ot-more-wrap">
@@ -217,7 +217,7 @@ const copiedToast = (toast, what) => (ok) => toast(ok ? `${what} copied` : 'Coul
 
 function StatusChip({ status }) {
   const cls = status === 'sent' || status === 'subscribed' || status === 'active' ? 'chip chip-ok'
-    : status === 'queued' ? 'chip chip-warn'
+    : status === 'queued' ? 'chip ot-chip-queued'
     : status === 'failed' ? 'chip chip-danger'
     : 'chip ot-chip-ghost';
   return <span className={cls}>{status}</span>;
@@ -228,6 +228,9 @@ function StatusChip({ status }) {
 // 'queued'. With no provider every message is queued; WITH a provider,
 // 'queued' means a mix of sent + failed, so the line has to say which.
 const noProviderNote = (note) => /no email provider/i.test(note || '');
+// Where "Connect" goes: the Website tab, with its More open on Email & texting.
+const CONNECT_TO = '/outreach/website?connect=1';
+const ConnectLink = () => <Link className="ot-connect" to={CONNECT_TO}>Connect</Link>;
 function BlastResult({ blast, emailConfigured, onDismiss }) {
   if (!blast) return null;
   const n = blast.audience_count ?? 0;
@@ -265,6 +268,8 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
   const ready = subject.trim().length > 0 && body.trim().length > 0;
   const empty = audienceCount === 0;
   const noun = (n) => plural(n, audienceNoun.one, audienceNoun.many);
+  // Without email connected nothing goes out — say so before, not after.
+  const offline = emailConfigured === false;
 
   const send = async () => {
     setFailed(null);
@@ -295,15 +300,19 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
       <div className="ot-foot">
         {confirming ? (
           <div className="ot-confirm" role="group" aria-label="Confirm send">
-            <span>Send to <strong>{audienceCount}</strong> {noun(audienceCount)}?</span>
+            <span>{offline ? 'Save for' : 'Send to'} <strong>{audienceCount}</strong> {noun(audienceCount)}?</span>
             <button type="button" className="btn btn-primary ot-btn-tap" disabled={act.busy} onClick={send}>
-              {act.busy ? 'Sending…' : 'Yes, send'}
+              {act.busy ? (offline ? 'Saving…' : 'Sending…') : offline ? 'Yes, send later' : 'Yes, send'}
             </button>
             <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setConfirming(false)}>No</button>
+            {/* No Connect link here: leaving would drop the draft. */}
+            {offline && <span className="ot-confirm-note">Email not connected yet</span>}
           </div>
         ) : (
           <>
-            <button type="submit" className="btn btn-primary ot-btn-tap" disabled={!ready || empty || act.busy}>Send</button>
+            <button type="submit" className="btn btn-primary ot-btn-tap" disabled={!ready || empty || act.busy}>
+              {offline ? 'Save to send later' : 'Send'}
+            </button>
             <span className="ot-audience">
               {audienceCount == null ? '…' : `${audienceCount} ${noun(audienceCount)}`}
             </span>
@@ -334,7 +343,9 @@ function SentList({ blasts, loading, kindFilter }) {
                 <span>{b.audience_count} {plural(b.audience_count, 'recipient', 'recipients')}</span>
                 <span>{fmtWhen(b.sent_at || b.created_at)}</span>
               </span>
-              {b.status !== 'sent' && b.provider_note && <span className="ot-row-note">{b.provider_note}</span>}
+              {b.status !== 'sent' && b.provider_note && (
+                <span className="ot-row-note">{noProviderNote(b.provider_note) ? 'Email not connected' : b.provider_note}</span>
+              )}
             </span>
             <StatusChip status={b.status} />
           </div>
@@ -350,7 +361,7 @@ function EmailStatus({ configured }) {
   return (
     <p className="ot-pay">
       <span className="ot-status-dot" data-status={configured ? 'sent' : 'queued'} aria-hidden="true" />
-      {configured ? 'Email provider connected' : 'No email provider — sends are queued'}
+      {configured ? 'Email connected' : <>Email not connected · <ConnectLink /></>}
     </p>
   );
 }
@@ -594,7 +605,7 @@ function PetitionRow({ p, slug, canWrite, toast }) {
       {open && (
         <div className="ot-body">
           {p.body && <p className="ot-text">{p.body}</p>}
-          <a className="ot-url" href={url} target="_blank" rel="noreferrer">{url}</a>
+          <a className="ot-url" href={url} target="_blank" rel="noreferrer">Petition page</a>
           {canWrite && (
             <div className="ot-actions">
               <button type="button" className="btn ot-btn-tap" aria-expanded={sigs} onClick={() => setSigs((o) => !o)}>
@@ -1058,7 +1069,7 @@ function EventRow({ ev, wsSlug, canWrite, toast, past }) {
               {ev.ends_at && <p className="ot-row__sub">{fmtEventWhen(ev.starts_at, ev.ends_at)}</p>}
               {ev.location && <p className="ot-where">{ev.location}</p>}
               {ev.description && <p className="ot-text">{ev.description}</p>}
-              {ev.public && !past && <a className="ot-url" href={url} target="_blank" rel="noreferrer">{url}</a>}
+              {ev.public && !past && <a className="ot-url" href={url} target="_blank" rel="noreferrer">RSVP page</a>}
               {!ev.public && <span><span className="chip ot-chip-ghost">team only</span></span>}
               {canWrite && (confirmDelete ? (
                 <div className="ot-confirm ot-confirm-danger" role="group" aria-label="Confirm delete">
@@ -1306,6 +1317,33 @@ function DonationsSettings({ me, toast }) {
   );
 }
 
+// Email & texting: on or off, said once. They're switched on where Starbase
+// is hosted, not here — so the line says who to ask.
+function Connections({ focus }) {
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity });
+  const p = brief.data?.providers;
+  const ref = useRef(null);
+  // Arriving from a "Connect" link: bring this section into view.
+  useEffect(() => {
+    if (focus && p && ref.current?.scrollIntoView) ref.current.scrollIntoView({ block: 'center' });
+  }, [focus, p]);
+  if (!p) return null;
+  return (
+    <section ref={ref} className="ot-sec" aria-label="Email and texting" id="connect">
+      <h2 className="ot-sec-h">Email &amp; texting</h2>
+      <p className="ot-pay">
+        <span className="ot-status-dot" data-status={p.email ? 'sent' : 'queued'} aria-hidden="true" />
+        {p.email ? 'Email connected' : 'Email not connected'}
+      </p>
+      <p className="ot-pay">
+        <span className="ot-status-dot" data-status={p.text ? 'sent' : 'queued'} aria-hidden="true" />
+        {p.text ? 'Texting connected' : 'Texting not connected'}
+      </p>
+      {(!p.email || !p.text) && <p className="ot-note">Ask whoever set up Starbase to connect them.</p>}
+    </section>
+  );
+}
+
 // The campaign's own site: public pages link back to it. Managers set it.
 function SiteSettings({ toast, current }) {
   const queryClient = useQueryClient();
@@ -1390,6 +1428,8 @@ function DeveloperKit({ base, slug, openEvents, copied }) {
 
 function WebsiteTab({ me, canWrite, toast }) {
   const isManager = me.role === 'manager';
+  const [params] = useSearchParams();
+  const connect = params.get('connect') === '1';
   const slug = me.workspace.slug;
   const site = me.workspace.settings?.website || '';
   const pets = useQuery({ queryKey: ['petitions'], queryFn: () => apiGet('/petitions') });
@@ -1419,7 +1459,8 @@ function WebsiteTab({ me, canWrite, toast }) {
       </ul>
 
       {canWrite && (
-        <More>
+        <More defaultOpen={connect}>
+          <Connections focus={connect} />
           {isManager ? (
             <SiteSettings toast={toast} current={site} />
           ) : (
@@ -1450,22 +1491,9 @@ export default function Outreach() {
   const openNew = () => setParams({ new: '1' });
   const closeNew = () => setParams({}, { replace: true });
 
-  // Counts in the tab strip — cheap, cached, shared with the tabs below.
-  // Subscriber and blast lists are desk-only reads (403 for volunteers).
-  const subs = useQuery({ queryKey: ['subscriptions'], queryFn: () => apiGet('/subscriptions'), enabled: canWrite });
-  const blasts = useQuery({ queryKey: ['blasts'], queryFn: () => apiGet('/blasts'), enabled: canWrite });
-  const pets = useQuery({ queryKey: ['petitions'], queryFn: () => apiGet('/petitions') });
-  const evq = useQuery({ queryKey: ['campaign-events'], queryFn: () => apiGet('/campaign-events') });
-
   if (!tab) return <Navigate to={home} replace />;
   if (!tabs.some((t) => t.key === tab)) return <Navigate to={home} replace />;
 
-  const counts = {
-    newsletter: subs.data?.subscribed,
-    press: blasts.data?.mediaContacts,
-    petitions: pets.data?.petitions?.length,
-    events: evq.data ? evq.data.events.filter((e) => isUpcoming(e)).length : undefined,
-  };
   const primary = canWrite && !creating ? PRIMARY[tab] : null;
   const tabProps = { me, canWrite, creating, onClose: closeNew, toast: toast.show };
 
@@ -1481,12 +1509,8 @@ export default function Outreach() {
       <nav className="ot-tabs" aria-label="Outreach sections" style={{ '--ot-tabs': tabs.length }}>
         {tabs.map((t) => (
           <Link key={t.key} to={`/outreach/${t.key}`} className={`ot-tab${tab === t.key ? ' active' : ''}`}
-            aria-current={tab === t.key ? 'page' : undefined}
-            aria-label={counts[t.key] != null ? `${t.label}, ${counts[t.key]}` : undefined}>
-            <span className="ot-tab-icon">
-              <TabIcon name={t.key} />
-              {counts[t.key] != null && <span className="n">{counts[t.key]}</span>}
-            </span>
+            aria-current={tab === t.key ? 'page' : undefined}>
+            <span className="ot-tab-icon"><TabIcon name={t.key} /></span>
             <span className="ot-tab-label">{t.label}</span>
           </Link>
         ))}

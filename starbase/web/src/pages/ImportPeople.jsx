@@ -124,25 +124,44 @@ const isSpreadsheetBinary = (buf, name) => {
   return zip || ole || /\.(xlsx|xlsm|xls|numbers|ods)$/i.test(name || '');
 };
 
-// Text → { headers, records: [{ cells, row }], delimiter } or { error }.
+// Does the first row hold a person rather than column names? People paste
+// rows with no header line. Data: an email, a phone number, a postal code or
+// a house number in it — and no cell that is a column name we know.
+const HOUSE_RE = /^\d{1,6}[a-z]?\s+\S/i;
+const isHeaderWord = (cell) => {
+  const n = normHeader(cell);
+  return Boolean(n) && EXACT.some(([, re]) => re.test(n));
+};
+export function looksLikeData(cells) {
+  const vals = cells.map((c) => String(c ?? '').trim()).filter(Boolean);
+  if (!vals.length || vals.some(isHeaderWord)) return false;
+  return vals.some((v) => EMAIL_RE.test(v) || PHONE_RE.test(v) || POSTAL_RE.test(v) || HOUSE_RE.test(v));
+}
+
+// Text → { delimiter, all: [{ cells, row }], header } or { error }.
+// header: whether the first non-blank row is column names (a guess).
 function readTable(text) {
-  if (!text || !text.trim()) return { error: 'That file is empty. Choose a CSV with a header row and at least one person.' };
+  if (!text || !text.trim()) return { error: 'That file is empty. Choose a CSV with at least one person in it.' };
   const { delimiter, rows } = parseCSV(text);
-  const headerAt = rows.findIndex((r) => !isBlankRow(r));
-  if (headerAt === -1) return { error: 'That file is empty. Choose a CSV with a header row and at least one person.' };
-  const records = [];
-  for (let i = headerAt + 1; i < rows.length; i++) {
-    if (!isBlankRow(rows[i])) records.push({ cells: rows[i], row: i + 1 }); // spreadsheet row number
-  }
+  const all = [];
+  rows.forEach((cells, i) => { if (!isBlankRow(cells)) all.push({ cells, row: i + 1 }); }); // spreadsheet row numbers
+  if (!all.length) return { error: 'That file is empty. Choose a CSV with at least one person in it.' };
+  return { delimiter, all, header: !looksLikeData(all[0].cells) };
+}
+
+// The rows, with or without the first as column names → { headers, records } or { error }.
+function shapeTable(all, header) {
+  const head = header ? all[0].cells : [];
+  const records = header ? all.slice(1) : all;
   if (records.length === 0) {
     return { error: 'There’s a header row but no people under it. Check you saved the whole sheet.' };
   }
-  let width = Math.min(500, Math.max(rows[headerAt].length, ...records.slice(0, 500).map((r) => r.cells.length)));
+  let width = Math.min(500, Math.max(head.length, ...records.slice(0, 500).map((r) => r.cells.length)));
   // Drop trailing columns with no header and nothing in them ("a,b," on every line).
-  const emptyCol = (i) => !String(rows[headerAt][i] ?? '').trim() && records.every((r) => !String(r.cells[i] ?? '').trim());
+  const emptyCol = (i) => !String(head[i] ?? '').trim() && records.every((r) => !String(r.cells[i] ?? '').trim());
   while (width > 1 && emptyCol(width - 1)) width -= 1;
-  const headers = Array.from({ length: width }, (_, i) => String(rows[headerAt][i] ?? '').trim() || `Column ${i + 1}`);
-  return { headers, records, delimiter };
+  const headers = Array.from({ length: width }, (_, i) => String(head[i] ?? '').trim() || `Column ${i + 1}`);
+  return { headers, records };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +217,8 @@ const CONTAINS = [
   ['name', /^(?!.*(user|file|middle|nick)).*name/],
 ];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// With no column names, a column of "Mira Chen"s is the name (2–4 words, letters only).
+const NAME_RE = /^\p{L}[\p{L}'’.-]*(?:\s+\p{L}[\p{L}'’.-]*){1,3}$/u;
 const POSTAL_RE = /^[a-z]\d[a-z][ -]?\d[a-z]\d$/i;
 const PHONE_RE = /^\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(\s*(x|ext\.?)\s*\d+)?$/i;
 
@@ -221,7 +242,7 @@ const columnValues = (records, i, limit = 200) => {
   return out;
 };
 
-function guessMapping(headers, records) {
+function guessMapping(headers, records, noHeader = false) {
   const out = headers.map(() => SKIP);
   const taken = new Set();
   const values = headers.map((_, i) => columnValues(records, i));
@@ -248,6 +269,14 @@ function guessMapping(headers, records) {
     else if (mostly(values[i], POSTAL_RE)) claim(i, 'postal');
     else if (mostly(values[i], PHONE_RE)) claim(i, 'phone');
   });
+  // No column names at all: guess the name and street from the values too.
+  if (noHeader) {
+    headers.forEach((_, i) => {
+      if (out[i] !== SKIP || !values[i].length) return;
+      if (mostly(values[i], HOUSE_RE)) claim(i, 'address');
+      else if (!taken.has('first') && !taken.has('last') && mostly(values[i], NAME_RE)) claim(i, 'name');
+    });
+  }
   return out;
 }
 
@@ -442,10 +471,21 @@ function ImportFlow() {
   const loadText = (text, name) => {
     const t = readTable(text);
     if (t.error) { setLoadError(t.error); return; }
+    const shaped = shapeTable(t.all, t.header);
+    if (shaped.error) { setLoadError(shaped.error); return; }
     setLoadError(null);
-    setSource({ name, ...t });
-    setMapping(guessMapping(t.headers, t.records));
+    setSource({ name, ...t, ...shaped });
+    setMapping(guessMapping(shaped.headers, shaped.records, !t.header));
     setTag('');
+    resetAfterSource();
+  };
+  // "First row is column names": on or off, then guess the columns again.
+  const setHeader = (on) => {
+    if (!source) return;
+    const shaped = shapeTable(source.all, on);
+    if (shaped.error) return;
+    setSource({ ...source, header: on, ...shaped });
+    setMapping(guessMapping(shaped.headers, shaped.records, !on));
     resetAfterSource();
   };
 
@@ -483,7 +523,7 @@ function ImportFlow() {
     loadFile(e.dataTransfer?.files?.[0]);
   };
   const usePaste = () => {
-    if (!pasteText.trim()) { setLoadError('Paste the CSV text first — header row on top.'); return; }
+    if (!pasteText.trim()) { setLoadError('Paste some rows first.'); return; }
     loadText(pasteText, 'Pasted text');
     setPasteOpen(false);
   };
@@ -623,7 +663,7 @@ function ImportFlow() {
       </div>
 
       {/* ── 1. Choose ── */}
-      <Step n={1} title="Choose a file" line="A CSV with column names on top." state={stepState(1)}>
+      <Step n={1} title="Choose a file" line="A spreadsheet saved as CSV." state={stepState(1)}>
         {source ? (
           <div className="imp-source">
             <p>
@@ -652,7 +692,8 @@ function ImportFlow() {
                 onChange={onPick}
                 disabled={reading}
               />
-              <span className="btn btn-primary imp-tap imp-drop__btn">
+              {/* The paste box's "Use this text" is the yellow button while it's open. */}
+              <span className={`btn ${pasteOpen ? 'btn-quiet' : 'btn-primary'} imp-tap imp-drop__btn`}>
                 {reading ? 'Reading…' : 'Choose CSV file'}
               </span>
               <span className="imp-drop__or">or drop it here</span>
@@ -664,19 +705,19 @@ function ImportFlow() {
             ) : (
               <div className="imp-paste">
                 <div className="field">
-                  <label htmlFor="imp-paste">CSV text, header row first</label>
+                  <label htmlFor="imp-paste">One person per line</label>
                   <textarea
                     id="imp-paste"
                     className="input mono imp-paste__text"
                     rows={7}
                     spellCheck={false}
-                    placeholder={'First Name,Last Name,Email,Street Address\nJane,Doe,jane@example.com,13450 104 Ave'}
+                    placeholder={'Jane Doe, jane@example.com, 604-555-0101\nSam Lee, sam@example.com, 604-555-0102'}
                     value={pasteText}
                     onChange={(e) => setPasteText(e.target.value)}
                   />
                 </div>
                 <div className="imp-actions">
-                  <button type="button" className="btn imp-tap" onClick={usePaste}>Use this text</button>
+                  <button type="button" className="btn btn-primary imp-tap" onClick={usePaste}>Use this text</button>
                   <button type="button" className="btn btn-quiet imp-tap" onClick={() => setPasteOpen(false)}>Cancel</button>
                 </div>
               </div>
@@ -700,6 +741,15 @@ function ImportFlow() {
           </div>
         ) : (
           <>
+            <label className="imp-headrow">
+              <input
+                type="checkbox"
+                checked={source.header}
+                disabled={locked || (!source.header && source.all.length < 2)}
+                onChange={(e) => setHeader(e.target.checked)}
+              />
+              First row is column names
+            </label>
             <ul className="imp-map">
               {source.headers.map((h, i) => {
                 const id = `imp-col-${i}`;
@@ -749,14 +799,14 @@ function ImportFlow() {
                     id="imp-tag"
                     className="input"
                     maxLength={TAG_MAX}
-                    placeholder="voters-list-2026"
+                    placeholder="e.g. Voters list"
                     value={tag}
                     disabled={locked}
                     onChange={(e) => onTag(e.target.value)}
                   />
                   {fileTag && tagClean !== fileTag && !locked && (
                     <button type="button" className="btn btn-quiet imp-tap" onClick={() => onTag(fileTag)}>
-                      Use “{fileTag}”
+                      Use “{tagWord(fileTag)}”
                     </button>
                   )}
                 </div>
@@ -915,13 +965,10 @@ function ImportFlow() {
               </div>
             )}
 
-            {(imported || imp?.phase === 'error' || (nothingToDo && !imp)) && (
+            {/* Two ways on: place them (above) and see them. Map and Turfs are in the nav. */}
+            {(imported || imp?.phase === 'error') && (imp?.created || 0) + (imp?.merged || 0) > 0 && (
               <div className="imp-actions imp-next">
-                {(imp?.created || 0) + (imp?.merged || 0) > 0 && (
-                  <Link className="btn imp-tap" to={peopleLink}>{tagClean ? `See “${tagWord(tagClean)}”` : 'See them'}</Link>
-                )}
-                <Link className="btn btn-quiet imp-tap" to="/map">Map</Link>
-                <Link className="btn btn-quiet imp-tap" to="/turfs">Turfs</Link>
+                <Link className="btn imp-tap" to={peopleLink}>{tagClean ? `See “${tagWord(tagClean)}”` : 'See them'}</Link>
               </div>
             )}
           </>

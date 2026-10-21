@@ -192,7 +192,8 @@ await page.click('.ops-confirm button:has-text("Send")');
 await sleep(900);
 await page.click('.ops-notify button:has-text("Details")').catch(() => {});
 t = await text();
-check('shift notify shows per-channel results', /email queued/i.test(t) && /text queued/i.test(t), (t.match(/Sam Ortiz.{0,80}/) || [''])[0]);
+// No provider on the test server: nothing may claim to be sent.
+check('shift notify shows per-channel results', /email waiting to send/i.test(t) && /text waiting to send/i.test(t) && !/✓ Sent/.test(t), (t.match(/Sam Ortiz.{0,80}/) || [''])[0]);
 await shot('5-shift');
 
 // ── 7. Outreach: newsletter, press, petition, website bridge ──
@@ -281,7 +282,8 @@ volPage.on('pageerror', (e) => errors.push('[vol] ' + e.message));
 await go('/team');
 await page.fill('#team-email', 'jas@example.org');
 await page.selectOption('#team-role', 'volunteer');
-await page.click('button:has-text("Send invite")');
+// Without email connected the button says what it does: "Get invite link".
+await page.getByRole('button', { name: /^(Send invite|Get invite link)$/ }).click();
 await page.waitForSelector('[data-testid="join-url"]', { timeout: 8000 }).catch(() => {});
 const joinUrl = await page.$eval('[data-testid="join-url"]', (el) => el.textContent).catch(() => '');
 check('Team: invite produces a join link', /\/join\/[0-9a-f]{48}$/.test(joinUrl), joinUrl);
@@ -292,9 +294,11 @@ check('join page names the campaign and role', /Join Imagine Surrey/.test(await 
 await volPage.fill('#join-name', 'Jas Volunteer');
 await volPage.fill('#join-password', 'knock-knock-2026');
 await volPage.click('button[type="submit"]');
-await volPage.waitForURL(/\/map/, { timeout: 15000 }).catch(() => {});
-const moved = /\/map/.test(volPage.url());
-check('volunteer joins and lands on the field map', moved, volPage.url());
+await volPage.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
+const moved = new URL(volPage.url()).pathname === '/';
+check('volunteer joins and lands on Today', moved, volPage.url());
+await volPage.waitForSelector('text=/start canvassing/i', { timeout: 8000 }).catch(() => {});
+check('Today offers Start canvassing', /start canvassing/i.test(await volPage.innerText('body').catch(() => '')), (await volPage.innerText('body').catch(() => '')).replace(/\s+/g, ' ').slice(0, 160));
 if (moved) {
   await volPage.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
   await sleep(1200);

@@ -14,13 +14,18 @@
 //
 // Contacts are append-only: after a tap the toast offers "Change", which
 // puts focus back on the rating row — the next tap logs the correction.
-import { useRef, useState } from 'react';
+//
+// A note typed after the rating (knock, rate, jot) is never lost: closing
+// the card (✕, another pin, the empty map, leaving the screen) or switching
+// to another person at the door sends it on its own — the same path as
+// "Save note" — and the toast says "Note saved".
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { action, ApiError } from '../api.js';
 import { logContact } from '../offline.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
-import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingSay } from './RatingButtons.jsx';
+import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
 import '../pages/map.css';
 
 // "Wants a sign?" — one tap files a request (Undo is on the toast). A kind
@@ -31,12 +36,13 @@ const SIGN_BUTTONS = [
   { code: 'billboard', label: 'Billboard' },
 ];
 export const SIGN_LABEL = Object.fromEntries(SIGN_KINDS.map((s) => [s.code, s.label]));
-const SIGN_CHIP = { installed: 'chip-ok', requested: 'chip-warn' };
+// "Requested" is a neutral ochre chip (fk-wait), never the brand yellow.
+const SIGN_CHIP = { installed: 'chip-ok', requested: 'fk-wait' };
 const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: 'Removed' };
 // Channel for the rating + outcome taps. Door by default on the map; tapping
 // Call / Text switches it so the rating that follows is logged as that call.
-// "Logging: At the door · Phone call · Text" at the bottom of More sets it by
-// hand (kept away from the Call / Text buttons, which dial).
+// "How you reached them: At the door · Phone call · Text" at the bottom of
+// More sets it by hand (kept away from the Call / Text buttons, which dial).
 const CHANNEL_BUTTONS = [
   { code: 'door', label: 'At the door' },
   { code: 'phone', label: 'Phone call' },
@@ -270,7 +276,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const [local, setLocal] = useState({});     // optimistic ratings by person id
   const [pending, setPending] = useState(null); // { id, channel } after a tel:/sms: tap
   const [channel, setChannel] = useState('door');
-  const [note, setNote] = useState('');
+  const [note, setNoteState] = useState('');
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [more, setMore] = useState(false);
@@ -280,6 +286,42 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const ratingOf = (p) => (p.id in local ? local[p.id] : p.rating);
   const noteText = note.trim();
   const multi = persons.length > 1;
+
+  // The note lives in a ref too, so closing the card (unmount) can still send
+  // it. A note that goes out with a tap is cleared at once (and put back if
+  // the server refuses), so it can never be sent twice.
+  const noteRef = useRef('');
+  const setNote = (v) => { noteRef.current = v; setNoteState(v); };
+  const latest = useRef(null);
+  useLayoutEffect(() => { latest.current = { sel, channel, toast, refresh, multi }; });
+  const sendNote = async (person, via, text, { toast: say, refresh: reload, multi: many }) => {
+    const who = many ? `${firstName(person.name)} · ` : '';
+    try {
+      const { queued } = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text });
+      say(queued ? `${who}Note saved offline` : `${who}Note saved`);
+      if (!queued) reload();
+    } catch (err) {
+      say(refusalMsg(err, 'Note not saved — try again'));
+    }
+  };
+  // Card closed with a note still in the box: send it on its own.
+  useEffect(() => () => {
+    const text = noteRef.current.trim();
+    const ctx = latest.current;
+    if (!text || !ctx?.sel) return;
+    noteRef.current = '';
+    sendNote(ctx.sel, ctx.channel, text, ctx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Another person at the door: their note is theirs, so send it first.
+  const pickPerson = (id) => {
+    const text = noteRef.current.trim();
+    if (text && sel && id !== sel.id) {
+      setNote('');
+      sendNote(sel, channel, text, { toast, refresh, multi });
+    }
+    onSelect(id);
+  };
 
   // Optimistic rating on the card and on the pin (via the doors cache).
   const setRating = (person, code, ratedAt) => {
@@ -303,6 +345,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     setBusy(true);
     const prev = { code: ratingOf(person), at: person.rated_at ?? null };
     if (rating) setRating(person, rating, new Date().toISOString());
+    const sentNote = noteRef.current.trim();
+    if (sentNote) setNote('');
     try {
       // The outbox: sends now when there's signal, saves on the phone when
       // there isn't (and replays exactly once — the server dedupes on its id).
@@ -311,9 +355,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         channel: via,
         outcome,
         rating: rating || undefined,
-        note: noteText || undefined,
+        note: sentNote || undefined,
       });
-      setNote('');
       if (pending) backToDoor(); // the call/text is logged — the next tap is back at the door
       // Append-only: "Change" brings the rating row back; the next tap logs the fix.
       const change = { label: 'Change', onClick: () => focusRating(rateRef.current) };
@@ -325,7 +368,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       }
       const who = multi ? `${firstName(person.name)} · ` : '';
       const what = rating
-        ? `Rated ${rating} · ${ratingSay(rating)}`
+        ? `Rated ${ratingText(rating)}`
         : outcome === 'contacted'
           ? (via === 'door' ? 'Note saved' : via === 'phone' ? 'Call logged' : 'Text logged')
           : `${OUTCOME_LABEL[outcome]}${via !== 'door' ? ` (${via})` : ''}`;
@@ -335,6 +378,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       // Only a refusal lands here (bad input, no permission) — network
       // trouble is queued above, never thrown.
       if (rating) setRating(person, prev.code, prev.at);
+      if (sentNote && !noteRef.current) setNote(sentNote);
       toast(refusalMsg(err, 'Not saved — try again'));
     } finally {
       setBusy(false);
@@ -406,11 +450,11 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
 
       {sel && (
         <section className="door-rate" ref={rateRef} aria-label={`Rate ${sel.name}`}>
-          <PersonTabs persons={persons} value={sel.id} onPick={onSelect} ratingOf={ratingOf} />
+          <PersonTabs persons={persons} value={sel.id} onPick={pickPerson} ratingOf={ratingOf} />
           {multi && dnc && <p className="door-dnc-line"><span className="chip chip-danger">Do not contact</span> {firstName(sel.name)}</p>}
           {channel !== 'door' && (
             <p className="door-via">
-              <span className="chip chip-warn">{CHANNEL_CHIP[channel]}</span>
+              <span className="chip fk-wait">{CHANNEL_CHIP[channel]}</span>
               <button type="button" className="fk-link" onClick={backToDoor}>At the door instead</button>
             </p>
           )}
@@ -427,7 +471,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       {sel && (
         <More id={moreId} open={more} onToggle={() => setMore((m) => !m)}>
           <div className="field door-note">
-            <label htmlFor="door-note">Note</label>
+            <label htmlFor="door-note" className="fk-sr">Note</label>
             <textarea
               id="door-note"
               className="input"
@@ -435,11 +479,12 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
               maxLength={2000}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Note — saved with your rating"
+              onFocus={() => toast(null)}
+              placeholder="Note"
             />
             {noteText && (
               <button type="button" className="btn door-act door-note__only" disabled={busy} onClick={() => log(sel, channel, 'contacted')}>
-                Save note only
+                Save note
               </button>
             )}
           </div>
@@ -497,7 +542,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
                 door={door}
                 toast={toast}
                 onCancel={() => setAdding(false)}
-                onDone={(id) => { setAdding(false); onSelect(id); }}
+                onDone={(id) => { setAdding(false); pickPerson(id); }}
               />
             ) : (
               <button type="button" className="btn door-act door-add-btn" onClick={() => setAdding(true)}>
@@ -507,7 +552,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           )}
 
           <div className="door-more__sec">
-            <span className="door-more__label" id="door-channel-label">Logging</span>
+            <span className="door-more__label" id="door-channel-label">How you reached them</span>
             <div className="door-channel" role="radiogroup" aria-labelledby="door-channel-label">
               {CHANNEL_BUTTONS.map((c) => (
                 <button

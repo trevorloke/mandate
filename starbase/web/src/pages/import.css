@@ -141,7 +141,7 @@
 
 .imp-tagfield { max-width: 520px; margin-bottom: var(--s-4); }
 .imp-tagrow { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
-.imp-tagrow .input { flex: 1 1 220px; min-height: 44px; }
+.imp-tagrow .input { flex: 1 1 220px; min-height: 48px; }
 
 .imp-preview > .eyebrow { display: block; margin-bottom: var(--s-2); }
 .imp-preview__scroll {
@@ -292,3 +292,18 @@
 .imp-place { margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--rule); }
 .imp-place__title { font-size: 16px; margin: 0 0 var(--s-2); }
 .imp-result .imp-actions { margin-top: var(--s-4); }
+
+/* ── Fix round 3 ── */
+/* One input height (48px), as on People and the profile. */
+.imp-page .input:not(textarea) { min-height: 48px; }
+/* "First row is column names": one quiet switch above the columns. */
+.imp-headrow {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  min-height: 48px; margin: 0 0 var(--s-2);
+  font-size: 15px; color: var(--text-2); cursor: pointer;
+}
+.imp-headrow input { width: 20px; height: 20px; margin: 0; accent-color: var(--ink); cursor: pointer; }
+.imp-headrow input:disabled { cursor: default; }
+.imp-headrow input:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+/* Touch screens keep :hover after a tap: the drop box only darkens for a mouse. */
+@media (hover: none) { .imp-drop:hover { border-color: var(--rule-2); } }

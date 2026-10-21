@@ -1,5 +1,6 @@
 // Join a campaign from an invite link. New people set a name and password;
 // people who already use Starbase confirm with their existing password.
+// Everyone lands on Today, whose one big button is "Start canvassing".
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -19,7 +20,11 @@ export default function Join() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
-  const inv = useQuery({ queryKey: ['invite', token], queryFn: () => apiGet(`/auth/invite/${token}`), retry: false });
+  // An invite works once: after joining it 404s, so never refetch it.
+  const inv = useQuery({
+    queryKey: ['invite', token], queryFn: () => apiGet(`/auth/invite/${token}`),
+    retry: false, staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false,
+  });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -27,9 +32,11 @@ export default function Join() {
     setError(null);
     try {
       const me = await apiPost('/auth/join', inv.data.hasAccount ? { token, password } : { token, name, password });
-      queryClient.clear();
+      // Drop whatever an earlier login cached — except this (now used)
+      // invite, which this screen still shows until Today takes over.
+      queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== 'invite' });
       queryClient.setQueryData(['me'], me);
-      navigate(me.role === 'volunteer' ? '/map' : '/');
+      navigate('/');
     } catch (err) {
       setError(err.message);
     } finally {

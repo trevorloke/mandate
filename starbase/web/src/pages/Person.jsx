@@ -13,11 +13,11 @@ import {
   ratingByCode, VOLUNTEER_ROLES, SOCIAL_PLATFORMS, SUGGESTED_TAGS,
   SIGN_KINDS, SIGN_STATUSES, DONOR_TIERS,
 } from '@starbase/shared/canvass';
-import RatingButtons, { OutcomeButtons, RatingChip, ratingSay } from '../components/RatingButtons.jsx';
+import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText } from '../components/RatingButtons.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
-  canDesk, invalidatePersonData, isDnc, tagWord, ratingLine,
+  canDesk, invalidatePersonData, isDnc, tagWord, RatingTag,
 } from './People.jsx';
 import './people.css';
 
@@ -34,25 +34,28 @@ const OUTCOME_LABEL = {
   contacted: 'Talked', no_answer: 'No answer', refused: 'Refused', moved: 'Moved', inaccessible: 'No access',
 };
 const CHANNEL_LABEL = { door: 'Door', phone: 'Phone', text: 'Text' };
-// "Rated 2 · Lean yes" or "No answer" — the field's own words.
-const contactWord = (c) => (c.rating ? `Rated ${c.rating} · ${ratingSay(c.rating)}` : OUTCOME_LABEL[c.outcome] || c.outcome);
+// "Rated 2 · Lean yes", "Rated 4 · Locke" or "No answer" — the field's own words.
+const contactWord = (c) => (c.rating ? `Rated ${ratingText(c.rating)}` : OUTCOME_LABEL[c.outcome] || c.outcome);
 
 // How this person is being reached (Door · Phone · Text), per person, kept for
 // this tab: a phone may reload the page after the dialer or messages app.
+// Until one is picked: Door — except at a desk computer (no dialer), for
+// someone with a phone and no door on the map, where it is a phone call.
 const CHANNEL_KEY = 'starbase.person.channel';
 const readChannels = () => {
   try { return JSON.parse(sessionStorage.getItem(CHANNEL_KEY) || '{}') || {}; } catch { return {}; }
 };
+const atDeskComputer = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(hover: hover) and (pointer: fine)').matches);
+const firstChannel = (person) => (atDeskComputer() && person?.phone && (person.lat == null || person.lng == null) ? 'phone' : 'door');
 function useChannel(personId) {
   const [chans, setChans] = useState(readChannels);
-  const saved = chans[personId];
-  const channel = CHANNEL_LABEL[saved] ? saved : 'door';
+  const saved = CHANNEL_LABEL[chans[personId]] ? chans[personId] : null;
   const setChannel = (c) => setChans((m) => {
     const next = { ...m, [personId]: c };
     try { sessionStorage.setItem(CHANNEL_KEY, JSON.stringify(next)); } catch { /* private mode: memory only */ }
     return next;
   });
-  return [channel, setChannel];
+  return [saved, setChannel];
 }
 const STATUS_CHIP = {
   assigned: 'chip', confirmed: 'chip chip-ok', declined: 'chip chip-danger', no_show: 'chip chip-danger', completed: 'chip',
@@ -121,10 +124,14 @@ function BackLink({ desk, className = 'eyebrow pf-back' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Header: name, rating, donor tier, Call · Text · Email · Map
 // ─────────────────────────────────────────────────────────────────────────────
-function Header({ person, donor, me, desk, onLog }) {
+function Header({ person, donor, me, desk, onLog, contacted }) {
   const r = ratingByCode(person.rating);
-  const when = fmtShort(person.rated_at);
+  const named = r?.band === 'opposed' && r.code !== '4'; // "4 · Locke" says it all
+  // The date of the rating only when no contact says it below.
+  const when = contacted ? '' : fmtShort(person.rated_at);
   const email = desk && person.email; // volunteers phone and knock; email is desk work
+  const tiles = Boolean(person.phone || email);
+  const located = person.lat != null && person.lng != null;
   return (
     <header className="pf-head">
       <BackLink desk={desk} />
@@ -133,10 +140,12 @@ function Header({ person, donor, me, desk, onLog }) {
         {person.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
       </h1>
       <div className="pf-meta">
-        {r && <RatingChip code={person.rating} />}
-        <span className="pf-word">
-          {r ? <>{ratingSay(person.rating)}{when && <span className="pf-when"> · {when}</span>}</> : 'Not rated'}
-        </span>
+        {r && <RatingChip code={person.rating} who />}
+        {(!r || !named || when) && (
+          <span className="pf-word">
+            {r ? <>{!named && ratingSay(person.rating)}{when && <span className="pf-when">{named ? '' : ' · '}{when}</span>}</> : 'Not rated'}
+          </span>
+        )}
         {isDnc(person) && <span className="chip chip-danger">Do not contact</span>}
         {/* donor is null for volunteers (the server hides money from them) */}
         {donor?.tier && TIER_LABEL[donor.tier] && (
@@ -145,8 +154,8 @@ function Header({ person, donor, me, desk, onLog }) {
           </span>
         )}
       </div>
-      {(person.phone || email || person.address) && (
-        <div className="pf-acts">
+      {(tiles || person.address) && (
+        <div className={`pf-acts${tiles ? '' : ' pf-acts--quiet'}`}>
           {person.phone && (
             <a className="btn pf-act" href={telHref(person.phone)} onClick={() => onLog('phone')}>
               <Icon name="phone" /> Call
@@ -164,10 +173,11 @@ function Header({ person, donor, me, desk, onLog }) {
           )}
           {person.address && (
             // Map selects ?person=<id>, and offers to place a pin when there is none
-            // (person.locate is open to volunteers too).
-            <Link className="btn pf-act" to={`/map?person=${person.id}`}
-              title={person.lat != null && person.lng != null ? 'On the map' : 'No pin yet — place one on the map'}>
-              <Icon name="map" /> Map
+            // (person.locate is open to volunteers too). With no Call or Text
+            // it's a quiet link, so the rating card stays the first big thing.
+            <Link className={tiles ? 'btn pf-act' : 'btn btn-quiet pp-btn pf-maplink'} to={`/map?person=${person.id}`}
+              title={located ? 'On the map' : 'No pin yet — place one on the map'}>
+              <Icon name="map" /> {tiles ? 'Map' : located ? 'On the map' : 'Place on map'}
             </Link>
           )}
         </div>
@@ -184,7 +194,11 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
   const [note, setNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   const [status, setStatus] = useState('');
+  const reachId = useId();
   const act = useAction(refresh);
+  // Contacts are kept as they were logged: "Change" (as on the field toasts)
+  // brings you back to the rating row, and the next tap logs the fix.
+  const change = () => { setStatus(''); focusRating(cardRef.current); };
 
   const log = async (outcome, rating) => {
     const res = await act.run('contact.log', {
@@ -211,13 +225,21 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
         ) : (
           <button type="button" className="btn btn-quiet pp-btn pf-note-btn" onClick={() => setNoteOpen(true)}>+ Add a note</button>
         )}
-        <div className="channel-toggle pf-channel" role="group" aria-label="How you reached them">
-          {['door', 'phone', 'text'].map((c) => (
-            <button key={c} type="button" aria-pressed={channel === c} onClick={() => setChannel(c)}>{CHANNEL_LABEL[c]}</button>
-          ))}
+        <div className="pf-reach">
+          <span className="eyebrow" id={reachId}>Reached by</span>
+          <div className="channel-toggle pf-channel" role="group" aria-labelledby={reachId}>
+            {['door', 'phone', 'text'].map((c) => (
+              <button key={c} type="button" aria-pressed={channel === c} onClick={() => setChannel(c)}>{CHANNEL_LABEL[c]}</button>
+            ))}
+          </div>
         </div>
       </div>
-      {act.error ? <p className="error" role="alert">{act.error}</p> : <p className="pf-status" role="status">{status}</p>}
+      {act.error ? <p className="error" role="alert">{act.error}</p> : (
+        <div className="pf-status-row">
+          <p className="pf-status" role="status">{status}</p>
+          {status && <button type="button" className="btn btn-quiet pp-btn pf-change" onClick={change}>Change</button>}
+        </div>
+      )}
     </section>
   );
 }
@@ -654,7 +676,7 @@ function History({ contacts }) {
           <span className="when">{fmtWhen(c.created_at)}</span>
           <span className="what">
             <span className="chip">{CHANNEL_LABEL[c.channel] || c.channel}</span>
-            {c.rating ? <RatingChip code={c.rating} who /> : <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>}
+            {c.rating ? <RatingTag code={c.rating} /> : <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>}
             {c.by_name && <span className="by">{c.by_name}</span>}
             {c.note && <span className="note">{c.note}</span>}
           </span>
@@ -672,7 +694,7 @@ export default function Person() {
   const { me } = useOutletContext() ?? {};
   const desk = canDesk(me);
   const queryClient = useQueryClient();
-  const [channel, setChannel] = useChannel(id);
+  const [savedChannel, setChannel] = useChannel(id);
   // Desks open on the history; volunteers on phone + address.
   const [open, setOpen] = useState(() => (desk ? { history: true } : { details: true }));
   const ratingRef = useRef(null);
@@ -711,17 +733,22 @@ export default function Person() {
   const tags = Array.isArray(person.tags) ? person.tags : [];
   const thisYear = totals.find((t) => String(t.year) === String(new Date().getFullYear()));
   const last = contacts[0];
+  const channel = savedChannel || firstChannel(person);
+  // The header already shows the rating: the line adds when and how.
+  const lastWhat = last && (last.rating
+    ? (last.rating === person.rating ? '' : ratingText(last.rating))
+    : OUTCOME_LABEL[last.outcome] || last.outcome);
 
   return (
     <div className="pf-page">
-      <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} />
+      <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} contacted={contacts.length > 0} />
 
       <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
 
       {/* Volunteers get one line instead of the full history. */}
       {!desk && last && (
         <p className="pf-last">
-          Last contact: {fmtShort(last.created_at)} · {CHANNEL_LABEL[last.channel] || last.channel} · {last.rating ? ratingLine(last.rating) : OUTCOME_LABEL[last.outcome] || last.outcome}
+          Last contact: {fmtShort(last.created_at)} · {CHANNEL_LABEL[last.channel] || last.channel}{lastWhat ? ` · ${lastWhat}` : ''}
         </p>
       )}
 

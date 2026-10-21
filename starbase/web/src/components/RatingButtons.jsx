@@ -5,7 +5,9 @@
 // profile). Tapping 4 asks one more thing — "Voting for?" — with the
 // opponents' surnames (McCallum · Locke · Annis · van Vliet · Randhawa) and
 // "Not sure" (= plain 4). Nothing is logged until that second tap, so an
-// opposed rating is still one contact.
+// opposed rating is still one contact. Codes ("4B") never show: the picked
+// 4 reads "4 / Locke", like its chip "4 · Locke" and the toast
+// "Rated 4 · Locke" (ratingText).
 // Band-tinted (support = green, undecided = ochre, opposed = red); the
 // current rating gets a dark ring and a check mark, never a solid fill, so
 // nothing here looks like the screen's one yellow button.
@@ -61,12 +63,21 @@ export function ratingWord(code) {
   return tail ? tail.split(' / ')[0].replace(/ supporter$/, '') : r.label;
 }
 
-// The words on the buttons, for the field toasts: "Strong yes", "Undecided",
-// "Locke", "Opposed" — so "Rated 4B · Locke" matches what was tapped.
+// The words on the buttons: "Strong yes", "Undecided", "Locke", "Opposed".
 export function ratingSay(code) {
   const r = ratingByCode(code);
   if (!r) return '';
   return r.band === 'opposed' && r.code !== '4' ? ratingWho(code) : MEANING[r.code] || r.label;
+}
+
+// One spelling of a rating for toasts and history lines, the same as the
+// chip and the button that was tapped: "1 · Strong yes", "4 · Locke",
+// "4 · Opposed". Never the code ("4B") — volunteers never see codes.
+// Toasts: `Rated ${ratingText(code)}`.
+export function ratingText(code) {
+  const r = ratingByCode(code);
+  if (!r) return '';
+  return `${r.band === 'opposed' ? '4' : r.short} · ${ratingSay(code)}`;
 }
 
 // The no-conversation outcomes, as one row of smaller quiet buttons.
@@ -178,13 +189,16 @@ export default function RatingButtons({ value = null, onPick, compact = false, d
           type="button"
           className={`rb-btn rb-btn--opposed${opposed ? ' is-active' : ''}${askWho ? ' is-asking' : ''}`}
           title="Opposed — tap, then pick who they vote for"
-          aria-label={opposed ? `4: Opposed, now ${cur.short} — change who they vote for` : '4: Opposed — pick who they vote for'}
+          aria-label={opposed
+            ? `4: Opposed, ${cur.code === '4' ? 'not sure who' : `voting ${ratingWho(cur.code)}`} — change who they vote for`
+            : '4: Opposed — pick who they vote for'}
           aria-expanded={askWho}
           aria-controls={whoId}
           disabled={disabled}
           onClick={() => setAskWho((o) => !o)}
         >
-          <span className="rb-btn__code">{opposed ? cur.short : '4'}</span>
+          {/* Picked: "4" over the name — the same words as the chip ("4 · Locke"). */}
+          <span className="rb-btn__code">4</span>
           <span className="rb-btn__sub">{opposed && cur.code !== '4' ? ratingWho(cur.code) : MEANING[4]}</span>
         </button>
       </div>
@@ -208,7 +222,6 @@ export default function RatingButtons({ value = null, onPick, compact = false, d
                   onClick={() => pick(code)}
                 >
                   <span className="rb-who__name">{ratingWho(code)}</span>
-                  <span className="rb-who__code">{r.short}</span>
                 </button>
               );
             })}

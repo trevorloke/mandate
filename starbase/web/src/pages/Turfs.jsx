@@ -1,24 +1,30 @@
 // Turfs + walk lists — the canvassing core.
 //   /turfs      every turf (volunteers: only the ones assigned to them): a
 //               row each, name + doors left; tap one for its walk list.
-//   /turfs/:id  THE WALK LIST: turf name, "4 of 7 doors", one yellow "Next
-//               door". Doors in the server's walk order (street by street,
-//               odd side up, even side back — never re-sorted here), one row
-//               each; tap a door for the same rating buttons as the map, the
-//               outcomes, and "More" (note, call, profile). Every knock goes
-//               through the offline outbox, so a dead zone mid-block loses
-//               nothing; the list shows what this phone logged right away.
-//               While a door is open and not knocked, the button reads
-//               "Skip → <the door after>" (quiet), never the door you're at.
-//               Both lists are kept on the phone for a day, so a reload with
-//               no signal still opens them ("Offline copy").
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+//   /turfs/:id  THE WALK LIST: turf name, "3 doors left" + a bar, one yellow
+//               "Next door". Doors in the server's walk order (street by
+//               street, odd side up, even side back — never re-sorted here),
+//               one row each; tap a door for the same rating buttons as the
+//               map, the outcomes, and "More" (note, call, profile). Like
+//               Calls, a tap that settles the door (everyone there rated or
+//               answered — always so for one person) closes it and opens the
+//               next one; "Change" on the toast reopens it. A note left in
+//               the box is sent on its own when the door closes, "Next door"
+//               is tapped or the screen is left ("Note saved").
+//               Every knock goes through the offline outbox, so a dead zone
+//               mid-block loses nothing; the list shows what this phone
+//               logged right away. While a door is open and not knocked, the
+//               button reads "Skip → <the door after>" (quiet), never the
+//               door you're at. Both lists are kept on the phone for a day,
+//               so a reload with no signal still opens them ("Offline copy");
+//               cachedWalkLists(me) lists those copies for the map and Today.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Link, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet } from '../api.js';
 import { logContact, useOutbox } from '../offline.js';
 import RatingButtons, {
-  More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingSay, reveal,
+  More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
 } from '../components/RatingButtons.jsx';
 import './turfs.css';
 
@@ -75,6 +81,39 @@ function writeCache(key, data, at) {
 function dropCache(key) {
   try { if (key) localStorage.removeItem(key); } catch { /* storage blocked */ }
 }
+// The walk lists kept on this phone for the signed-in user, newest first:
+// [{ id, name, at }]. The map (and Today) offer them when there's no signal.
+export function cachedWalkLists(me) {
+  const base = cacheKey(me, 'walk:');
+  if (!base) return [];
+  const keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(base) && k.length > base.length) keys.push(k);
+    }
+  } catch { return []; /* storage blocked */ }
+  // readCache drops expired copies, so read after the scan, not during it.
+  const out = [];
+  for (const k of keys) {
+    const v = readCache(k);
+    if (v) out.push({ id: k.slice(base.length), name: v.data?.turf?.name || 'Walk list', at: v.at });
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+
+// navigator.onLine as state (the walk list hides its outbox row offline —
+// the shell's strip already says it — and the map's no-signal card).
+const onlineNow = () => typeof navigator === 'undefined' || navigator.onLine !== false;
+const subscribeOnline = (fn) => {
+  window.addEventListener('online', fn);
+  window.addEventListener('offline', fn);
+  return () => { window.removeEventListener('online', fn); window.removeEventListener('offline', fn); };
+};
+export function useOnline() {
+  return useSyncExternalStore(subscribeOnline, onlineNow, () => true);
+}
+
 export function forgetFieldCache() {
   try {
     for (let i = localStorage.length - 1; i >= 0; i -= 1) {
@@ -218,11 +257,11 @@ function TurfList() {
                   <span className="turfs-row__top">
                     <span className="turfs-row__name">{t.name}</span>
                     <span className={`turfs-row__left mono${left === 0 && t.doors ? ' is-done' : ''}`}>
-                      {t.doors === 0 ? 'No doors' : left === 0 ? 'All done' : `${plural(left, 'door', 'doors')} left`}
+                      {t.doors === 0 ? 'No doors' : left === 0 ? <>All done <span aria-hidden="true">✓</span></> : `${plural(left, 'door', 'doors')} left`}
                     </span>
                   </span>
                   <ProgressBar done={t.doorsDone} total={t.doors} label={`${t.name}: doors done`} />
-                  {desk && t.members.length === 0 && <span className="chip chip-warn turfs-row__flag">No canvassers</span>}
+                  {desk && t.members.length === 0 && <span className="chip fk-wait turfs-row__flag">No canvassers</span>}
                 </Link>
               </li>
             );
@@ -237,11 +276,29 @@ function TurfList() {
 // /turfs/:id — the walk list
 // ─────────────────────────────────────────────────────────────────────────────
 
+// A door reached only by phone (a call or a text, never a knock): it counts
+// as done, but shows a phone in the circle, not a tick. Needs each person's
+// door_knocked (boolean) from the server's walk list; while it's missing,
+// every done door ticks.
+const reachedByPhoneOnly = (door) => {
+  const reached = door.persons.filter((p) => p.last_contact_at);
+  return reached.length > 0 && reached.every((p) => p.door_knocked === false);
+};
+
+function PhoneGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="walk-glyph">
+      <path d="M7 3.5h3l1.4 4-2 1.4a11 11 0 0 0 5.7 5.7l1.4-2 4 1.4v3c0 1-.8 1.8-1.8 1.8A16 16 0 0 1 5.2 5.3c0-1 .8-1.8 1.8-1.8z" />
+    </svg>
+  );
+}
+
 function WalkList({ id }) {
   const { me } = useOutletContext();
   const desk = DESK_ROLES.includes(me?.role);
   const queryClient = useQueryClient();
   const outbox = useOutbox();
+  const online = useOnline();
   const rootRef = useRef(null);
   const nextRef = useRef(null);
   useTabbarHeight(rootRef);
@@ -277,17 +334,30 @@ function WalkList({ id }) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState(null); // { text, tone, act }
   const toastTimer = useRef(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const toast = (text, { tone = 'ok', act = null } = {}) => {
-    setToastMsg({ text, tone, act });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMsg(null), act || tone === 'error' ? 5000 : 3000);
+    if (!alive.current) return;
+    setToastMsg({ text, tone, act });
+    toastTimer.current = setTimeout(() => setToastMsg(null), act || tone === 'error' ? 4000 : 3000);
   };
+  // The Note field got focus: the toast must not sit on what they type.
+  const hideToast = () => { clearTimeout(toastTimer.current); setToastMsg(null); };
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['turf', id] });
     for (const key of KNOCK_KEYS) queryClient.invalidateQueries({ queryKey: [key] });
+  };
+
+  // Unsent notes, mirrored in a ref: a door closing (or the screen going
+  // away) still knows what's in the boxes.
+  const notesRef = useRef({});
+  const setNote = (pid, v) => {
+    notesRef.current = { ...notesRef.current, [pid]: v };
+    if (alive.current) setNotes(notesRef.current);
   };
 
   // The outbox drained (here or from the app shell): refetch, and stop
@@ -312,7 +382,7 @@ function WalkList({ id }) {
     const persons = d.persons.map((p) => {
       const mine = local[p.id];
       return mine
-        ? { ...p, rating: mine.rating ?? p.rating, last_outcome: mine.outcome, last_contact_at: mine.at, queued: mine.queued }
+        ? { ...p, rating: mine.rating ?? p.rating, last_outcome: mine.outcome, last_contact_at: mine.at, door_knocked: true, queued: mine.queued }
         : p;
     });
     return {
@@ -323,8 +393,17 @@ function WalkList({ id }) {
     };
   }), [q.data, local]);
 
+  // The latest list, open door and knocks, for handlers that finish after an
+  // await (and for the unmount note flush).
+  const doorsRef = useRef(doors);
+  const openRef = useRef(openKey);
+  const localRef = useRef(local);
+  useLayoutEffect(() => { doorsRef.current = doors; openRef.current = openKey; localRef.current = local; });
+
   const total = doors.length;
   const doneCount = doors.filter((d) => d.done).length;
+  const left = total - doneCount;
+  const allDone = total > 0 && left === 0;
   const people = doors.reduce((n, d) => n + d.persons.length, 0);
   const rated = doors.reduce((n, d) => n + d.persons.filter((p) => p.rating).length, 0);
   const nextIdx = doors.findIndex((d) => !d.done);
@@ -385,16 +464,82 @@ function WalkList({ id }) {
     return n;
   });
 
+  // A note on its own (its door closed, Next door, leaving the screen): a
+  // "talked" contact carrying just the note — the same as "Save note".
+  const sendNote = async (person, text, multi) => {
+    try {
+      const r = await logContact({ person_id: person.id, channel: 'door', outcome: 'contacted', note: text });
+      if (!r.queued) refresh();
+      if (!alive.current) return;
+      setLocal((l) => ({
+        ...l,
+        [person.id]: { rating: l[person.id]?.rating || null, outcome: 'contacted', at: new Date().toISOString(), queued: r.queued },
+      }));
+      const who = multi ? `${firstName(person.name)} · ` : '';
+      toast(r.queued ? `${who}Note saved offline` : `${who}Note saved`, { tone: r.queued ? 'queued' : 'ok' });
+    } catch (err) {
+      if (!alive.current) return;
+      if (!notesRef.current[person.id]) setNote(person.id, text);
+      toast(`Note not saved — ${err.message}`, { tone: 'error' });
+    }
+  };
+  const flushNotes = (persons) => {
+    const multi = persons.length > 1;
+    for (const p of persons) {
+      const text = (notesRef.current[p.id] || '').trim();
+      if (!text) continue;
+      setNote(p.id, '');
+      sendNote(p, text, multi);
+    }
+  };
+  // A door closing — collapsed, another door opened, Next door, or a tap
+  // that settled it — sends any note still in its box.
+  const prevOpen = useRef(null);
+  useEffect(() => {
+    const prev = prevOpen.current;
+    prevOpen.current = openKey;
+    if (!prev || prev === openKey) return;
+    const door = doorsRef.current.find((d) => d.key === prev);
+    if (door) flushNotes(door.persons);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openKey]);
+  // Leaving the screen: the same, for every door.
+  useEffect(() => () => {
+    for (const d of doorsRef.current) flushNotes(d.persons);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // After a tap that settles a door: close it and open the next door not
+  // knocked yet (wrapping round) — the same rhythm as Calls.
+  const advanceFrom = (key) => {
+    const list = doorsRef.current;
+    const at = list.findIndex((d) => d.key === key);
+    for (let k = 1; k < list.length; k += 1) {
+      const i = (at + k) % list.length;
+      if (!list[i].done) { setOpenKey(list[i].key); setScrollTo(i); return; }
+    }
+    setOpenKey(null);
+  };
+  const reopen = (key) => {
+    setOpenKey(key);
+    setFocusPanel(doorsRef.current.findIndex((d) => d.key === key));
+  };
+
   // One knock for one person, through the outbox. Returns { ok, queued }.
-  // rootId: the door panel, so the toast's "Change rating" can focus it.
-  const log = async (person, outcome, rating = null, { quiet = false, batch = false, rootId = null, multi = false } = {}) => {
-    const note = (notes[person.id] || '').trim();
+  // door: where it was tapped. A rating or an answer that leaves everyone at
+  // the door rated or answered closes the door and opens the next one (the
+  // toast's "Change" reopens it); a household with someone still to rate
+  // stays open. A note in the box goes with the tap (and is cleared at once,
+  // so it can't be sent twice).
+  const log = async (person, outcome, rating = null, { quiet = false, batch = false, door = null } = {}) => {
+    const note = (notesRef.current[person.id] || '').trim();
     const input = { person_id: person.id, channel: 'door', outcome };
     if (rating) input.rating = rating;
-    if (note) input.note = note;
+    if (note) { input.note = note; setNote(person.id, ''); }
     setBusyKey(person.id, true);
     try {
       const r = await logContact(input);
+      const before = localRef.current;
       setLocal((l) => ({
         ...l,
         [person.id]: {
@@ -404,19 +549,30 @@ function WalkList({ id }) {
           queued: r.queued,
         },
       }));
-      if (note) setNotes((n) => ({ ...n, [person.id]: '' }));
       if (!quiet) {
-        // Append-only: "Change" brings the rating row back; the next tap logs the fix.
-        const act = rootId ? { label: 'Change', onClick: () => focusRating(document.getElementById(rootId)) } : null;
+        const multi = (door?.persons.length || 0) > 1;
+        // "Save note" on its own never moves on: they're still at the door.
+        const settled = Boolean(door) && (Boolean(rating) || outcome !== 'contacted')
+          && door.persons.every((p) => p.id === person.id || p.rating || before[p.id]);
+        let act = null;
+        if (door) {
+          // Append-only: "Change" brings the rating row back; the next tap logs the fix.
+          act = settled
+            ? { label: 'Change', onClick: () => reopen(door.key) }
+            : { label: 'Change', onClick: () => focusRating(document.getElementById(`walk-panel-${doorsRef.current.findIndex((d) => d.key === door.key)}`)) };
+          // Only if they're still on this door (they may have opened another meanwhile).
+          if (settled && openRef.current === door.key) advanceFrom(door.key);
+        }
         const who = multi ? `${firstName(person.name)} · ` : '';
         const what = rating
-          ? `Rated ${rating} · ${ratingSay(rating)}`
+          ? `Rated ${ratingText(rating)}`
           : outcome === 'contacted' ? 'Note saved' : OUTCOME_LABEL[outcome];
         toast(r.queued ? QUEUED_TEXT : `${who}${what}`, { tone: r.queued ? 'queued' : 'ok', act });
       }
       if (!r.queued && !batch) refresh();
       return { ok: true, queued: r.queued };
     } catch (err) {
+      if (note && !notesRef.current[person.id]) setNote(person.id, note);
       toast(`Not saved — ${err.message}`, { tone: 'error' });
       return { ok: false };
     } finally {
@@ -424,8 +580,9 @@ function WalkList({ id }) {
     }
   };
 
-  // "No answer" at the door: a no-answer for everyone there, one tap.
-  const nobodyHome = async (door, index) => {
+  // "No answer" at the door: a no-answer for everyone there, one tap. It
+  // settles the door, so on to the next one.
+  const nobodyHome = async (door) => {
     setBusyKey(door.key, true);
     let queued = false;
     let failed = 0;
@@ -438,10 +595,12 @@ function WalkList({ id }) {
     }
     if (sent) refresh(); // once for the door, not once per person
     setBusyKey(door.key, false);
-    const change = { label: 'Change', onClick: () => { setOpenKey(door.key); setFocusPanel(index); } };
+    const change = { label: 'Change', onClick: () => reopen(door.key) };
     if (failed) toast(`${plural(failed, 'knock', 'knocks')} not saved — try again`, { tone: 'error' });
-    else toast(queued ? QUEUED_TEXT : OUTCOME_LABEL.no_answer, { tone: queued ? 'queued' : 'ok', act: change });
-    if (!failed) setOpenKey((k) => (k === door.key ? null : k));
+    else {
+      toast(queued ? QUEUED_TEXT : OUTCOME_LABEL.no_answer, { tone: queued ? 'queued' : 'ok', act: change });
+      if (openRef.current === door.key) advanceFrom(door.key);
+    }
   };
 
   const sendNow = async () => {
@@ -496,7 +655,7 @@ function WalkList({ id }) {
   const nextAria = target ? `${skipping ? 'Skip to' : 'Next door:'} ${doorLabel(target)}` : undefined;
 
   return (
-    <div className={`walk${target ? ' has-next' : ''}`} ref={rootRef} style={{ '--turf': turfColor(turf) }}>
+    <div className={`walk${target ? ' has-next' : ''}${openIdx >= 0 ? ' has-open' : ''}`} ref={rootRef} style={{ '--turf': turfColor(turf) }}>
       <div className="walk-nav">
         <Link className="btn btn-quiet walk-back" to="/turfs">← Turfs</Link>
         <Link className="btn btn-quiet walk-act walk-map" to={`/map?turf=${turf.id}`} aria-label="Map of this turf">Map</Link>
@@ -504,20 +663,27 @@ function WalkList({ id }) {
 
       <header className="walk-head">
         <h1 className="walk-title">{turf.name}</h1>
-        <div className="walk-progress">
-          <span className="walk-progress__text mono"><strong>{doneCount}</strong> of {plural(total, 'door', 'doors')}</span>
-          <ProgressBar done={doneCount} total={total} />
-        </div>
+        {/* One phrase everywhere (turf list, map sheet, Today): "3 doors left" + the bar. */}
+        {total > 0 && (
+          <div className="walk-progress">
+            {allDone ? (
+              <span className="walk-progress__text walk-progress__done mono" role="status">All done <span aria-hidden="true">✓</span></span>
+            ) : (
+              <span className="walk-progress__text mono"><strong>{left}</strong> {left === 1 ? 'door' : 'doors'} left</span>
+            )}
+            <ProgressBar done={doneCount} total={total} />
+          </div>
+        )}
         {target ? (
           <button type="button" ref={nextRef} className={nextCls} aria-label={nextAria} onClick={goNext}>{nextLabel}</button>
-        ) : total > 0 && doneCount === total ? (
-          <p className="walk-next__done" role="status">All done — nice work</p>
+        ) : allDone ? (
+          <Link className="walk-calls" to="/calls">Make calls <span aria-hidden="true">→</span></Link>
         ) : null}
         {total > 0 && (
           <More id="walk-info" label={turf.notes ? 'Notes' : 'More'} open={infoOpen} onToggle={() => setInfoOpen((o) => !o)}>
             {turf.notes && <p className="walk-notes">{turf.notes}</p>}
             <dl className="walk-stats">
-              <div><dt>Left</dt><dd>{total - doneCount}</dd></div>
+              <div><dt>Left</dt><dd>{left}</dd></div>
               <div><dt>People</dt><dd>{people}</dd></div>
               <div><dt>Rated</dt><dd>{rated}</dd></div>
             </dl>
@@ -525,9 +691,11 @@ function WalkList({ id }) {
         )}
       </header>
 
-      {outbox.pending > 0 && (
+      {/* Offline the shell's strip already says "1 knock saved": no second
+          row here, and no "Send now" that can't send. */}
+      {online && outbox.pending > 0 && (
         <div className="walk-outbox" role="status">
-          <span className="chip chip-warn">{outbox.pending} saved offline</span>
+          <span className="chip fk-wait">{outbox.pending} saved offline</span>
           {outbox.lastError && <span className="walk-outbox__err">{outbox.lastError}</span>}
           <button type="button" className="btn walk-act" onClick={sendNow} disabled={outbox.flushing}>
             {outbox.flushing ? 'Sending…' : 'Send now'}
@@ -556,9 +724,10 @@ function WalkList({ id }) {
               onPick={(pid) => setPicked((m) => ({ ...m, [d.key]: pid }))}
               busy={busy}
               notes={notes}
-              setNote={(pid, v) => setNotes((n) => ({ ...n, [pid]: v }))}
-              onLog={log}
-              onNobodyHome={() => nobodyHome(d, i)}
+              setNote={setNote}
+              onNoteFocus={hideToast}
+              onLog={(p, outcome, rating = null) => log(p, outcome, rating, { door: d })}
+              onNobodyHome={() => nobodyHome(d)}
             />
           ))}
         </ol>
@@ -588,7 +757,7 @@ function WalkList({ id }) {
   );
 }
 
-function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, notes, setNote, onLog, onNobodyHome }) {
+function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, notes, setNote, onNoteFocus, onLog, onNobodyHome }) {
   const [more, setMore] = useState(false);
   const headId = `walk-door-${index}-addr`;
   const panelId = `walk-panel-${index}`;
@@ -597,12 +766,12 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
   const doorBusy = Boolean(busy[door.key]) || door.persons.some((p) => busy[p.id]);
   const queued = door.persons.some((p) => p.queued);
   const rated = door.persons.filter((p) => p.rating);
+  const phoneOnly = door.done && reachedByPhoneOnly(door);
   const note = notes[sel?.id] || '';
   const dnc = sel && isDnc(sel);
   const last = sel?.last_contact_at
     ? `${OUTCOME_LABEL[sel.last_outcome] || 'Knocked'} · ${fmtWhen(sel.last_contact_at)}`
     : 'Not knocked yet';
-  const opts = { rootId: panelId, multi };
   // Opening a door from its row: bring the whole door (buttons included)
   // into view — clear of the docked Next door bar and the tab bar.
   const toggle = () => {
@@ -621,16 +790,23 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
     >
       <h2 className="walk-door__h">
         <button type="button" className="walk-door__head" aria-expanded={open} aria-controls={panelId} onClick={toggle}>
-          <span className="walk-check" data-done={door.done ? '' : undefined} aria-hidden="true">✓</span>
+          <span className="walk-check" data-done={door.done ? '' : undefined} data-phone={phoneOnly ? '' : undefined} aria-hidden="true">
+            {phoneOnly ? <PhoneGlyph /> : '✓'}
+          </span>
           <span className="walk-door__main">
             <span className="walk-door__addr" id={headId}>{doorLabel(door)}</span>
             <span className="walk-door__names">{door.persons.map((p) => p.name).join(' · ')}</span>
           </span>
+          {/* One line: a household says "2 rated" (whose is whose is inside). */}
           <span className="walk-door__chips">
-            {queued && <span className="chip chip-warn">Offline</span>}
-            {rated.map((p) => <RatingChip key={p.id} code={p.rating} who />)}
+            {queued && <span className="chip fk-wait">Offline</span>}
+            {multi
+              ? rated.length > 0 && <span className="chip walk-rated">{rated.length} rated</span>
+              : rated.map((p) => <RatingChip key={p.id} code={p.rating} who />)}
           </span>
-          <span className="walk-sr">{door.done ? ' — done' : ' — not knocked yet'}{isNext ? ', next door' : ''}</span>
+          <span className="walk-sr">
+            {door.done ? (phoneOnly ? ' — called, not knocked' : ' — done') : ' — not knocked yet'}{isNext ? ', next door' : ''}
+          </span>
         </button>
       </h2>
 
@@ -638,33 +814,34 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
         <div className="walk-panel" id={panelId}>
           <PersonTabs persons={door.persons} value={sel.id} onPick={onPick} />
           {dnc && <p className="walk-dnc"><span className="chip chip-danger">Do not contact</span> Skip {firstName(sel.name)}</p>}
-          <RatingButtons key={sel.id} value={sel.rating} disabled={Boolean(busy[sel.id] || busy[door.key])} onPick={(code) => onLog(sel, 'contacted', code, opts)} />
+          <RatingButtons key={sel.id} value={sel.rating} disabled={Boolean(busy[sel.id] || busy[door.key])} onPick={(code) => onLog(sel, 'contacted', code)} />
           <OutcomeButtons
             items={DOOR_OUTCOMES}
             disabled={doorBusy}
-            onPick={(code) => (code === NOBODY ? onNobodyHome() : onLog(sel, code, null, opts))}
+            onPick={(code) => (code === NOBODY ? onNobodyHome() : onLog(sel, code))}
           />
           <More id={`walk-more-${index}`} open={more} onToggle={() => setMore((m) => !m)}>
             <p className="walk-last mono">
               {multi && <strong>{firstName(sel.name)} · </strong>}{last}
-              {sel.queued && <span className="chip chip-warn"> Saved offline</span>}
+              {sel.queued && <span className="chip fk-wait"> Saved offline</span>}
             </p>
             <div className="field walk-note">
-              <label htmlFor={`walk-note-${sel.id}`}>Note</label>
+              <label htmlFor={`walk-note-${sel.id}`} className="walk-sr">Note</label>
               <textarea
                 id={`walk-note-${sel.id}`} className="input" rows={2} maxLength={2000}
                 value={note} onChange={(e) => setNote(sel.id, e.target.value)}
-                placeholder="Note — saved with your rating"
+                onFocus={onNoteFocus}
+                placeholder="Note"
               />
             </div>
             <div className="walk-panel__links">
               {note.trim() && (
-                <button type="button" className="btn walk-act" disabled={Boolean(busy[sel.id])} onClick={() => onLog(sel, 'contacted', null, opts)}>
-                  Save note only
+                <button type="button" className="btn walk-act" disabled={Boolean(busy[sel.id])} onClick={() => onLog(sel, 'contacted')}>
+                  Save note
                 </button>
               )}
               {multi && (
-                <button type="button" className="btn walk-act" disabled={Boolean(busy[sel.id])} onClick={() => onLog(sel, 'no_answer', null, opts)}>
+                <button type="button" className="btn walk-act" disabled={Boolean(busy[sel.id])} onClick={() => onLog(sel, 'no_answer')}>
                   No answer · {firstName(sel.name)} only
                 </button>
               )}

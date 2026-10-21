@@ -69,8 +69,8 @@ function AddFilingForm({ onDone, onClose }) {
           <div className="field">
             <label htmlFor="nf-status">Status</label>
             <select id="nf-status" className="input" value={form.status} onChange={set('status')}>
-              <option value="upcoming">upcoming</option>
-              <option value="filed">filed</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="filed">Filed</option>
             </select>
           </div>
           <div className="field">

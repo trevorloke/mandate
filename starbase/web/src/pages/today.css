@@ -102,12 +102,43 @@ h2.today-h {
 }
 .today-num__label {
   margin-top: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-3);
   line-height: 1.3;
+}
+/* The tile's own glyph, as on the rows: › goes to a screen, + opens here
+   (the same plus as every "More" row, app.css .disclose). */
+.today-num__go {
+  flex: none;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 0.7;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+.today-num__plus {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-bottom: 1px;
+  color: var(--text-2);
+  background:
+    linear-gradient(currentColor, currentColor) center / 12px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 2px 12px no-repeat;
+}
+.today-num[aria-expanded='true'] .today-num__plus { background: linear-gradient(currentColor, currentColor) center / 12px 2px no-repeat; }
+@media (forced-colors: active) {
+  .today-num__plus { width: auto; height: auto; background: none; }
+  .today-num__plus::after { content: '+'; content: '+' / ''; }
+  .today-num[aria-expanded='true'] .today-num__plus::after { content: '−'; content: '−' / ''; }
 }
 
 /* Support bar: green / amber / red, from the doorstep ratings — the same
@@ -193,6 +224,9 @@ h2.today-h {
    Shifts — yellow belongs to the one primary button. */
 .today .chip.chip-warn { background: transparent; color: var(--warn); border-color: var(--warn); }
 .today-row__extra { color: var(--text-1); font-weight: 600; }
+.today-row__extra.is-warn { color: var(--warn); }
+/* The amount, on the right as on Money. */
+.today-row__end { flex: none; font-size: 14px; font-weight: 600; color: var(--text-1); }
 .today-fill { flex: none; font-size: 13px; color: var(--text-2); }
 /* Holds the volunteer's shift line while "which shifts am I on?" loads, so
    the row doesn't jump from "Open shift" to "Your next shift". */
@@ -239,7 +273,19 @@ h2.today-h {
   box-shadow: 0 3px 0 var(--mark-deep);
 }
 .btn.btn-primary.today-start:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--mark-deep); }
-.today-offline + .today-start { margin-top: var(--s-4); }
+/* "Newton — 72 Ave — All done ✓ ›": still the way into the walk list. */
+.today-go__meta.today-go__link {
+  min-height: 48px;
+  margin-top: var(--s-2);
+  color: var(--text-1);
+  text-decoration: none;
+  flex-wrap: nowrap;
+}
+.today-go__link .today-chev { margin-left: auto; }
+@media (hover: hover) {
+  .today-go__link:hover .today-go__turf { text-decoration: underline; text-decoration-color: var(--mark-deep); text-underline-offset: 3px; }
+}
+.today-go__link:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .today-go__meta {
   display: flex;
   align-items: center;

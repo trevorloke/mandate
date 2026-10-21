@@ -1,13 +1,17 @@
 // Money — what came in, and what needs the desk.
 //   Top: one big "Raised this year" number, then "Needs you": pledges from the
-//   donate page to mark received (→ a gift, cap-checked) or cancel, and gifts
-//   flagged over the contribution limit.
+//   donate page ("Pledge" chip) to "Mark paid" (→ a gift, cap-checked) or
+//   "Cancel pledge", and gifts over the contribution limit ("Over limit":
+//   "$150 over the $1,250 limit", the legal wording under "Why?", Donor ·
+//   Void right there).
 //   One yellow "Log a gift" (?new=1; ?person=<id> preselects the donor):
-//   donor, amount, date — method, cadence and note under "More details".
-//   Type-ahead donor picker (never type IDs); a compliance banner on a cap crossing.
-//   The ledger: rows of donor, amount, date (+ monthly / flagged chips). Tap a
-//   row for method, note, the donor's profile and Void (optimistic, 7s Undo).
-//   Under "More": the donate page link and paid & closed pledges.
+//   donor, amount, date — paid by, cadence and note under "More details".
+//   Type-ahead donor picker (never type IDs). Saving says "✓ $150 from Owen
+//   Patel" (Undo voids it); a cap crossing also raises an "Over limit" banner.
+//   The ledger: rows of donor, amount, date (+ monthly / over limit chips). Tap
+//   a row for how it was paid, note, the donor's profile and Void ("Void this
+//   gift? Yes · No", then a 7s Undo).
+//   Under "More": the donate page (Copy link · Open · Set up) and paid & closed pledges.
 //   Dollars on screen, integer cents on the wire; cursor-paginated load more.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
@@ -20,8 +24,10 @@ import './shifts.css';
 // gift.log / gift.void / gift.restore and GET /records/* are desk-only
 // (server: MONEY_ROLES; volunteers get 403 on both reads and writes).
 const MONEY_ROLES = ['manager', 'treasurer', 'staff'];
-// Registry: gift.method / gift.cadence select options.
+// Registry: gift.method / gift.cadence select options, in plain words.
 const METHODS = ['card', 'etransfer', 'cheque', 'cash', 'in-kind'];
+const METHOD_WORD = { card: 'Card', etransfer: 'E-transfer', cheque: 'Cheque', cash: 'Cash', 'in-kind': 'In-kind' };
+const methodWord = (m) => METHOD_WORD[m] ?? m;
 const CADENCES = [
   { code: 'one-time', label: 'One-time' },
   { code: 'monthly', label: 'Monthly' },
@@ -31,6 +37,19 @@ const LATEST = 3;
 
 // "$3,325" for the big number; rows keep the cents.
 const fmtBig = (cents) => fmtMoney(cents).replace(/\.00$/, '');
+
+// Over the contribution limit, in one line: "$150 over the $1,250 limit".
+// The server's flag_reason reads "<donor> is at $1400.00 for 2026 — over the
+// $1250.00 limit (<legal source>)"; a fresh gift.log also returns the numbers.
+const parseOver = (reason) => {
+  const m = /at \$([\d,]+(?:\.\d+)?) for (\d{4}) — over the \$([\d,]+(?:\.\d+)?) limit/.exec(String(reason || ''));
+  if (!m) return null;
+  const cents = (v) => Math.round(Number(v.replace(/,/g, '')) * 100);
+  return { totalCents: cents(m[1]), capCents: cents(m[3]) };
+};
+const overLine = (c) => (c && Number.isFinite(c.totalCents) && Number.isFinite(c.capCents) && c.totalCents > c.capCents
+  ? `${fmtBig(c.totalCents - c.capCents)} over the ${fmtBig(c.capCents)} limit`
+  : 'Over limit');
 // "Aug 2" (this year) or "Aug 2, 2025"
 const shortDate = (value) => {
   const [y, m, d] = fmtDate(value).split('-').map(Number);
@@ -198,7 +217,7 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
         cadence,
         note: note.trim() || undefined,
       });
-      onSaved(res);
+      onSaved(res, donor);
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -232,10 +251,10 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
         <div id="gift-more" className="ops-more-body">
           <div className="form-row">
             <div className="field">
-              <label htmlFor="gift-method">Method</label>
+              <label htmlFor="gift-method">Paid by</label>
               <select id="gift-method" className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="">—</option>
-                {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {METHODS.map((m) => <option key={m} value={m}>{methodWord(m)}</option>)}
               </select>
             </div>
             <div className="field">
@@ -268,9 +287,9 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
 const OPEN_PLEDGE = new Set(['pledged', 'pending']);
 const PLEDGE_STATUS = {
   pledged:   { label: 'pledged', cls: 'chip chip-warn', title: 'Waiting for the donor to send it' },
-  pending:   { label: 'card pending', cls: 'chip chip-warn', title: 'Started card checkout; Stripe has not confirmed payment' },
-  paid:      { label: 'paid by card', cls: 'chip chip-ok', title: 'Stripe confirmed payment' },
-  received:  { label: 'received', cls: 'chip chip-ok', title: 'Marked received at the desk' },
+  pending:   { label: 'card started', cls: 'chip chip-warn', title: 'Started paying by card; the card payment isn’t confirmed yet' },
+  paid:      { label: 'paid by card', cls: 'chip chip-ok', title: 'The card payment went through' },
+  received:  { label: 'paid', cls: 'chip chip-ok', title: 'Marked paid at the desk' },
   cancelled: { label: 'cancelled', cls: 'chip ops-chip-muted', title: 'Cancelled — no gift recorded' },
 };
 const PledgeStatus = ({ status }) => {
@@ -279,6 +298,8 @@ const PledgeStatus = ({ status }) => {
 };
 // A plain fact, so a quiet outline chip — yellow is kept for problems.
 const MonthlyChip = () => <span className="chip">monthly</span>;
+// The sample dataset tags every gift note "sample"; Today already says so.
+const shownNote = (n) => (n && n.trim().toLowerCase() !== 'sample' ? n : null);
 
 function PledgeRow({ p, onReceived, onChanged }) {
   const [mode, setMode] = useState(null); // null | 'receive' | 'cancel'
@@ -306,7 +327,7 @@ function PledgeRow({ p, onReceived, onChanged }) {
     setBusy(true);
     try {
       await action('pledge.cancel', { id: p.id });
-      onChanged(`Cancelled ${p.name}’s ${fmtMoney(p.amount_cents)} pledge`);
+      onChanged(`✓ Cancelled ${p.name}’s ${fmtBig(p.amount_cents)} pledge`);
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -322,6 +343,7 @@ function PledgeRow({ p, onReceived, onChanged }) {
           <span className="ops-row__name">{p.person_id ? <Link to={`/people/${p.person_id}`}>{p.name}</Link> : p.name}</span>
           <span className="ops-row__sub">
             {localDay(p.created_at)}
+            {open && <span className="chip ops-chip-amber" title="Promised on the donate page — not paid yet">Pledge</span>}
             {p.cadence === 'monthly' && <MonthlyChip />}
             {p.status !== 'pledged' && <PledgeStatus status={p.status} />}
           </span>
@@ -331,24 +353,24 @@ function PledgeRow({ p, onReceived, onChanged }) {
 
       {open && mode === null && (
         <div className="ops-pledge-acts">
-          <button type="button" className="btn ops-tap" onClick={() => setMode('receive')}>Received</button>
-          <button type="button" className="btn btn-quiet ops-tap" onClick={() => setMode('cancel')}>Cancel</button>
+          <button type="button" className="btn ops-tap" onClick={() => setMode('receive')}>Mark paid</button>
+          <button type="button" className="btn btn-quiet ops-tap" onClick={() => setMode('cancel')}>Cancel pledge</button>
         </div>
       )}
 
       {open && mode === 'receive' && (
-        <form className="ops-body" onSubmit={receive} aria-label={`Mark ${p.name}’s pledge received`}>
+        <form className="ops-body" onSubmit={receive} aria-label={`Mark ${p.name}’s pledge paid`}>
           {p.status === 'pending' && <p className="ops-meta">Card checkout started — only if paid another way.</p>}
           {p.cadence === 'monthly' && <p className="ops-meta">Records this month’s gift only.</p>}
           <div className="form-row">
             <div className="field">
               <label htmlFor={`${idp}-method`}>Paid by</label>
               <select id={`${idp}-method`} className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
-                {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {METHODS.map((m) => <option key={m} value={m}>{methodWord(m)}</option>)}
               </select>
             </div>
             <div className="field">
-              <label htmlFor={`${idp}-date`}>Date received</label>
+              <label htmlFor={`${idp}-date`}>Date paid</label>
               <input id={`${idp}-date`} className="input mono" type="date" required value={date}
                 max={todayISO()} onChange={(e) => setDate(e.target.value)} />
             </div>
@@ -356,7 +378,7 @@ function PledgeRow({ p, onReceived, onChanged }) {
           {error && <p className="error" role="alert">{error}</p>}
           <div className="ops-actions">
             <button type="submit" className="btn ops-solid ops-tap" disabled={busy || !date}>
-              {busy ? 'Saving…' : `Record ${fmtMoney(p.amount_cents)}`}
+              {busy ? 'Saving…' : `Mark ${fmtBig(p.amount_cents)} paid`}
             </button>
             <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={back}>Back</button>
           </div>
@@ -379,27 +401,56 @@ function PledgeRow({ p, onReceived, onChanged }) {
   );
 }
 
-// ── A gift over the limit (from the brief); tap for the reason ──
-function FlaggedRow({ f, personId }) {
+// ── Donor · Void, with "Void this gift? Yes · No" in place ──
+function GiftActions({ personId, onVoid }) {
+  const [confirm, setConfirm] = useState(false);
+  if (confirm) {
+    return (
+      <div className="ops-confirm" role="group" aria-label="Void this gift">
+        <span>Void this gift?</span>
+        <button type="button" className="btn ops-danger ops-tap" onClick={() => { setConfirm(false); onVoid(); }}>Yes</button>
+        <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirm(false)}>No</button>
+      </div>
+    );
+  }
+  return (
+    <div className="ops-actions">
+      {personId && <Link className="btn btn-quiet ops-tap ops-link" to={`/people/${personId}`}>Donor</Link>}
+      <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirm(true)}>Void</button>
+    </div>
+  );
+}
+
+// "Over limit" — the same word on every gift that crossed the cap.
+const OverChip = ({ title }) => <span className="chip chip-warn" title={title || undefined}>over limit</span>;
+
+// ── A gift over the limit (from the brief); tap for how far over ──
+function FlaggedRow({ f, personId, onVoid }) {
   const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState(false);
   const bodyId = `fl-${f.id}`;
   return (
     <li className="ops-item">
       <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((v) => !v)}>
         <span className="ops-row__main">
           <span className="ops-row__name">{f.donor}</span>
-          <span className="ops-row__sub">{shortDate(f.date)}<span className="chip chip-warn">over limit</span></span>
+          <span className="ops-row__sub">{shortDate(f.date)}<OverChip /></span>
         </span>
         <span className="ops-row__end"><span className="ops-row__amt">{fmtMoney(f.amount_cents)}</span></span>
       </button>
       {open && (
         <div className="ops-body" id={bodyId}>
-          {f.flag_reason && <p>{f.flag_reason}</p>}
-          {personId && (
-            <div className="ops-actions">
-              <Link className="btn btn-quiet ops-tap ops-link" to={`/people/${personId}`}>Donor</Link>
-            </div>
+          <p className="ops-over" title={f.flag_reason || undefined}>{overLine(parseOver(f.flag_reason))}</p>
+          {f.flag_reason && (
+            <>
+              <button type="button" className="ops-more disclose disclose--inline" aria-expanded={why}
+                aria-controls={`${bodyId}-why`} onClick={() => setWhy((v) => !v)}>
+                Why?
+              </button>
+              {why && <p id={`${bodyId}-why`} className="ops-meta">{f.flag_reason}</p>}
+            </>
           )}
+          <GiftActions personId={personId} onVoid={onVoid} />
         </div>
       )}
     </li>
@@ -417,27 +468,56 @@ function GiftRow({ g, open, onToggle, onVoid }) {
           <span className="ops-row__sub">
             {shortDate(g.date)}
             {g.cadence === 'monthly' && <MonthlyChip />}
-            {g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}
+            {g.flagged && <OverChip title={g.flag_reason} />}
           </span>
         </span>
         <span className="ops-row__end"><span className="ops-row__amt">{fmtMoney(g.amount_cents)}</span></span>
       </button>
       {open && (
         <div className="ops-body" id={bodyId}>
-          {(g.method || g.note) && (
+          {(g.method || shownNote(g.note)) && (
             <p className="ops-chips">
-              {g.method && <span className="chip">{g.method}</span>}
-              {g.note && <span className="ops-meta">{g.note}</span>}
+              {g.method && <span className="chip">{methodWord(g.method)}</span>}
+              {shownNote(g.note) && <span className="ops-meta">{shownNote(g.note)}</span>}
             </p>
           )}
-          {g.flagged && g.flag_reason && <p className="ops-meta">{g.flag_reason}</p>}
-          <div className="ops-actions">
-            <Link className="btn btn-quiet ops-tap ops-link" to={`/people/${g.person_id}`}>Donor</Link>
-            <button type="button" className="btn btn-quiet ops-tap" onClick={onVoid}>Void</button>
-          </div>
+          {g.flagged && <p className="ops-over" title={g.flag_reason || undefined}>{overLine(parseOver(g.flag_reason))}</p>}
+          <GiftActions personId={g.person_id} onVoid={onVoid} />
         </div>
       )}
     </li>
+  );
+}
+
+// ── "Donate page · Copy link · Open · Set up" — the link, never the path ──
+function DonateLink({ slug }) {
+  const [copied, setCopied] = useState(null); // null | 'ok' | 'show'
+  const url = slug ? `${window.location.origin}/d/${slug}` : null;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied('ok');
+    } catch {
+      setCopied('show'); // no clipboard (http, old browser) — show it to copy by hand
+    }
+  };
+  return (
+    <div className="ops-donate">
+      <div className="ops-actions">
+        <span className="ops-donate__label">Donate page</span>
+        {url && (
+          <button type="button" className="btn btn-quiet ops-tap" onClick={copy}>
+            {copied === 'ok' ? 'Copied ✓' : 'Copy link'}
+          </button>
+        )}
+        {url && <a className="btn btn-quiet ops-tap" href={url} target="_blank" rel="noopener noreferrer">Open</a>}
+        <Link className="btn btn-quiet ops-tap" to="/outreach/website">Set up</Link>
+      </div>
+      {copied === 'show' && (
+        <input className="input mono" readOnly value={url} aria-label="Donate page link"
+          onFocus={(e) => e.currentTarget.select()} autoFocus />
+      )}
+    </div>
   );
 }
 
@@ -455,7 +535,6 @@ export default function Money() {
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
-  const [pledgeNote, setPledgeNote] = useState(null);
   const [more, setMore] = useState(false);
   const [allGifts, setAllGifts] = useState(false);
   const toastTimer = useRef(null);
@@ -509,30 +588,45 @@ export default function Money() {
     invalidate();
   };
 
-  const onSaved = (res) => {
-    setBanner(res.compliance?.over ? res.gift.flag_reason : null);
+  // toast({ text, undo? }) — one at a time, 7s.
+  const showToast = (t) => {
+    clearTimeout(toastTimer.current);
+    setToast(t);
+    toastTimer.current = setTimeout(() => setToast(null), 7000);
+  };
+  // A cap crossing: one line, the legal wording kept as the tooltip.
+  const overBanner = (res, name) => (res.compliance?.over
+    ? { name, line: overLine(res.compliance), reason: res.gift?.flag_reason, giftId: res.gift?.id }
+    : null);
+
+  const onSaved = (res, donor) => {
+    const g = res.gift || {};
+    setBanner(overBanner(res, donor?.name));
     setParams({});
     invalidate();
+    showToast({
+      text: `✓ ${fmtBig(g.amount_cents)} from ${donor?.name ?? 'donor'}`,
+      undo: g.id ? () => voidGift(g.id) : null,
+    });
   };
 
   const onReceived = (res, p) => {
     const g = res.gift || {};
-    setPledgeNote(`Recorded ${fmtMoney(g.amount_cents ?? p.amount_cents)} from ${p.name}${g.flagged ? ' — flagged' : ''}`);
-    setBanner(res.compliance?.over ? g.flag_reason : null);
+    setBanner(overBanner(res, p.name));
     refreshPledges();
+    showToast({ text: `✓ ${fmtBig(g.amount_cents ?? p.amount_cents)} from ${p.name}` });
   };
   const onPledgeChanged = (text) => {
-    setPledgeNote(text);
     refreshPledges();
+    showToast({ text });
   };
 
   const voidGift = async (id) => {
     setError(null);
     setOpenId(null);
     setVoided((s) => new Set(s).add(id)); // optimistic remove
-    clearTimeout(toastTimer.current);
-    setToast({ id });
-    toastTimer.current = setTimeout(() => setToast(null), 7000);
+    setBanner((b) => (b?.giftId === id ? null : b)); // that gift no longer counts
+    showToast({ text: 'Gift voided', undo: () => undoVoid(id) });
     try {
       await action('gift.void', { id });
       // The donor's profile shows gifts, yearly totals and the donor tier.
@@ -545,10 +639,7 @@ export default function Money() {
     }
   };
 
-  const undoVoid = async () => {
-    const { id } = toast;
-    clearTimeout(toastTimer.current);
-    setToast(null);
+  const undoVoid = async (id) => {
     try {
       await action('gift.restore', { id });
       setVoided((s) => { const n = new Set(s); n.delete(id); return n; });
@@ -587,7 +678,9 @@ export default function Money() {
 
       {banner && (
         <div className="banner" role="status">
-          <span><strong>Over the limit.</strong> {banner}</span>
+          <span title={banner.reason || undefined}>
+            <strong>Over limit</strong>{banner.name ? ` · ${banner.name}` : ''} · {banner.line}
+          </span>
           <button type="button" className="btn btn-quiet ops-tap" onClick={() => setBanner(null)}>Dismiss</button>
         </div>
       )}
@@ -602,7 +695,6 @@ export default function Money() {
         {weekCents > 0 && <span className="sub">+{fmtBig(weekCents)} this week</span>}
       </div>
 
-      {pledgeNote && <p className="ops-done" role="status">✓ {pledgeNote}</p>}
       {pledges.isError && <p className="error">{pledges.error.message}</p>}
       {needs > 0 && (
         <section className="ops-needs" aria-labelledby="needs-head">
@@ -611,7 +703,9 @@ export default function Money() {
             {openPledges.map((p) => (
               <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onPledgeChanged} />
             ))}
-            {flagged.map((f) => <FlaggedRow key={f.id} f={f} personId={personOf[f.id]} />)}
+            {flagged.map((f) => (
+              <FlaggedRow key={f.id} f={f} personId={personOf[f.id]} onVoid={() => voidGift(f.id)} />
+            ))}
           </ul>
         </section>
       )}
@@ -655,10 +749,7 @@ export default function Money() {
         </button>
         {more && (
           <div id="money-more" className="ops-more-body">
-            <p>
-              Donate page{slug ? <>: <a className="mono" href={`/d/${slug}`} target="_blank" rel="noopener noreferrer">/d/{slug}</a></> : null}
-              {' · '}<Link to="/outreach/website">Set up</Link>
-            </p>
+            <DonateLink slug={slug} />
             {closedPledges.length > 0 && (
               <>
                 <span className="eyebrow ops-label">Paid &amp; closed pledges · {closedPledges.length}</span>
@@ -675,8 +766,13 @@ export default function Money() {
 
       {toast && (
         <div className="toast ops-toast" role="status">
-          <span>Gift voided</span>
-          <button type="button" className="btn ops-tap" onClick={undoVoid}>Undo</button>
+          <span>{toast.text}</span>
+          {toast.undo && (
+            <button type="button" className="btn ops-tap"
+              onClick={() => { const u = toast.undo; clearTimeout(toastTimer.current); setToast(null); u(); }}>
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>

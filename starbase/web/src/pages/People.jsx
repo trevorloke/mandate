@@ -8,13 +8,13 @@
 // People is a desk screen: volunteers' /people opens Calls.
 // Shared widgets + helpers are exported from here for Person.jsx.
 // Ratings always render with the shared RatingChip / ratingSay words.
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useSearchParams, useLocation, Link, Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
-import RatingButtons, { RatingChip, ratingSay, ratingWho } from '../components/RatingButtons.jsx';
+import RatingButtons, { RatingChip, ratingSay, ratingText, ratingWho } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
-import { apiGet, action } from '../api.js';
+import { apiGet, action, ApiError } from '../api.js';
 import './people.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,6 +84,28 @@ export const ratingLine = (code) => {
   if (!r) return '';
   return r.band === 'opposed' && r.code !== '4' ? `Opposed · ${ratingWho(code)}` : ratingSay(code);
 };
+
+// A rating where there's room for its meaning: the chip plus the button's
+// word in small text — "1 Strong yes", "3 Undecided". "4 · Locke" already
+// says who, so it stays a chip.
+export function RatingTag({ code }) {
+  const r = ratingByCode(code);
+  if (!r) return null;
+  const named = r.band === 'opposed' && r.code !== '4';
+  return (
+    <span className="pp-rtag">
+      <RatingChip code={code} who />
+      {!named && <span className="pp-rtag__word" aria-hidden="true">{ratingSay(code)}</span>}
+    </span>
+  );
+}
+
+// No signal: the query is paused (react-query knew it was offline) or the
+// fetch itself failed (a TypeError, not an ApiError) — and nothing is cached.
+// It refetches by itself once the phone is back online.
+export const noSignal = (q) => !q.data && (
+  (q.isPending && q.fetchStatus === 'paused') || (q.isError && !(q.error instanceof ApiError))
+);
 
 export const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 export const isDnc = (p) => Array.isArray(p?.tags) && p.tags.includes('do-not-contact');
@@ -396,10 +418,11 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
   }, [onClose, phone]);
   const pick = (key, value) => update({ [key]: f[key] === value ? null : value });
   const anyPicked = Boolean(f.rating || f.tag || f.role || f.has);
-  // Who they vote for, tags and roles are the long lists: one tap away, open if one is picked.
+  // Who they vote for and volunteer roles are the long lists: one tap away,
+  // open if one is picked. Tags in use sit on the first level.
   const whoPicked = WHO_CODES.includes(f.rating);
-  const [moreOpen, setMoreOpen] = useState(Boolean(f.tag || f.role || whoPicked));
-  const morePicked = [whoPicked, f.tag, f.role].filter(Boolean).length;
+  const [moreOpen, setMoreOpen] = useState(Boolean(f.role || whoPicked));
+  const morePicked = [whoPicked, f.role].filter(Boolean).length;
   const moreId = useId();
   const chip = (key, value, label, band) => (
     <button key={value} type="button" className={`chip-btn pp-pick${f[key] === value ? ' on' : ''}`}
@@ -437,6 +460,12 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
               {chip('has', 'location', 'Map pin')}
             </div>
           </fieldset>
+          {tagOptions.length > 0 && (
+            <fieldset className="pp-group">
+              <legend className="eyebrow">Tag</legend>
+              <div className="pp-group__opts">{tagOptions.map((t) => chip('tag', t, tagWord(t)))}</div>
+            </fieldset>
+          )}
           <button type="button" className="pp-morefilters disclose disclose--inline" aria-expanded={moreOpen} aria-controls={moreId}
             onClick={() => setMoreOpen((v) => !v)}>
             More filters
@@ -447,10 +476,6 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
               <fieldset className="pp-group">
                 <legend className="eyebrow">Voting for…</legend>
                 <div className="pp-group__opts">{WHO_CODES.map((c) => chip('rating', c, ratingWho(c), 'opposed'))}</div>
-              </fieldset>
-              <fieldset className="pp-group">
-                <legend className="eyebrow">Tag</legend>
-                <div className="pp-group__opts">{tagOptions.map((t) => chip('tag', t, tagWord(t)))}</div>
               </fieldset>
               <fieldset className="pp-group">
                 <legend className="eyebrow">Volunteer role</legend>
@@ -613,10 +638,16 @@ function PeopleList() {
   const n = page.key === qsKey ? page.n : PAGE;
   const shown = rows.slice(0, n);
 
-  // Tag vocabulary: suggested first, then anything seen in the results.
-  const seen = new Set(rows.flatMap((p) => p.tags || []));
-  if (f.tag) seen.add(f.tag);
-  const tagOptions = [...SUGGESTED_TAGS, ...[...seen].filter((t) => !SUGGESTED_TAGS.includes(t)).sort()];
+  // Tags in use: every tag seen in a result on this visit (so picking one
+  // doesn't hide the others), suggested ones first. Unused tags match no one.
+  const seenRef = useRef(new Set());
+  for (const p of rows) for (const t of p.tags || []) seenRef.current.add(t);
+  if (f.tag) seenRef.current.add(f.tag);
+  const seen = seenRef.current;
+  const tagOptions = [
+    ...SUGGESTED_TAGS.filter((t) => seen.has(t)),
+    ...[...seen].filter((t) => !SUGGESTED_TAGS.includes(t)).sort((a, b) => tagWord(a).localeCompare(tagWord(b))),
+  ];
 
   const picked = [f.rating, f.tag, f.role, f.has].filter(Boolean).length;
   const anyFilter = Boolean(picked || f.q);
@@ -628,6 +659,7 @@ function PeopleList() {
     return <Navigate replace to={`/calls${carry(f, { channel: bank === 'text' ? 'text' : null })}`} />;
   }
 
+  const offline = noSignal(persons);
   const count = persons.isLoading ? '…' : rows.length >= LIMIT ? `${LIMIT}+` : String(rows.length);
   // The profile's back link returns to this list, filters and all.
   const back = { from: { to: `/people${carry(f, { has: f.has })}`, label: 'People' } };
@@ -673,11 +705,13 @@ function PeopleList() {
 
       <FilterChips f={f} update={update} />
 
-      <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}</p>
+      {!offline && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}</p>}
 
-      {persons.isError && <p className="error">{persons.error.message}</p>}
+      {persons.isError && !offline && <p className="error">{persons.error.message}</p>}
 
-      {rows.length === 0 && !persons.isLoading ? (
+      {offline ? (
+        <p className="pp-offline" role="status">No signal — the list loads when you’re back online.</p>
+      ) : rows.length === 0 && !persons.isLoading ? (
         <div className="pp-empty">
           <p>{anyFilter ? 'No one matches.' : 'No people yet.'}</p>
           {anyFilter ? (
@@ -722,7 +756,7 @@ function PeopleList() {
                     {p.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
                     {second && <span className="pp-table__second">{second}</span>}
                   </td>
-                  <td>{p.rating && <RatingChip code={p.rating} who />}</td>
+                  <td>{p.rating && <RatingTag code={p.rating} />}</td>
                   <td>
                     {p.phone
                       ? <a className="tel" href={telHref(p.phone)} onClick={(e) => e.stopPropagation()}>{p.phone}</a>
@@ -762,6 +796,26 @@ const writeDone = (map) => {
 const OUTCOME_WORD = { no_answer: 'No answer', refused: 'Refused' };
 const outcomeWord = (outcome, channel) => (outcome === 'no_answer' && channel === 'text' ? 'No reply' : OUTCOME_WORD[outcome] || outcome);
 
+// Who comes up first: never rated, then rated longest ago, so anyone rated
+// today (by you or another caller) goes to the back. Ties are shuffled per
+// caller — stable for you, different for the next caller — so two people
+// working the same list don't start on the same name.
+const hash = (s) => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  // Final mix, so the caller part of the key moves the whole order.
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return h >>> 0;
+};
+const ratedTime = (p) => {
+  const t = p.rated_at ? Date.parse(p.rated_at) : NaN;
+  return Number.isNaN(t) ? -Infinity : t;
+};
+const callOrder = (list, seed) => list
+  .map((p) => ({ p, t: ratedTime(p), h: hash(`${seed}:${p.id}`) }))
+  .sort((a, b) => (a.t === b.t ? a.h - b.h : a.t - b.t))
+  .map((x) => x.p);
+
 function CallsScreen() {
   const { me } = useOutletContext() ?? {};
   const location = useLocation();
@@ -781,7 +835,13 @@ function CallsScreen() {
     queryFn: () => apiGet(`/persons?${qs}`),
     placeholderData: keepPreviousData,
   });
-  const rows = (persons.data?.persons ?? []).filter((p) => p.phone && !isDnc(p));
+  const seed = me?.user?.id || '';
+  const list = persons.data?.persons;
+  const rows = useMemo(
+    () => callOrder((list ?? []).filter((p) => p.phone && !isDnc(p)), seed),
+    [list, seed],
+  );
+  const offline = noSignal(persons);
 
   const [done, setDone] = useState(readDone);
   const [currentId, setCurrentId] = useState(null);
@@ -795,6 +855,9 @@ function CallsScreen() {
   const [held, setHeld] = useState(null);
   const toastTimer = useRef(null);
   const cardRef = useRef(null);
+  // After a tap the next person's card is a fresh element (no button looks
+  // pressed). If focus was on the card, it moves to the new card.
+  const refocus = useRef(false);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   const markDone = (id, entry) => setDone((d) => { const next = { ...d }; if (entry) next[id] = entry; else delete next[id]; writeDone(next); return next; });
@@ -811,6 +874,23 @@ function CallsScreen() {
   const after = (i) => (i < 0 ? queue[0] || null : queue.length > 1 ? queue[(i + 1) % queue.length] : null);
   const upNext = at < 0 ? queue : queue.slice(at + 1).concat(queue.slice(0, at));
 
+  // Their own note (from the volunteer form) lives on the profile; the card
+  // shows its first line. Same cache as the profile screen.
+  const profile = useQuery({
+    queryKey: ['person', current?.id],
+    queryFn: () => apiGet(`/persons/${current.id}`),
+    enabled: Boolean(current?.id),
+    staleTime: 60_000,
+  });
+  const theirNote = profile.data?.person?.id === current?.id ? String(profile.data?.person?.note || '').trim() : '';
+
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    cardRef.current?.focus({ preventScroll: true });
+  }, [current?.id]);
+  const focusInCard = () => Boolean(cardRef.current?.contains(document.activeElement));
+
   const showToast = (text, person) => {
     setToast({ text, person });
     clearTimeout(toastTimer.current);
@@ -820,17 +900,19 @@ function CallsScreen() {
   const log = async (outcome, rating) => {
     const p = current;
     if (!p) return;
+    const inCard = focusInCard(); // read before the buttons disable for the save
     const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined });
     if (!res) return;
     const next = after(at);
+    refocus.current = inCard;
     markDone(p.id, { rating: rating || null, outcome, queued: !!res.queued });
     if (rating) setPicked((m) => ({ ...m, [p.id]: rating }));
     setHeld(null);
     setCurrentId(next?.id ?? null);
-    const what = rating ? `Rated ${rating} · ${ratingSay(rating)}` : outcomeWord(outcome, channel);
+    const what = rating ? `Rated ${ratingText(rating)}` : outcomeWord(outcome, channel);
     showToast(`${firstName(p.name)} · ${what}${res.queued ? ' · saved offline' : ''}`, p);
   };
-  const skip = () => { const next = after(at); if (next) setCurrentId(next.id); };
+  const skip = () => { const next = after(at); if (next) { refocus.current = focusInCard(); setCurrentId(next.id); } };
   const change = () => {
     const p = toast?.person;
     setToast(null);
@@ -838,6 +920,7 @@ function CallsScreen() {
     if (!p) return;
     markDone(p.id, null);
     setHeld(p);
+    refocus.current = true;
     setCurrentId(p.id);
     cardRef.current?.scrollIntoView?.({ block: 'start' });
   };
@@ -855,7 +938,7 @@ function CallsScreen() {
   return (
     <div className="cl-page">
       <div className="page-head cl-head">
-        <h1>Calls</h1>
+        <h1>{channel === 'text' ? 'Texts' : 'Calls'}</h1>
         <div className="cl-toggle" role="group" aria-label="Call or text">
           <button type="button" aria-pressed={channel === 'phone'} onClick={() => setChannel('phone')}>
             <Icon name="phone" size={18} /> Phone
@@ -868,9 +951,11 @@ function CallsScreen() {
 
       {filterChips}
 
-      {persons.isError && <p className="error">{persons.error.message}</p>}
+      {persons.isError && !offline && <p className="error">{persons.error.message}</p>}
 
-      {persons.isLoading ? (
+      {offline ? (
+        <p className="pp-offline" role="status">No signal — your list loads when you’re back online.</p>
+      ) : persons.isLoading ? (
         <p className="muted">Loading…</p>
       ) : rows.length === 0 && !current ? (
         <div className="pp-empty">
@@ -892,11 +977,12 @@ function CallsScreen() {
             </div>
           </div>
 
-          <section className="card cl-card" ref={cardRef} aria-label={`${current.name}`}>
+          {/* Keyed per person: a new card for each, so nothing carries over. */}
+          <section key={current.id} className="card cl-card" ref={cardRef} tabIndex={-1} aria-label={`${current.name}`}>
             <div className="cl-who">
               <div className="cl-who__main">
                 <Link className="cl-name" to={`/people/${current.id}`}
-                  state={{ from: { to: `${location.pathname}${location.search}`, label: 'Calls' } }}>
+                  state={{ from: { to: `${location.pathname}${location.search}`, label: channel === 'text' ? 'Texts' : 'Calls' } }}>
                   {current.name}
                 </Link>
                 <span className="cl-phone mono">{current.phone}</span>
@@ -904,6 +990,11 @@ function CallsScreen() {
                 {current.rating && !mine && (
                   <span className="cl-last">
                     Last time: {ratingLine(current.rating)}{current.rated_at ? ` · ${fmtShort(current.rated_at)}` : ''}
+                  </span>
+                )}
+                {theirNote && (
+                  <span className="cl-note" title={theirNote}>
+                    <span className="pp-sr">Their note: </span>“{theirNote.split('\n')[0]}”
                   </span>
                 )}
               </div>
@@ -944,7 +1035,7 @@ function CallsScreen() {
                 <ul className="cl-next__list">
                   {upNext.map((p) => (
                     <li key={p.id}>
-                      <button type="button" onClick={() => { setCurrentId(p.id); setListOpen(false); cardRef.current?.scrollIntoView?.({ block: 'start' }); }}>
+                      <button type="button" onClick={() => { refocus.current = true; setCurrentId(p.id); setListOpen(false); cardRef.current?.scrollIntoView?.({ block: 'start' }); }}>
                         <span>{p.name}</span>
                         {p.rating && <RatingChip code={p.rating} who />}
                       </button>
