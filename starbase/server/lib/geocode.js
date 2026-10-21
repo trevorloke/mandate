@@ -3,6 +3,7 @@
 // is the fallback. Plain fetch, no SDKs.
 //   GEOCODER=bc (default) | nominatim | off
 //   BC_GEOCODER_KEY   optional api key for higher BC rate limits
+//   BC_GEOCODER_URL   base URL (default the official service; set for a self-hosted mirror)
 //   GEOCODE_MIN_SCORE minimum BC match score to accept (default 75)
 
 const DEFAULT_CITY = 'Surrey';
@@ -13,7 +14,8 @@ const formatAddress = ({ address, unit, city, postal }) => {
 };
 
 const bc = async (q) => {
-  const url = new URL('https://geocoder.api.gov.bc.ca/addresses.json');
+  const base = (process.env.BC_GEOCODER_URL || 'https://geocoder.api.gov.bc.ca').replace(/\/$/, '');
+  const url = new URL(`${base}/addresses.json`);
   url.searchParams.set('addressString', q);
   url.searchParams.set('maxResults', '1');
   url.searchParams.set('outputSRS', '4326');
