@@ -1,6 +1,8 @@
 // Starbase server. Hono app: /api/auth (public), /api/* (workspace-scoped),
 // static web build. Exported for in-process tests via app.request().
 import { Hono } from 'hono';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import authRoutes from './routes/auth.js';
@@ -15,9 +17,11 @@ app.route('/api/auth', authRoutes);
 app.route('/', publicRoutes); // /p, /n, /v, /u, /api/public — no auth
 app.route('/api', apiRoutes);
 
-// Static web build (SPA fallback to index.html for URL routing).
-app.use('*', serveStatic({ root: './web/dist' }));
-app.get('*', serveStatic({ root: './web/dist', path: 'index.html' }));
+// Static web build (SPA fallback to index.html for URL routing). Resolved
+// from this file, not the working directory, so any launch location works.
+const WEB_ROOT = relative(process.cwd(), fileURLToPath(new URL('../web/dist', import.meta.url))) || '.';
+app.use('*', serveStatic({ root: WEB_ROOT }));
+app.get('*', serveStatic({ root: WEB_ROOT, path: 'index.html' }));
 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
 if (isMain) {

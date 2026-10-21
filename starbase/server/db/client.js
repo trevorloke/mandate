@@ -54,6 +54,11 @@ const createPglite = async () => {
   // campaign; the test runner and STARBASE_DATA=memory use an in-memory DB.
   const testing = !!process.env.NODE_TEST_CONTEXT;
   const dataDir = process.env.STARBASE_DATA || (testing ? 'memory' : './data/starbase');
+  if (dataDir !== 'memory') {
+    // PGlite won't create parent folders; a first run must not crash.
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(dataDir, { recursive: true });
+  }
   const db = dataDir === 'memory' ? new PGlite() : new PGlite(dataDir);
   return {
     kind: 'pglite',
