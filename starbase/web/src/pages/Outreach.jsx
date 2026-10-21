@@ -1,24 +1,30 @@
-// Outreach — the campaign's outward-facing plumbing, in four tabs:
+// Outreach — the campaign's outward-facing plumbing, in five tabs:
 //   newsletter  subscribers, compose + send, share the signup link
 //   press       media contacts (tag 'media' + email), press releases
 //   petitions   public petition pages, signatures, new petition
-//   website     the Imagine Surrey bridge: site link, public pages, embed code
+//   events      public RSVP pages, RSVP lists, check-in after the event
+//   website     the Imagine Surrey bridge: site link, public pages, donations,
+//               embed code
 // Tabs live in the URL (/outreach/:tab). Everything is react-query driven;
 // every write invalidates and toasts.
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { VOLUNTEER_ROLES } from '@starbase/shared/canvass';
-import { apiGet, action } from '../api.js';
+import { apiGet, action, fmtMoney } from '../api.js';
 import './outreach.css';
 
 const TABS = [
   { key: 'newsletter', label: 'Newsletter' },
   { key: 'press',      label: 'Press' },
   { key: 'petitions',  label: 'Petitions' },
+  { key: 'events',     label: 'Events' },
   { key: 'website',    label: 'Website' },
 ];
 const DESK_ROLES = ['manager', 'treasurer', 'staff'];
+// Volunteers get 403 on /api/subscriptions, /api/blasts and signature lists,
+// so they only see the tabs whose reads they're allowed.
+const VOLUNTEER_TABS = new Set(['petitions', 'events', 'website']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -370,7 +376,7 @@ function NewsletterTab({ me, canWrite, toast }) {
       <div className="card">
         <div className="ot-head">
           <span className="eyebrow">Subscriber list</span>
-          <span className="ot-note">{subs.isLoading ? 'Loading…' : `${list.length} on file`}</span>
+          <span className="ot-note">{subs.isPending ? 'Loading…' : `${list.length} on file`}</span>
         </div>
         {subs.isError && <p className="error">{subs.error.message}</p>}
         <div className="ot-scroll">
@@ -404,7 +410,7 @@ function NewsletterTab({ me, canWrite, toast }) {
                   )}
                 </tr>
               ))}
-              {list.length === 0 && !subs.isLoading && (
+              {list.length === 0 && !subs.isPending && (
                 <tr><td colSpan={canWrite ? 6 : 5} className="ot-empty">No subscribers yet — share the signup link or add one below.</td></tr>
               )}
             </tbody>
@@ -437,7 +443,7 @@ function NewsletterTab({ me, canWrite, toast }) {
           <span className="ot-note">Newsletters and press releases, newest first</span>
         </div>
         {blasts.isError && <p className="error">{blasts.error.message}</p>}
-        <BlastsTable blasts={blasts.data?.blasts} loading={blasts.isLoading} />
+        <BlastsTable blasts={blasts.data?.blasts} loading={blasts.isPending} />
       </div>
     </>
   );
@@ -489,7 +495,7 @@ function PressTab({ canWrite, toast }) {
           <span className="eyebrow">Past press releases</span>
         </div>
         {blasts.isError && <p className="error">{blasts.error.message}</p>}
-        <BlastsTable blasts={blasts.data?.blasts} loading={blasts.isLoading} kindFilter="press" />
+        <BlastsTable blasts={blasts.data?.blasts} loading={blasts.isPending} kindFilter="press" />
       </div>
     </>
   );
@@ -504,7 +510,7 @@ function Signatures({ petitionId }) {
     queryFn: () => apiGet(`/petitions/${petitionId}/signatures`),
   });
   const rows = q.data?.signatures ?? [];
-  if (q.isLoading) return <p className="ot-note">Loading signatures…</p>;
+  if (q.isPending) return <p className="ot-note">Loading signatures…</p>;
   if (q.isError) return <p className="error">{q.error.message}</p>;
   if (rows.length === 0) return <p className="ot-empty">No signatures yet.</p>;
   return (
@@ -551,9 +557,11 @@ function PetitionRow({ p, slug, canWrite, toast }) {
       {p.body && <p className="ot-lede ot-body" style={{ marginTop: 'var(--s-1)' }}>{p.body}</p>}
       <LinkRow href={url} onCopied={(ok) => toast(ok ? 'Petition link copied' : 'Could not copy — select the link instead')} />
       <div className="ot-petition-actions">
-        <button type="button" className="btn ot-btn-tap" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {open ? 'Hide signatures' : 'View signatures'}
-        </button>
+        {canWrite && (
+          <button type="button" className="btn ot-btn-tap" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+            {open ? 'Hide signatures' : 'View signatures'}
+          </button>
+        )}
         {canWrite && (
           <button type="button" className="btn ot-switch ot-btn-tap" aria-pressed={p.active} disabled={act.busy} onClick={toggle}
             title={p.active ? 'Close to new signatures' : 'Reopen for signatures'}>
@@ -563,7 +571,7 @@ function PetitionRow({ p, slug, canWrite, toast }) {
         <span className="ot-slug-hint">slug: {p.slug}</span>
         {act.error && <span className="error">{act.error}</span>}
       </div>
-      {open && <div className="ot-expander"><Signatures petitionId={p.id} /></div>}
+      {open && canWrite && <div className="ot-expander"><Signatures petitionId={p.id} /></div>}
     </li>
   );
 }
@@ -600,7 +608,7 @@ function NewPetitionForm({ onCreated }) {
         </div>
         <div className="field" style={{ flex: '1 1 200px' }}>
           <label htmlFor="pet-slug">Slug (in the public link)</label>
-          <input id="pet-slug" className="input mono" required value={slug} pattern="[a-z0-9-]{2,60}"
+          <input id="pet-slug" className="input mono" required value={slug} pattern="[a-z0-9\-]{2,60}"
             onChange={(e) => { setSlugTouched(true); setSlug(slugInput(e.target.value)); }}
             onBlur={() => setSlug((v) => v.replace(/^-+|-+$/g, ''))}
             placeholder="skytrain-to-newton" aria-describedby="pet-slug-hint" />
@@ -630,7 +638,7 @@ function PetitionsTab({ me, canWrite, toast }) {
       <div className="ot-row">
         <div className="card ot-stat">
           <span className="eyebrow">Signatures</span>
-          <div className="n">{pets.isLoading ? '…' : totalSigs}</div>
+          <div className="n">{pets.isPending ? '…' : totalSigs}</div>
           <div className="sub">{rows.length} {rows.length === 1 ? 'petition' : 'petitions'} · {rows.filter((p) => p.active).length} active</div>
         </div>
         <div className="card">
@@ -654,11 +662,471 @@ function PetitionsTab({ me, canWrite, toast }) {
         {pets.isError && <p className="error">{pets.error.message}</p>}
         <ul className="ot-petitions">
           {rows.map((p) => <PetitionRow key={p.id} p={p} slug={slug} canWrite={canWrite} toast={toast} />)}
-          {rows.length === 0 && !pets.isLoading && (
+          {rows.length === 0 && !pets.isPending && (
             <li className="ot-empty">No petitions yet{canWrite ? ' — create the first one above.' : '.'}</li>
           )}
         </ul>
       </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENTS — public RSVP pages, the door list, check-in afterwards
+// ─────────────────────────────────────────────────────────────────────────────
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// <input type="datetime-local"> speaks wall-clock time with no zone; the API
+// wants ISO. Attach this browser's offset for that date (DST-safe), so
+// "6:30 pm" means 6:30 pm here.
+const localInputToISO = (v) => {
+  if (!v) return null;
+  const s = v.length === 16 ? `${v}:00` : v.slice(0, 19);
+  const d = new Date(s); // no zone → parsed as local time
+  if (Number.isNaN(d.getTime())) return null;
+  const off = -d.getTimezoneOffset();
+  const a = Math.abs(off);
+  return `${s}${off >= 0 ? '+' : '-'}${pad2(Math.floor(a / 60))}:${pad2(a % 60)}`;
+};
+const isoToLocalInput = (ts) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+
+const fmtEventWhen = (starts, ends) => {
+  const a = new Date(starts);
+  if (Number.isNaN(a.getTime())) return '—';
+  const thisYear = a.getFullYear() === new Date().getFullYear();
+  const day = (d) => d.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', ...(thisYear ? {} : { year: 'numeric' }) });
+  const time = (d) => d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+  const b = ends ? new Date(ends) : null;
+  if (!b || Number.isNaN(b.getTime())) return `${day(a)} · ${time(a)}`;
+  if (a.toDateString() === b.toDateString()) return `${day(a)} · ${time(a)}–${time(b)}`;
+  return `${day(a)} ${time(a)} – ${day(b)} ${time(b)}`;
+};
+
+// Upcoming = hasn't started yet, or is still running (ends later). The public
+// page closes RSVPs at the start time either way.
+const isUpcoming = (e, now = Date.now()) =>
+  new Date(e.starts_at).getTime() >= now || (e.ends_at && new Date(e.ends_at).getTime() >= now);
+
+// A small "Today / Tomorrow / In 3 days / On now" marker for upcoming events.
+const soonLabel = (e, now = Date.now()) => {
+  const start = new Date(e.starts_at);
+  if (start.getTime() < now) return 'On now';
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const that = new Date(start); that.setHours(0, 0, 0, 0);
+  const days = Math.round((that - today) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days <= 14) return `In ${days} days`;
+  return null;
+};
+
+const RSVP_STATUSES = [
+  { code: 'going', label: 'Going' },
+  { code: 'attended', label: 'Attended' },
+  { code: 'cancelled', label: 'Cancelled' },
+];
+
+function CapacityMeter({ going, capacity, attended, past }) {
+  const full = capacity && going >= capacity;
+  const pct = capacity ? Math.min(100, Math.round((going / capacity) * 100)) : 0;
+  return (
+    <div className="ot-meter" data-full={full ? 'true' : 'false'}>
+      <div className="ot-meter-n">
+        <strong>{going}</strong>
+        {capacity ? <span className="of"> / {capacity}</span> : null}
+        <span className="lbl"> {past ? 'said yes' : 'going'}</span>
+        {full && !past && <span className="chip chip-danger">full</span>}
+      </div>
+      {capacity ? (
+        <div className="ot-meter-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></div>
+      ) : (
+        <div className="ot-meter-sub">no cap</div>
+      )}
+      {attended > 0 && <div className="ot-meter-sub">{attended} checked in</div>}
+    </div>
+  );
+}
+
+function RsvpList({ eventId, canWrite }) {
+  const queryClient = useQueryClient();
+  const key = ['rsvps', eventId];
+  const q = useQuery({ queryKey: key, queryFn: () => apiGet(`/campaign-events/${eventId}/rsvps`) });
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(null);
+  const rows = q.data?.rsvps ?? [];
+
+  const setStatus = async (r, status) => {
+    if (status === r.status) return;
+    setBusyId(r.id);
+    setError(null);
+    // A refetch already in flight would land after this and undo the pick.
+    await queryClient.cancelQueries({ queryKey: key });
+    queryClient.setQueryData(key,(d) => d && { ...d, rsvps: d.rsvps.map((x) => (x.id === r.id ? { ...x, status } : x)) });
+    try {
+      await action('rsvp.setStatus', { id: r.id, status });
+    } catch (e) {
+      setError(`${r.name}: ${e.message}`);
+    } finally {
+      setBusyId(null);
+      queryClient.invalidateQueries({ queryKey: key });
+      queryClient.invalidateQueries({ queryKey: ['campaign-events'] });
+      queryClient.invalidateQueries({ queryKey: ['brief'] });
+    }
+  };
+
+  if (q.isPending) return <p className="ot-note">Loading RSVPs…</p>;
+  if (q.isError) return <p className="error">{q.error.message}</p>;
+  if (rows.length === 0) return <p className="ot-empty">No RSVPs yet — share the link.</p>;
+
+  const heads = (s) => rows.filter((r) => r.status === s).reduce((n, r) => n + 1 + (r.guests || 0), 0);
+  return (
+    <>
+      <p className="ot-rsvp-sum">
+        <span><strong>{rows.length}</strong> {rows.length === 1 ? 'RSVP' : 'RSVPs'}</span>
+        <span>{heads('going')} going</span>
+        <span>{heads('attended')} attended</span>
+        {heads('cancelled') > 0 && <span>{heads('cancelled')} cancelled</span>}
+        <span className="muted">counts include guests</span>
+      </p>
+      <ul className="ot-rsvps">
+        {rows.map((r) => (
+          <li key={r.id} className="ot-rsvp" data-status={r.status}>
+            <div className="who">
+              <span className="name">
+                {r.person_id ? <Link to={`/people/${r.person_id}`}>{r.name}</Link> : r.name}
+                {r.guests > 0 && <span className="guests"> +{r.guests}</span>}
+              </span>
+              <span className="contact">
+                {r.email && <a className="email" href={`mailto:${r.email}`}>{r.email}</a>}
+                {r.phone && <a className="email" href={`tel:${String(r.phone).replace(/[^\d+]/g, '')}`}>{r.phone}</a>}
+                {!r.email && !r.phone && <span className="muted">no contact given</span>}
+                <span className="when">{fmtDay(r.created_at)}</span>
+              </span>
+            </div>
+            {canWrite ? (
+              <select
+                className="input ot-rsvp-status"
+                aria-label={`Status for ${r.name}`}
+                value={r.status}
+                disabled={busyId === r.id}
+                onChange={(e) => setStatus(r, e.target.value)}
+              >
+                {RSVP_STATUSES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+              </select>
+            ) : (
+              <StatusChip status={r.status} />
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && <p className="error">{error}</p>}
+    </>
+  );
+}
+
+function EventForm({ ev, wsSlug, onDone, onCancel }) {
+  const queryClient = useQueryClient();
+  const editing = !!ev;
+  const [title, setTitle] = useState(ev?.title || '');
+  const [slug, setSlug] = useState(ev?.slug || '');
+  const [slugTouched, setSlugTouched] = useState(editing);
+  const [starts, setStarts] = useState(isoToLocalInput(ev?.starts_at));
+  const [ends, setEnds] = useState(isoToLocalInput(ev?.ends_at));
+  const [location, setLocation] = useState(ev?.location || '');
+  const [capacity, setCapacity] = useState(ev?.capacity ? String(ev.capacity) : '');
+  const [description, setDescription] = useState(ev?.description || '');
+  const [isPublic, setIsPublic] = useState(ev ? !!ev.public : true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const idp = editing ? `ev-${ev.id.slice(0, 8)}` : 'ev-new';
+
+  const onTitle = (v) => { setTitle(v); if (!slugTouched) setSlug(slugify(v)); };
+  const cleanSlug = slug.replace(/^-+|-+$/g, '');
+  const slugOk = /^[a-z0-9-]{2,60}$/.test(cleanSlug);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    const startsISO = localInputToISO(starts);
+    if (!startsISO) { setError('Pick a start date and time.'); return; }
+    const endsISO = ends ? localInputToISO(ends) : null;
+    if (endsISO && new Date(endsISO) <= new Date(startsISO)) { setError('The end time has to be after the start.'); return; }
+    if (editing && ev.ends_at && !endsISO) { setError('An end time can’t be removed once set — change it instead.'); return; }
+    const capText = capacity.trim();
+    const cap = capText ? Number(capText) : null;
+    if (capText && (!Number.isInteger(cap) || cap < 1)) { setError('Capacity is a whole number of people, like 40 — or leave it blank for no limit.'); return; }
+    if (editing && ev.capacity && cap == null) { setError('Capacity can’t be removed once set — enter a larger number instead.'); return; }
+
+    const input = editing
+      ? {
+          id: ev.id,
+          title: title.trim(),
+          description: description.trim(),
+          location: location.trim(),
+          starts_at: startsISO,
+          ends_at: endsISO || undefined,
+          capacity: cap ?? undefined,
+          public: isPublic,
+        }
+      : {
+          slug: cleanSlug,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          location: location.trim() || undefined,
+          starts_at: startsISO,
+          ends_at: endsISO || undefined,
+          capacity: cap ?? undefined,
+          public: isPublic,
+        };
+    setBusy(true);
+    try {
+      const res = await action(editing ? 'cevent.update' : 'cevent.create', input);
+      queryClient.invalidateQueries({ queryKey: ['campaign-events'] });
+      queryClient.invalidateQueries({ queryKey: ['brief'] });
+      onDone?.(res, input);
+    } catch (err) {
+      setError(err.status === 409 ? `${err.message} — change the link and try again.` : err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className={editing ? 'ot-event-form' : 'card ot-event-form'} onSubmit={submit}>
+      <span className="eyebrow">{editing ? 'Edit event' : 'New event'}</span>
+      <div className="form-row">
+        <div className="field" style={{ flex: '2 1 240px' }}>
+          <label htmlFor={`${idp}-title`}>Title</label>
+          <input id={`${idp}-title`} className="input" required maxLength={300} value={title}
+            onChange={(e) => onTitle(e.target.value)} placeholder="Town hall: transit in Newton" />
+        </div>
+        {!editing && (
+          <div className="field" style={{ flex: '1 1 200px' }}>
+            <label htmlFor={`${idp}-slug`}>Link (in the public address)</label>
+            <input id={`${idp}-slug`} className="input mono" required value={slug} pattern="[a-z0-9\-]{2,60}"
+              autoCapitalize="none" spellCheck={false}
+              onChange={(e) => { setSlugTouched(true); setSlug(slugInput(e.target.value)); }}
+              onBlur={() => setSlug((v) => v.replace(/^-+|-+$/g, ''))}
+              placeholder="newton-town-hall" aria-describedby={`${idp}-slug-hint`} />
+            <span id={`${idp}-slug-hint`} className="ot-slug-hint">/e/{wsSlug}/{cleanSlug || '…'}</span>
+          </div>
+        )}
+      </div>
+      {editing && (
+        <p className="ot-slug-hint" style={{ margin: '0 0 var(--s-3)' }}>Link: /e/{wsSlug}/{ev.slug} · set when the event was created</p>
+      )}
+      <div className="form-row">
+        <div className="field">
+          <label htmlFor={`${idp}-starts`}>Starts</label>
+          <input id={`${idp}-starts`} className="input mono" type="datetime-local" required value={starts}
+            onChange={(e) => setStarts(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor={`${idp}-ends`}>Ends (optional)</label>
+          <input id={`${idp}-ends`} className="input mono" type="datetime-local" value={ends} min={starts || undefined}
+            onChange={(e) => setEnds(e.target.value)} />
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="field" style={{ flex: '2 1 240px' }}>
+          <label htmlFor={`${idp}-loc`}>Location</label>
+          <input id={`${idp}-loc`} className="input" maxLength={400} value={location}
+            onChange={(e) => setLocation(e.target.value)} placeholder="Newton Recreation Centre, 13730 72 Ave" />
+        </div>
+        <div className="field" style={{ flex: '1 1 120px' }}>
+          <label htmlFor={`${idp}-cap`}>Capacity</label>
+          <input id={`${idp}-cap`} className="input mono" inputMode="numeric" value={capacity}
+            onChange={(e) => setCapacity(e.target.value.replace(/[^\d]/g, ''))} placeholder="no limit" />
+        </div>
+      </div>
+      <div className="field">
+        <label htmlFor={`${idp}-desc`}>Description</label>
+        <textarea id={`${idp}-desc`} className="input" rows={3} maxLength={8000} value={description}
+          onChange={(e) => setDescription(e.target.value)} placeholder="What it is, who should come, what to bring." />
+      </div>
+      <label className="ot-check" htmlFor={`${idp}-public`}>
+        <input id={`${idp}-public`} type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
+        <span>
+          <strong>Public page</strong>
+          <span className="ot-hint"> — anyone with the link can RSVP. Untick for a team-only event.</span>
+        </span>
+      </label>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="ot-actions">
+        <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy || !title.trim() || !starts || (!editing && !slugOk)}>
+          {busy ? 'Saving…' : editing ? 'Save changes' : 'Create event'}
+        </button>
+        <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function EventRow({ ev, wsSlug, canWrite, toast, past }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const act = useAction(() => {
+    queryClient.invalidateQueries({ queryKey: ['campaign-events'] });
+    queryClient.invalidateQueries({ queryKey: ['brief'] });
+  });
+  const url = `${origin()}/e/${wsSlug}/${ev.slug}`;
+  const soon = past ? null : soonLabel(ev);
+
+  const remove = async () => {
+    const res = await act.run('cevent.delete', { id: ev.id });
+    if (!res) return;
+    queryClient.removeQueries({ queryKey: ['rsvps', ev.id] });
+    toast(`Deleted “${ev.title}”`);
+  };
+
+  return (
+    <li className={`ot-event${past ? ' past' : ''}`}>
+      <div className="ot-event-head">
+        <div className="ot-event-main">
+          <h3 className="title">{ev.title}</h3>
+          <div className="when">
+            {fmtEventWhen(ev.starts_at, ev.ends_at)}
+            {soon && <span className="chip chip-warn">{soon}</span>}
+            {!ev.public && <span className="chip ot-chip-ghost">team only</span>}
+          </div>
+          {ev.location && <div className="where">{ev.location}</div>}
+        </div>
+        <CapacityMeter going={ev.going || 0} capacity={ev.capacity} attended={ev.attended || 0} past={past} />
+      </div>
+
+      {editing ? (
+        <EventForm
+          ev={ev}
+          wsSlug={wsSlug}
+          onCancel={() => setEditing(false)}
+          onDone={(res, input) => { setEditing(false); toast(`Saved “${input.title}”`); }}
+        />
+      ) : (
+        <>
+          {ev.description && <p className="ot-lede ot-body ot-event-desc">{ev.description}</p>}
+          {ev.public && !past && (
+            <LinkRow label="RSVP page" href={url} onCopied={(ok) => toast(ok ? 'Event link copied' : 'Could not copy — select the link instead')} />
+          )}
+          {!ev.public && !past && (
+            <p className="ot-note">No public page — only the team sees this event.{canWrite ? ' Edit it and tick “Public page” to share an RSVP link.' : ''}</p>
+          )}
+        </>
+      )}
+
+      {!editing && (
+        <div className="ot-petition-actions">
+          {canWrite && (
+            <button type="button" className="btn ot-btn-tap" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+              {open ? 'Hide RSVPs' : past ? 'RSVPs & check-in' : 'RSVPs'}
+            </button>
+          )}
+          {canWrite && !confirmDelete && (
+            <>
+              <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => { setEditing(true); setConfirmDelete(false); }}>Edit</button>
+              <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => setConfirmDelete(true)}>Delete</button>
+            </>
+          )}
+          {confirmDelete && (
+            <div className="ot-confirm ot-confirm-danger" role="group" aria-label="Confirm delete">
+              <span>Delete “{ev.title}”?{ev.public && !past ? ' Its RSVP page stops working.' : ''} People who RSVP’d stay in People.</span>
+              <button type="button" className="btn ot-btn-tap ot-btn-danger" disabled={act.busy} onClick={remove}>
+                {act.busy ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setConfirmDelete(false)}>Keep it</button>
+            </div>
+          )}
+          {act.error && <span className="error">{act.error}</span>}
+        </div>
+      )}
+
+      {open && canWrite && <div className="ot-expander"><RsvpList eventId={ev.id} canWrite={canWrite} /></div>}
+    </li>
+  );
+}
+
+function EventsTab({ me, canWrite, toast }) {
+  const evq = useQuery({ queryKey: ['campaign-events'], queryFn: () => apiGet('/campaign-events') });
+  const [creating, setCreating] = useState(false);
+  const [showAllPast, setShowAllPast] = useState(false);
+  const wsSlug = evq.data?.slug || me.workspace.slug;
+  const events = evq.data?.events ?? [];
+  const now = Date.now();
+  const upcoming = events.filter((e) => isUpcoming(e, now));
+  const past = events.filter((e) => !isUpcoming(e, now)).reverse(); // most recent first
+  const pastShown = showAllPast ? past : past.slice(0, 5);
+  const goingTotal = upcoming.reduce((n, e) => n + (e.going || 0), 0);
+
+  return (
+    <>
+      <div className="ot-row">
+        <div className="card ot-stat">
+          <span className="eyebrow">Upcoming events</span>
+          <div className="n">{evq.isPending ? '…' : upcoming.length}</div>
+          <div className="sub">{goingTotal} going across them · {past.length} past</div>
+        </div>
+        <div className="card">
+          <span className="eyebrow">How events work</span>
+          <p className="ot-lede">
+            Each public event gets an RSVP page. Everyone who RSVPs lands in People tagged{' '}
+            <span className="chip">event</span> and <span className="chip">event:&lt;link&gt;</span>.
+            {canWrite ? ' Afterwards, mark who came.' : ''}
+          </p>
+          <div className="ot-actions">
+            <Link className="btn" to="/people?tag=event">See RSVPs in People</Link>
+          </div>
+        </div>
+      </div>
+
+      {canWrite && (creating ? (
+        <EventForm
+          wsSlug={wsSlug}
+          onCancel={() => setCreating(false)}
+          onDone={(res) => { setCreating(false); toast(`“${res.event.title}” is on the calendar`); }}
+        />
+      ) : (
+        <div className="ot-actions" style={{ marginBottom: 'var(--s-4)' }}>
+          <button type="button" className="btn btn-primary ot-btn-tap" onClick={() => setCreating(true)}>New event</button>
+        </div>
+      ))}
+
+      {evq.isError && <p className="error">{evq.error.message}</p>}
+
+      <div className="card">
+        <div className="ot-head">
+          <span className="eyebrow">Upcoming</span>
+          <span className="ot-note">{evq.isPending ? 'Loading…' : `${upcoming.length} on the calendar`}</span>
+        </div>
+        <ul className="ot-events">
+          {upcoming.map((e) => <EventRow key={e.id} ev={e} wsSlug={wsSlug} canWrite={canWrite} toast={toast} />)}
+          {upcoming.length === 0 && !evq.isPending && (
+            <li className="ot-empty">Nothing coming up{canWrite ? ' — press New event to add one.' : '.'}</li>
+          )}
+        </ul>
+      </div>
+
+      {past.length > 0 && (
+        <div className="card">
+          <div className="ot-head">
+            <span className="eyebrow">Past</span>
+            {canWrite && <span className="ot-note">Open RSVPs to mark who came</span>}
+          </div>
+          <ul className="ot-events">
+            {pastShown.map((e) => <EventRow key={e.id} ev={e} wsSlug={wsSlug} canWrite={canWrite} toast={toast} past />)}
+          </ul>
+          {past.length > pastShown.length && (
+            <div className="ot-actions" style={{ marginTop: 'var(--s-2)' }}>
+              <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => setShowAllPast(true)}>Show all {past.length}</button>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -729,22 +1197,147 @@ ${VOLUNTEER_ROLES.map((r) => `    <option value="${r.code}">${r.label}</option>`
   });
 </script>`;
 
-function WebsiteTab({ me, toast }) {
+const snippetRsvp = (endpoint, eventSlug) => `<!-- Event RSVP → Starbase -->
+<form id="sb-rsvp">
+  <input name="name" placeholder="Your name" required>
+  <input name="email" type="email" placeholder="Email">
+  <input name="phone" type="tel" placeholder="Phone">
+  <select name="guests">
+    <option value="0">Just me</option>
+${[1, 2, 3, 4, 5].map((n) => `    <option value="${n}">+${n} ${n === 1 ? 'guest' : 'guests'}</option>`).join('\n')}
+  </select>
+  <button type="submit">RSVP</button>
+  <p class="sb-msg"></p>
+</form>
+<script>
+  document.getElementById('sb-rsvp').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target, f = new FormData(form);
+    let status = 0;
+    try {
+      const r = await fetch('${endpoint}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'rsvp', event: '${eventSlug}',
+          name: f.get('name'), email: f.get('email'), phone: f.get('phone'),
+          guests: Number(f.get('guests')) || 0,
+        }),
+      });
+      status = r.status;
+    } catch {}
+    form.querySelector('.sb-msg').textContent = status === 200
+      ? 'You are in — see you there.'
+      : status === 409 ? 'Sorry — this event is full.'
+      : status === 404 ? 'RSVPs for this event are closed.'
+      : 'Something went wrong. Please try again.';
+    if (status === 200) form.reset();
+  });
+</script>`;
+
+const DEFAULT_DONATE_NOTE = 'Pledge now and the campaign will contact you to complete your contribution by e-transfer or cheque.';
+
+// Donate page status + the instructions donors see when cards are off.
+function DonationsCard({ me, base, canWrite, toast, copied }) {
+  const queryClient = useQueryClient();
+  const isManager = me.role === 'manager';
+  const slug = me.workspace.slug;
+  const current = me.workspace.settings?.donateInstructions || '';
+  const [text, setText] = useState(current);
+  useEffect(() => { setText(current); }, [current]);
+  // /api/pledges is desk-only; it also says whether Stripe is connected.
+  const pledges = useQuery({ queryKey: ['pledges'], queryFn: () => apiGet('/pledges'), enabled: canWrite });
+  const stripe = pledges.data?.stripe;
+  const open = (pledges.data?.pledges ?? []).filter((p) => p.status === 'pledged' || p.status === 'pending');
+  const openCents = open.reduce((n, p) => n + (p.amount_cents || 0), 0);
+  const act = useAction(() => queryClient.invalidateQueries({ queryKey: ['me'] }));
+
+  const save = async (e) => {
+    e.preventDefault();
+    const v = text.trim();
+    const res = await act.run('workspace.update', { donate_instructions: v });
+    if (!res) return;
+    setText(v);
+    toast(v ? 'Donation instructions saved' : 'Donation instructions cleared — donors see the standard note');
+  };
+
+  return (
+    <div className="card">
+      <div className="ot-head">
+        <span className="eyebrow">Donations</span>
+        {canWrite && open.length > 0 && (
+          <Link className="ot-note" to="/money">{open.length} open {open.length === 1 ? 'pledge' : 'pledges'} · {fmtMoney(openCents)} — confirm in Money →</Link>
+        )}
+      </div>
+      <LinkRow label="Donate" href={`${base}/d/${slug}`} onCopied={copied} />
+      {canWrite && (
+        <p className="ot-pay" data-on={stripe ? 'true' : 'false'}>
+          <span className="ot-status-dot" data-status={stripe ? 'sent' : pledges.isPending ? undefined : 'queued'} aria-hidden="true" />
+          {pledges.isPending ? 'Checking card payments…'
+            : pledges.isError ? <span className="error">{pledges.error.message}</span>
+            : stripe ? 'Card payments on (Stripe)'
+            : 'Pledges only — connect Stripe to take cards'}
+        </p>
+      )}
+      <p className="ot-note">The page checks BC eligibility and the annual contribution limit before it takes a gift.</p>
+
+      {canWrite && pledges.isSuccess && !stripe && (
+        <div className="ot-donate-note">
+          {isManager ? (
+            <form onSubmit={save}>
+              <div className="field">
+                <label htmlFor="ws-donate-note">Donation instructions</label>
+                <textarea id="ws-donate-note" className="input" rows={3} maxLength={2000} value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="E-transfer to donate@imaginesurrey.ca — put your full name and home address in the message." />
+                <span className="ot-hint">
+                  Shown on the donate page and after someone pledges, while cards are off.
+                  {!text.trim() && <> Left empty, donors see: “{DEFAULT_DONATE_NOTE}”</>}
+                </span>
+              </div>
+              <div className="ot-actions">
+                <button type="submit" className="btn btn-primary ot-btn-tap" disabled={act.busy || text.trim() === current}>
+                  {act.busy ? 'Saving…' : 'Save instructions'}
+                </button>
+                {act.error && <span className="error">{act.error}</span>}
+              </div>
+            </form>
+          ) : (
+            <>
+              <span className="eyebrow">Donation instructions</span>
+              <p className="ot-lede ot-body" style={{ margin: 'var(--s-1) 0 0' }}>{current || DEFAULT_DONATE_NOTE}</p>
+              <p className="ot-note">A manager can change this.</p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WebsiteTab({ me, canWrite, toast }) {
   const queryClient = useQueryClient();
   const isManager = me.role === 'manager';
   const slug = me.workspace.slug;
   const current = me.workspace.settings?.website || '';
   const [site, setSite] = useState(current);
   const [snippet, setSnippet] = useState('newsletter');
+  const [rsvpEvent, setRsvpEvent] = useState('');
   const pets = useQuery({ queryKey: ['petitions'], queryFn: () => apiGet('/petitions') });
+  const evq = useQuery({ queryKey: ['campaign-events'], queryFn: () => apiGet('/campaign-events') });
   const act = useAction(() => queryClient.invalidateQueries({ queryKey: ['me'] }));
 
   useEffect(() => { setSite(current); }, [current]);
 
   const base = origin();
   const endpoint = `${base}/api/public/${slug}/signup`;
-  const code = snippet === 'volunteer' ? snippetVolunteer(endpoint) : snippetNewsletter(endpoint);
   const petitions = pets.data?.petitions ?? [];
+  // Only public events that haven't started take RSVPs.
+  const openEvents = (evq.data?.events ?? []).filter((e) => e.public && new Date(e.starts_at).getTime() >= Date.now());
+  const rsvpSlug = openEvents.some((e) => e.slug === rsvpEvent) ? rsvpEvent : (openEvents[0]?.slug || '<event-link>');
+  const code = snippet === 'volunteer' ? snippetVolunteer(endpoint)
+    : snippet === 'rsvp' ? snippetRsvp(endpoint, rsvpSlug)
+    : snippetNewsletter(endpoint);
 
   // Accept a bare domain ("imaginesurrey.ca") and store a real link.
   const normalized = (() => {
@@ -812,11 +1405,24 @@ function WebsiteTab({ me, toast }) {
               <LinkRow label="Petition" href={`${base}/p/${slug}/${p.slug}`} onCopied={copied} />
             </li>
           ))}
-          {!pets.isLoading && petitions.length === 0 && (
+          {!pets.isPending && petitions.length === 0 && (
             <li className="ot-note">No petitions yet — <Link to="/outreach/petitions">create one</Link> and its link appears here.</li>
+          )}
+          {openEvents.map((e) => (
+            <li key={e.id}>
+              <div className="ot-link-caption">
+                {e.title} <span className="muted">· {fmtEventWhen(e.starts_at, e.ends_at)}</span>
+              </div>
+              <LinkRow label="Event" href={`${base}/e/${slug}/${e.slug}`} onCopied={copied} />
+            </li>
+          ))}
+          {!evq.isPending && openEvents.length === 0 && (
+            <li className="ot-note">No public events coming up — <Link to="/outreach/events">add one</Link> and its RSVP link appears here.</li>
           )}
         </ul>
       </div>
+
+      <DonationsCard me={me} base={base} canWrite={canWrite} toast={toast} copied={copied} />
 
       <div className="card">
         <div className="ot-head">
@@ -824,18 +1430,37 @@ function WebsiteTab({ me, toast }) {
           <div className="ot-seg" role="group" aria-label="Snippet">
             <button type="button" aria-pressed={snippet === 'newsletter'} onClick={() => setSnippet('newsletter')}>Newsletter</button>
             <button type="button" aria-pressed={snippet === 'volunteer'} onClick={() => setSnippet('volunteer')}>Volunteer</button>
+            <button type="button" aria-pressed={snippet === 'rsvp'} onClick={() => setSnippet('rsvp')}>Event RSVP</button>
           </div>
         </div>
         <p className="ot-lede">
           Keep the site’s own design; the form posts JSON to <code className="mono">{endpoint}</code>. CORS is open, so it works
-          from any domain. Submissions land in People{snippet === 'volunteer' ? ' tagged volunteer-prospect, with the roles picked' : ' and on the newsletter list'}.
+          from any domain. Submissions land in People
+          {snippet === 'volunteer' ? ' tagged volunteer-prospect, with the roles picked'
+            : snippet === 'rsvp' ? ' tagged event, and count toward the event’s capacity'
+            : ' and on the newsletter list'}.
         </p>
+        {snippet === 'rsvp' && (
+          openEvents.length > 0 ? (
+            <div className="field ot-snippet-event">
+              <label htmlFor="snip-event">Event</label>
+              <select id="snip-event" className="input" value={rsvpSlug} onChange={(e) => setRsvpEvent(e.target.value)}>
+                {openEvents.map((e) => <option key={e.id} value={e.slug}>{e.title} — {fmtEventWhen(e.starts_at, e.ends_at)}</option>)}
+              </select>
+            </div>
+          ) : (
+            <p className="ot-note" style={{ marginBottom: 'var(--s-2)' }}>
+              No public events coming up — <Link to="/outreach/events">create one</Link>, then replace <code>&lt;event-link&gt;</code> with its link.
+            </p>
+          )
+        )}
         <div className="ot-pre-wrap">
           <CopyButton text={code} label="Copy snippet" onCopied={copied} />
           <pre className="ot-pre"><code>{code}</code></pre>
         </div>
         <p className="ot-note" style={{ marginTop: 'var(--s-2)' }}>
           Petitions use the same endpoint: <code>{`{ kind: 'petition', petition: '<slug>', name, email, subscribe: true }`}</code>.
+          Event RSVPs: <code>{`{ kind: 'rsvp', event: '<event-slug>', name, email, phone, guests }`}</code>.
         </p>
       </div>
     </>
@@ -850,19 +1475,24 @@ export default function Outreach() {
   const { tab } = useParams();
   const toast = useToast();
   const canWrite = DESK_ROLES.includes(me.role);
+  const tabs = canWrite ? TABS : TABS.filter((t) => VOLUNTEER_TABS.has(t.key));
+  const home = canWrite ? '/outreach/newsletter' : '/outreach/events';
 
   // Counts in the tab strip — cheap, cached, shared with the tabs below.
-  const subs = useQuery({ queryKey: ['subscriptions'], queryFn: () => apiGet('/subscriptions') });
-  const blasts = useQuery({ queryKey: ['blasts'], queryFn: () => apiGet('/blasts') });
+  // Subscriber and blast lists are desk-only reads (403 for volunteers).
+  const subs = useQuery({ queryKey: ['subscriptions'], queryFn: () => apiGet('/subscriptions'), enabled: canWrite });
+  const blasts = useQuery({ queryKey: ['blasts'], queryFn: () => apiGet('/blasts'), enabled: canWrite });
   const pets = useQuery({ queryKey: ['petitions'], queryFn: () => apiGet('/petitions') });
+  const evq = useQuery({ queryKey: ['campaign-events'], queryFn: () => apiGet('/campaign-events') });
 
-  if (!tab) return <Navigate to="/outreach/newsletter" replace />;
-  if (!TABS.some((t) => t.key === tab)) return <Navigate to="/outreach/newsletter" replace />;
+  if (!tab) return <Navigate to={home} replace />;
+  if (!tabs.some((t) => t.key === tab)) return <Navigate to={home} replace />;
 
   const counts = {
     newsletter: subs.data?.subscribed,
     press: blasts.data?.mediaContacts,
     petitions: pets.data?.petitions?.length,
+    events: evq.data ? evq.data.events.filter((e) => isUpcoming(e)).length : undefined,
   };
 
   return (
@@ -873,7 +1503,7 @@ export default function Outreach() {
       </div>
 
       <nav className="ot-tabs" aria-label="Outreach sections">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Link key={t.key} to={`/outreach/${t.key}`} className={`ot-tab${tab === t.key ? ' active' : ''}`} aria-current={tab === t.key ? 'page' : undefined}>
             {t.label}
             {counts[t.key] != null && <span className="n">{counts[t.key]}</span>}
@@ -881,16 +1511,17 @@ export default function Outreach() {
         ))}
       </nav>
 
-      {!canWrite && tab !== 'website' && (
+      {!canWrite && (
         <div className="banner" role="status">
-          <span>You can read everything here. Sending, adding subscribers and editing petitions need a staff, treasurer or manager role.</span>
+          <span>Share event and petition links from here. Newsletters, press, sign-up lists and RSVP lists are run by the campaign desk.</span>
         </div>
       )}
 
       {tab === 'newsletter' && <NewsletterTab me={me} canWrite={canWrite} toast={toast.show} />}
       {tab === 'press' && <PressTab canWrite={canWrite} toast={toast.show} />}
       {tab === 'petitions' && <PetitionsTab me={me} canWrite={canWrite} toast={toast.show} />}
-      {tab === 'website' && <WebsiteTab me={me} toast={toast.show} />}
+      {tab === 'events' && <EventsTab me={me} canWrite={canWrite} toast={toast.show} />}
+      {tab === 'website' && <WebsiteTab me={me} canWrite={canWrite} toast={toast.show} />}
 
       {toast.msg && (
         <div className="toast ot-toast" role="status">

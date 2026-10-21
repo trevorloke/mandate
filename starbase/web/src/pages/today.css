@@ -1,0 +1,179 @@
+/* Today — sample data, your turf, events, pledges, toast.
+   The field strip, support bar, shifts and signs line keep their ops-* rules
+   in shifts.css. Everything here is today-* so it never collides. */
+
+.today { min-width: 0; }
+
+/* ── Shared bits ── */
+.today-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.btn.today-tap {
+  min-height: 44px;
+  padding-left: 16px;
+  padding-right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.today-card-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); flex-wrap: wrap; margin-bottom: var(--s-1); }
+.today-more {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin: -12px 0; /* full-height tap target without padding out the card head */
+}
+.today-more:hover { color: var(--text-1); text-decoration: underline; text-decoration-color: var(--mark-deep); }
+
+/* ── No signal yet (brief paused offline) ── */
+.today-offline {
+  border-left: 3px solid var(--mark);
+  padding: var(--s-2) var(--s-3);
+  margin: var(--s-4) 0;
+  color: var(--text-2);
+  background: var(--paper-0);
+}
+
+/* Getting started: a step this role can't do */
+.today-step-who { font-size: 13px; text-align: right; }
+
+/* ── Sample data ── */
+.card.today-sample {
+  border-color: var(--rule-2);
+  border-top: 3px solid var(--mark);
+  padding: var(--s-4) var(--s-5) var(--s-5);
+  margin-top: var(--s-4);
+}
+.today-sample h2 { font-size: 20px; margin: 0 0 var(--s-2); }
+.today-sample-lede { color: var(--text-2); margin: 0 0 var(--s-4); max-width: 56ch; }
+.today-sample .error { margin: var(--s-3) 0 0; }
+
+.today-sample-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: calc(-1 * var(--s-2)) 0 0;
+  min-height: 44px;
+}
+.today-dot { margin: 0 var(--s-2); color: var(--text-4); }
+.today-linkbtn {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  padding: 0 var(--s-1);
+  min-height: 44px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--rule-2);
+  text-underline-offset: 3px;
+}
+.today-linkbtn:hover { color: var(--danger); text-decoration-color: currentColor; }
+.today-linkbtn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 1px; }
+
+.today-confirm {
+  background: var(--paper-0);
+  border: var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 0 var(--r-card) var(--r-card) 0;
+  padding: var(--s-3) var(--s-4);
+  margin: var(--s-2) 0 var(--s-2);
+}
+.today-confirm p { margin: 0 0 var(--s-3); color: var(--text-2); }
+.btn.today-danger { color: var(--danger); border-color: var(--danger); }
+.btn.today-danger:hover { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
+
+/* ── Your turf ── */
+.card.today-turf.is-lead {
+  border: var(--border-ink);
+  border-top: 3px solid var(--mark);
+  margin-top: var(--s-4);
+}
+.today-turf-list { list-style: none; margin: 0; padding: 0; }
+.today-turf-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2) var(--s-4);
+  flex-wrap: wrap;
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--rule);
+}
+.today-turf-list li:last-child { border-bottom: 0; }
+.today-turf-info { display: flex; flex-direction: column; gap: 3px; flex: 1 1 200px; min-width: 0; }
+.today-turf-name { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
+.today-turf-meta { font-size: 12px; color: var(--text-3); }
+.today-progress { display: block; height: 6px; max-width: 260px; background: var(--paper-2); border-radius: 999px; overflow: hidden; }
+.today-progress > span { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+.today-turf-none { color: var(--text-2); margin: 0 0 var(--s-3); }
+
+/* ── Upcoming events ── */
+.today-event-info { display: flex; flex-direction: column; min-width: 0; flex: 1 1 220px; }
+.today-event-title { font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+a.today-event-title:hover { text-decoration: underline; }
+.today-events .when { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); }
+.today-rsvp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-decoration-color: var(--mark-deep);
+  text-underline-offset: 3px;
+  display: inline-block;
+  align-self: flex-start;
+  padding: 8px 0;
+  line-height: 20px;
+}
+.today-rsvp:hover { color: var(--text-1); }
+.today-events .list-plain li { align-items: center; }
+
+.today-going { display: inline-flex; align-items: center; gap: var(--s-2); white-space: nowrap; font-size: 12px; color: var(--text-2); }
+.today-going-track { width: 72px; height: 6px; background: var(--paper-2); border-radius: 999px; overflow: hidden; display: inline-block; }
+.today-going-track > span { display: block; height: 100%; background: var(--ink); border-radius: 999px; }
+.today-going[data-full] .today-going-track > span { background: var(--ok); }
+.today-going[data-full] { color: var(--ok); }
+
+/* ── Pledges (under the money hero) ── */
+.today-pledges {
+  display: inline-block;
+  padding: 10px 0;
+  line-height: 24px;
+  margin-top: var(--s-1);
+  font-size: 14px;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-decoration-color: var(--mark-deep);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.today-pledges:hover { color: var(--text-1); background: var(--mark-soft); }
+.today-pledges .mono { font-size: 13px; color: var(--text-1); }
+
+/* ── Toast: above the phone tab bar ── */
+.toast.today-toast { max-width: calc(100vw - 32px); }
+.toast.today-toast .btn { min-height: 36px; }
+
+@media (max-width: 720px) {
+  .toast.today-toast {
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    z-index: 950;
+    width: max-content;
+  }
+}
+@media (max-width: 480px) {
+  .card.today-sample { padding: var(--s-4); }
+  .today-sample .today-actions .btn,
+  .today-confirm .today-actions .btn,
+  .today-turf .btn.today-tap { width: 100%; }
+}

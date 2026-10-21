@@ -113,17 +113,22 @@ test('volunteer roles with detail; role filter; unassign', async () => {
   assert.equal(t.status, 200);
   const cc = await c.action('volunteer.assign', { person_id: p.id, role: 'community_committee', detail: 'Newton' });
   assert.equal(cc.status, 200);
+  const hr = await c.action('volunteer.assign', { person_id: p.id, role: 'highrise_captain', detail: 'The Hub, 13438 Central Ave' });
+  assert.equal(hr.status, 200, 'hi-rise building captain with its building');
+  const byRole = await c.get('/api/persons?role=highrise_captain');
+  assert.ok(byRole.json.persons.some((x) => x.id === p.id));
   const bad = await c.action('volunteer.assign', { person_id: p.id, role: 'astronaut' });
   assert.equal(bad.status, 400);
   const filt = await c.get('/api/persons?role=translation');
   assert.ok(filt.json.persons.some((x) => x.id === p.id));
   const prof = await c.get(`/api/persons/${p.id}`);
-  assert.equal(prof.json.roles.length, 2);
+  assert.equal(prof.json.roles.length, 3);
   assert.equal(prof.json.roles.find((r) => r.role === 'translation').detail, 'Punjabi');
+  assert.equal(prof.json.roles.find((r) => r.role === 'highrise_captain').detail, 'The Hub, 13438 Central Ave');
   const un = await c.action('volunteer.unassign', { id: t.json.volunteerRole.id });
   assert.equal(un.status, 200);
   const after = await c.get(`/api/persons/${p.id}`);
-  assert.equal(after.json.roles.length, 1);
+  assert.equal(after.json.roles.length, 2);
 });
 
 test('volunteers can log contacts, place signs, and locate pins — not log gifts', async () => {

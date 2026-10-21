@@ -530,7 +530,7 @@ app.get('/brief', async (c) => {
     `select status, count(*)::int as n from signs where workspace_id = $1 group by status`, [ws],
   )).rows;
   const events = (await db.query(
-    `select e.id, e.slug, e.title, e.starts_at, e.location, e.capacity,
+    `select e.id, e.slug, e.title, e.starts_at, e.location, e.capacity, e.public,
        coalesce((select sum(1 + r.guests) from event_rsvps r where r.event_id = e.id and r.status <> 'cancelled'), 0)::int as going
      from campaign_events e where e.workspace_id = $1 and e.deleted_at is null and e.starts_at >= now()
      order by e.starts_at limit 3`, [ws],

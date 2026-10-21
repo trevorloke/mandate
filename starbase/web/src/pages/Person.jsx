@@ -335,9 +335,10 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
     });
     if (res) {
       setNote('');
-      setStatus(rating
+      const saved = res.queued ? 'Saved offline — sends when you’re back online · ' : '';
+      setStatus(saved + (rating
         ? `Logged ${CHANNEL_LABEL[channel].toLowerCase()} · rated ${rating} (${ratingByCode(rating)?.label})`
-        : `Logged ${CHANNEL_LABEL[channel].toLowerCase()} · ${OUTCOME_LABEL[outcome].toLowerCase()}`);
+        : `Logged ${CHANNEL_LABEL[channel].toLowerCase()} · ${OUTCOME_LABEL[outcome].toLowerCase()}`));
     }
   };
 

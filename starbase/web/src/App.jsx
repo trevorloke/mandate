@@ -19,6 +19,8 @@ const Signs = lazy(() => import('./pages/Signs.jsx'));
 const Outreach = lazy(() => import('./pages/Outreach.jsx'));
 const Filings = lazy(() => import('./pages/Filings.jsx'));
 const Team = lazy(() => import('./pages/Team.jsx'));
+const ImportPeople = lazy(() => import('./pages/ImportPeople.jsx'));
+const Turfs = lazy(() => import('./pages/Turfs.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -43,6 +45,7 @@ export default function App() {
         <Route path="/" element={<Today />} />
         <Route path="/map" element={<MapPage />} />
         <Route path="/people" element={<People />} />
+        <Route path="/people/import" element={<ImportPeople />} />
         <Route path="/people/:id" element={<Person />} />
         <Route path="/shifts" element={<Shifts />} />
         <Route path="/shifts/:id" element={<Shifts />} />
@@ -52,6 +55,8 @@ export default function App() {
         <Route path="/outreach/:tab" element={<Outreach />} />
         <Route path="/filings" element={<Filings />} />
         <Route path="/team" element={<Team />} />
+        <Route path="/turfs" element={<Turfs />} />
+        <Route path="/turfs/:id" element={<Turfs />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

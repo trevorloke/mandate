@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, Link, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
+import { logContact } from '../offline.js';
 import { apiGet, action } from '../api.js';
 import './people.css';
 
@@ -59,7 +60,8 @@ export function useAction(onDone) {
     setBusy(true);
     setError(null);
     try {
-      const res = await action(name, input);
+      // Knocks always go through the offline outbox (saved, sent once).
+      const res = name === 'contact.log' ? await logContact(input) : await action(name, input);
       await onDone?.(res, name, input);
       return res;
     } catch (e) {
@@ -316,7 +318,7 @@ function BankRow({ p, channel, me }) {
     const res = await act.run('contact.log', {
       person_id: p.id, channel, outcome, rating: rating || undefined,
     });
-    if (res) { setLogged({ outcome, rating }); setReached(false); }
+    if (res) { setLogged({ outcome, rating, queued: !!res.queued }); setReached(false); }
   };
 
   const first = (p.name || '').split(/\s+/)[0];
@@ -352,7 +354,7 @@ function BankRow({ p, channel, me }) {
         {reached && !logged && <span className="hint now">Now log this {noun} →</span>}
         {logged && (
           <span className="logged">
-            ✓ logged {logged.rating ? `as ${logged.rating}` : logged.outcome.replace('_', ' ')} via {noun}
+            {logged.queued ? '✓ saved offline' : '✓ logged'} {logged.rating ? `as ${logged.rating}` : logged.outcome.replace('_', ' ')} via {noun}
           </span>
         )}
       </div>
@@ -435,6 +437,7 @@ export default function People() {
               <button type="button" className="btn" onClick={() => startBank('text')}>Text bank</button>
             </>
           )}
+          {desk && !bank && <Link className="btn" to="/people/import">Import CSV</Link>}
           {desk && !showNew && !bank && (
             <button type="button" className="btn btn-primary" onClick={() => update({ new: '1' }, { replace: false })}>
               Add person

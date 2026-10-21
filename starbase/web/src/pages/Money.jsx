@@ -1,6 +1,8 @@
 // Money — the gift ledger. Type-ahead donor picker (never type IDs),
 // dollars in / cents on the wire, compliance banner on cap crossings,
 // optimistic void with a 7s UNDO toast, cursor-paginated load more.
+// Above the ledger: online pledges from the donate page, to mark received
+// (→ a gift, cap-checked) or cancel.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
@@ -8,6 +10,7 @@ import {
 } from '@tanstack/react-query';
 import { apiGet, action, fmtMoney, fmtDate, todayISO, dollarsToCents } from '../api.js';
 import './people.css';
+import './outreach.css'; // shared ot-* helpers + the pl-* pledge queue styles
 
 // gift.log / gift.void / gift.restore and GET /records/* are desk-only
 // (server: MONEY_ROLES; volunteers get 403 on both reads and writes).
@@ -221,6 +224,209 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
   );
 }
 
+// ── Pledges: online donations waiting on the desk ──
+// The donate page (/d/:slug) records a pledge; it becomes a gift when Stripe
+// confirms payment, or when the treasurer marks it received here (e-transfer,
+// cheque…). Receiving runs the same cap check as a desk gift.
+const OPEN_PLEDGE = new Set(['pledged', 'pending']);
+const localDay = (ts) => {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? fmtDate(ts) : d.toLocaleDateString('en-CA');
+};
+const PLEDGE_STATUS = {
+  pledged:   { label: 'pledged', cls: 'chip chip-warn', title: 'Waiting for the donor to send it' },
+  pending:   { label: 'card pending', cls: 'chip chip-warn', title: 'Started card checkout; Stripe has not confirmed payment' },
+  paid:      { label: 'paid by card', cls: 'chip chip-ok', title: 'Stripe confirmed payment' },
+  received:  { label: 'received', cls: 'chip chip-ok', title: 'Marked received at the desk' },
+  cancelled: { label: 'cancelled', cls: 'chip chip-ghost', title: 'Cancelled — no gift recorded' },
+};
+const PledgeStatus = ({ status }) => {
+  const s = PLEDGE_STATUS[status] || { label: status, cls: 'chip' };
+  return <span className={s.cls} title={s.title}>{s.label}</span>;
+};
+
+function PledgeRow({ p, onReceived, onChanged }) {
+  const [mode, setMode] = useState(null); // null | 'receive' | 'cancel'
+  const [method, setMethod] = useState('etransfer');
+  const [date, setDate] = useState(todayISO());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const open = OPEN_PLEDGE.has(p.status);
+
+  const receive = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await action('pledge.receive', { id: p.id, method, date });
+      onReceived(res, p);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await action('pledge.cancel', { id: p.id });
+      onChanged(`Cancelled ${p.name}’s ${fmtMoney(p.amount_cents)} pledge`);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  const idp = `pl-${p.id.slice(0, 8)}`;
+  return (
+    <li className="pl-row">
+      <div className="pl-main">
+        <div className="pl-who">
+          <span className="name">{p.person_id ? <Link to={`/people/${p.person_id}`}>{p.name}</Link> : p.name}</span>
+          <span className="email">{p.email}</span>
+        </div>
+        <div className="pl-amt">
+          <strong>{fmtMoney(p.amount_cents)}</strong>
+          {p.cadence === 'monthly'
+            ? <span className="chip chip-mark">monthly</span>
+            : <span className="chip chip-ghost">one-time</span>}
+        </div>
+      </div>
+      <div className="pl-meta">
+        <span>{localDay(p.created_at)}</span>
+        <PledgeStatus status={p.status} />
+      </div>
+
+      {open && mode === null && (
+        <div className="pl-actions">
+          <button type="button" className="btn btn-primary ot-btn-tap" onClick={() => setMode('receive')}>Mark received</button>
+          <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => setMode('cancel')}>Cancel</button>
+        </div>
+      )}
+
+      {open && mode === 'receive' && (
+        <form className="pl-receive" onSubmit={receive}>
+          {p.status === 'pending' && (
+            <p className="ot-note">They started paying by card. Only mark it received if the money came another way.</p>
+          )}
+          {p.cadence === 'monthly' && (
+            <p className="ot-note">Records this month’s gift and closes the pledge. Log later months in the ledger.</p>
+          )}
+          <div className="form-row">
+            <div className="field">
+              <label htmlFor={`${idp}-method`}>Paid by</label>
+              <select id={`${idp}-method`} className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
+                {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor={`${idp}-date`}>Date received</label>
+              <input id={`${idp}-date`} className="input mono" type="date" required value={date}
+                max={todayISO()} onChange={(e) => setDate(e.target.value)} />
+            </div>
+          </div>
+          {error && <p className="error" role="alert">{error}</p>}
+          <div className="pl-actions">
+            <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy || !date}>
+              {busy ? 'Saving…' : `Record ${fmtMoney(p.amount_cents)} gift`}
+            </button>
+            <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={() => { setMode(null); setError(null); }}>Back</button>
+          </div>
+        </form>
+      )}
+
+      {open && mode === 'cancel' && (
+        <div className="pl-actions">
+          <div className="ot-confirm ot-confirm-danger" role="group" aria-label="Confirm cancel">
+            <span>Cancel {p.name}’s {fmtMoney(p.amount_cents)} pledge? No gift is recorded.</span>
+            <button type="button" className="btn ot-btn-tap ot-btn-danger" disabled={busy} onClick={cancel}>
+              {busy ? 'Cancelling…' : 'Yes, cancel it'}
+            </button>
+            <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy} onClick={() => { setMode(null); setError(null); }}>Keep it</button>
+          </div>
+          {error && <p className="error" role="alert">{error}</p>}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function Pledges({ onBanner }) {
+  const queryClient = useQueryClient();
+  const pledges = useQuery({ queryKey: ['pledges'], queryFn: () => apiGet('/pledges') });
+  const [result, setResult] = useState(null);
+  const all = pledges.data?.pledges ?? [];
+  const open = all.filter((p) => OPEN_PLEDGE.has(p.status));
+  const closed = all.filter((p) => !OPEN_PLEDGE.has(p.status));
+  const openCents = open.reduce((n, p) => n + (p.amount_cents || 0), 0);
+  const slug = pledges.data?.slug;
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['pledges'] });
+    queryClient.invalidateQueries({ queryKey: ['records', 'gift'] });
+    queryClient.invalidateQueries({ queryKey: ['brief'] });
+    queryClient.invalidateQueries({ queryKey: ['person'] });
+  };
+
+  const onReceived = (res, p) => {
+    const g = res.gift || {};
+    setResult({
+      text: `Recorded ${fmtMoney(g.amount_cents ?? p.amount_cents)} from ${p.name} — ${g.method || 'received'}, ${fmtDate(g.date)}. It’s in the ledger below.`,
+      flagged: !!g.flagged,
+    });
+    onBanner(res.compliance?.over ? g.flag_reason : null);
+    refresh();
+  };
+  const onChanged = (text) => {
+    setResult({ text, flagged: false });
+    refresh();
+  };
+
+  // Nothing to show until the donate page has been used at least once.
+  if (pledges.isSuccess && all.length === 0) {
+    return (
+      <p className="ot-note" style={{ marginBottom: 'var(--s-4)' }}>
+        No online pledges yet. Share the donate page{slug ? <> (<span className="mono">/d/{slug}</span>)</> : null} — set it up under{' '}
+        <Link to="/outreach/website">Outreach → Website</Link>.
+      </p>
+    );
+  }
+
+  return (
+    <section className="card" aria-labelledby="pl-head">
+      <div className="ot-head">
+        <span className="eyebrow" id="pl-head">Pledges to confirm</span>
+        <span className="ot-note">
+          {pledges.isPending ? 'Loading…' : open.length ? `${open.length} open · ${fmtMoney(openCents)}` : 'all caught up'}
+        </span>
+      </div>
+      {pledges.isError && <p className="error">{pledges.error.message}</p>}
+      {result && (
+        <div className="pl-result" role="status">
+          <span>{result.text}{result.flagged ? ' Flagged — see the banner above.' : ''}</span>
+          <button type="button" className="btn btn-quiet" onClick={() => setResult(null)}>Dismiss</button>
+        </div>
+      )}
+      {open.length > 0 ? (
+        <ul className="pl-list">
+          {open.map((p) => <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onChanged} />)}
+        </ul>
+      ) : pledges.isSuccess && (
+        <p className="ot-note">No pledges waiting. New ones from the donate page show up here.</p>
+      )}
+      {closed.length > 0 && (
+        <details className="pl-history">
+          <summary>Paid &amp; closed ({closed.length})</summary>
+          <ul className="pl-list">
+            {closed.map((p) => <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onChanged} />)}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
 // ── The screen ──
 export default function Money() {
   const queryClient = useQueryClient();
@@ -332,38 +538,44 @@ export default function Money() {
         <GiftForm presetPersonId={presetPersonId} onSaved={onSaved} onClose={() => setParams({})} />
       )}
 
+      <Pledges onBanner={setBanner} />
+
+      <span className="eyebrow" style={{ display: 'block', marginBottom: 'var(--s-2)' }}>Gift ledger</span>
+
       {error && <p className="error">{error}</p>}
       {gifts.isError && <p className="error">{gifts.error.message}</p>}
 
-      <table className="table">
-        <thead>
-          <tr><th>Date</th><th>Donor</th><th className="num">Amount</th><th>Method</th><th>Cadence</th><th></th><th></th></tr>
-        </thead>
-        <tbody>
-          {rows.map((g) => (
-            <tr key={g.id}>
-              <td className="mono">{fmtDate(g.date)}</td>
-              <td>
-                <Link to={`/people/${g.person_id}`}>{donorName[g.person_id] ?? '…'}</Link>
-              </td>
-              <td className="num">{fmtMoney(g.amount_cents)}</td>
-              <td>{g.method ? <span className="chip">{g.method}</span> : <span className="muted">—</span>}</td>
-              <td>
-                {g.cadence === 'monthly'
-                  ? <span className="chip chip-mark">monthly</span>
-                  : <span className="chip chip-ghost">one-time</span>}
-              </td>
-              <td>{g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}</td>
-              <td>
-                <button type="button" className="btn btn-quiet" onClick={() => voidGift(g.id)}>Void</button>
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && !gifts.isLoading && (
-            <tr><td colSpan={7} className="muted">No gifts yet — press “n” anywhere to log one.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <div className="ot-scroll">
+        <table className="table">
+          <thead>
+            <tr><th>Date</th><th>Donor</th><th className="num">Amount</th><th>Method</th><th>Cadence</th><th></th><th></th></tr>
+          </thead>
+          <tbody>
+            {rows.map((g) => (
+              <tr key={g.id}>
+                <td className="mono">{fmtDate(g.date)}</td>
+                <td>
+                  <Link to={`/people/${g.person_id}`}>{donorName[g.person_id] ?? '…'}</Link>
+                </td>
+                <td className="num">{fmtMoney(g.amount_cents)}</td>
+                <td>{g.method ? <span className="chip">{g.method}</span> : <span className="muted">—</span>}</td>
+                <td>
+                  {g.cadence === 'monthly'
+                    ? <span className="chip chip-mark">monthly</span>
+                    : <span className="chip chip-ghost">one-time</span>}
+                </td>
+                <td>{g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}</td>
+                <td>
+                  <button type="button" className="btn btn-quiet" onClick={() => voidGift(g.id)}>Void</button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && !gifts.isPending && (
+              <tr><td colSpan={7} className="muted">No gifts yet — press “n” anywhere to log one.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {gifts.hasNextPage && (
         <p>

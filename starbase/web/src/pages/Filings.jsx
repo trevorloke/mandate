@@ -1,7 +1,8 @@
 // Filings — deadline list with days-left badges, add form (?new=1),
-// one-click "Mark filed".
+// one-click "Mark filed". Manager and treasurer file; staff read; volunteers
+// never see the books.
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, fmtDate, todayISO, daysUntil } from '../api.js';
 
@@ -71,9 +72,11 @@ function AddFilingForm({ onDone, onClose }) {
 }
 
 export default function Filings() {
+  const { me } = useOutletContext();
+  const canFile = me.role === 'manager' || me.role === 'treasurer';
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const showNew = params.get('new') === '1';
+  const showNew = canFile && params.get('new') === '1';
   const [error, setError] = useState(null);
 
   const filings = useInfiniteQuery({
@@ -82,6 +85,7 @@ export default function Filings() {
       apiGet(`/records/filing?limit=50${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
     initialPageParam: null,
     getNextPageParam: (last) => last.next,
+    enabled: me.role !== 'volunteer',
   });
   const rows = (filings.data?.pages ?? []).flatMap((p) => p.records);
 
@@ -100,11 +104,13 @@ export default function Filings() {
     }
   };
 
+  if (me.role === 'volunteer') return <Navigate to="/" replace />;
+
   return (
     <>
       <div className="page-head">
         <h1>Filings</h1>
-        {!showNew && (
+        {canFile && !showNew && (
           <button type="button" className="btn btn-primary" onClick={() => setParams({ new: '1' })}>
             Add filing
           </button>
@@ -128,7 +134,7 @@ export default function Filings() {
               <td><DueBadge filing={f} /></td>
               <td className="muted">{f.note || ''}</td>
               <td>
-                {f.status === 'upcoming' && (
+                {canFile && f.status === 'upcoming' && (
                   <button type="button" className="btn" onClick={() => markFiled(f.id)}>Mark filed</button>
                 )}
               </td>

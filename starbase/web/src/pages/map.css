@@ -478,3 +478,91 @@
   .map-mode .btn { min-height: 44px; }
   .map-canvas .leaflet-bar a { width: 44px; height: 44px; line-height: 44px; }
 }
+
+/* ── Turfs: outlines, drawing, the turf sheet ──
+   Outline + label colors are literal for the same reason as the pins: the
+   basemap is light in both schemes. */
+.map-canvas path.map-turf { cursor: pointer; }
+.map-canvas .leaflet-tooltip.map-turf-tip {
+  font: 600 12px/1.3 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: #0c0c0c;
+  background: #faf8f1;
+  border: 1px solid #0c0c0c;
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 rgba(12, 12, 12, 0.15);
+  padding: 4px 8px;
+  max-width: 240px;
+  white-space: normal;
+}
+.map-canvas .leaflet-tooltip-top.map-turf-tip::before { border-top-color: #0c0c0c; }
+
+/* Turfs chip: an on/off layer toggle, set apart from the one-of filters. */
+.map-fchip--toggle { margin-left: 6px; }
+.map-fchip--toggle::before { border-radius: 2px; width: 10px; height: 10px; background: transparent; border: 1.5px solid #2b6cb0; }
+.map-fchip--toggle.is-on { background: var(--paper-0); color: var(--text-1); border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink), 0 1px 2px rgba(12, 12, 12, 0.12); }
+.map-fchip--toggle.is-on::before { background: #2b6cb0; }
+
+/* "Draw turf": a pill that is a button */
+.map-pill--action { cursor: pointer; color: var(--text-1); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+a.map-pill--action { text-decoration: none; }
+.map-pill--action:hover { border-color: var(--ink); background: var(--paper-1); }
+.map-pill--action:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 1px; }
+.map-glyph { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linejoin: round; flex: 0 0 auto; }
+.map-pill--warn { flex-wrap: wrap; }
+.map-pill__btns { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* Drawing: pins and turfs go click-through so every tap lands on the map
+   (the first corner stays tappable to close the shape). */
+.map-page.is-drawing .leaflet-container { cursor: crosshair; }
+.map-page.is-drawing .leaflet-marker-icon { pointer-events: none; }
+.map-page.is-drawing .leaflet-marker-icon.map-draft-start.leaflet-interactive { pointer-events: auto; cursor: pointer; }
+.map-page.is-moded .map-canvas path.map-turf { pointer-events: none; }
+.map-draft-start { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; }
+.map-draft-dot { display: block; width: 16px; height: 16px; border-radius: 50%; background: #ffd400; border: 2px solid #0c0c0c; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.map-draft-start.is-closable .map-draft-dot { width: 22px; height: 22px; box-shadow: 0 0 0 5px rgba(255, 212, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4); }
+
+.map-mode--draw .btn { min-height: 44px; }
+.map-mode--draw .map-mode__btns { flex-wrap: wrap; }
+.map-mode .btn.map-mode__go { background: var(--mark); color: var(--mark-ink); border-color: var(--mark); }
+.map-mode .btn.map-mode__go:hover { background: var(--mark-deep); border-color: var(--mark-deep); }
+.map-mode .btn:disabled, .map-mode .btn:disabled:hover { background: transparent; color: var(--mark); border-color: var(--mark-deep); }
+
+/* The turf sheet */
+.turf-sheet { --turf: #2b6cb0; }
+@media (max-width: 720px) { .turf-sheet { max-height: 70dvh; } }
+.turf-swatch { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 2px; background: var(--turf); vertical-align: 0; }
+.turf-sheet__body { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-3) var(--s-4) var(--s-4); }
+.turf-progress { display: flex; flex-direction: column; gap: 6px; }
+.turf-progress__text { font-size: 13px; }
+.turf-progress__text strong { font-size: 15px; }
+.turf-bar { display: block; height: 8px; background: var(--paper-2); border-radius: 999px; overflow: hidden; }
+.turf-bar__fill { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+.turf-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-2); margin: 0; }
+.turf-stats > div { border-top: 1px solid var(--rule); padding-top: 6px; }
+.turf-stats dt { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+.turf-stats dd { margin: 2px 0 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 18px; }
+.btn.turf-act { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; }
+.turf-sec { border-top: 1px solid var(--rule); padding-top: var(--s-3); }
+.turf-sec > .eyebrow { display: block; margin-bottom: var(--s-1); }
+.turf-none { margin: var(--s-1) 0 var(--s-2); font-size: 14px; }
+.turf-members { list-style: none; margin: 0 0 var(--s-2); padding: 0; }
+.turf-member { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); min-height: 44px; border-bottom: 1px solid var(--rule); }
+.turf-member__name { min-width: 0; overflow-wrap: anywhere; }
+.btn.turf-member__remove { min-width: 44px; min-height: 44px; padding: 0; font-size: 14px; }
+.turf-assign { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; margin-top: var(--s-2); }
+.turf-assign .field { flex: 1 1 180px; margin: 0; }
+.turf-assign select.input { min-height: 44px; }
+.btn.turf-delete { align-self: flex-start; color: var(--danger); }
+.btn.turf-delete:hover { color: var(--danger); border-color: var(--danger); }
+.turf-confirm { border: 1px solid var(--danger); border-radius: var(--r-ctrl); padding: var(--s-3); background: color-mix(in srgb, var(--danger) 7%, var(--paper-0)); }
+.turf-confirm p { margin: 0 0 var(--s-3); font-size: 14px; }
+.turf-confirm__btns { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.btn.turf-danger { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
+.btn.turf-danger:hover { background: color-mix(in srgb, var(--danger) 85%, var(--ink)); border-color: var(--danger); }
+.turf-all { align-self: flex-start; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: var(--s-2) 0; min-height: 44px; display: inline-flex; align-items: center; }
+.turf-form-error { padding: 0 var(--s-4); }
+
+@media (pointer: coarse) {
+  .map-pill--action { min-height: 44px; }
+}

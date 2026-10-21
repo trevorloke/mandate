@@ -136,6 +136,7 @@ test('public volunteer page renders every role; submissions dedupe by email', as
   const page = await pub('GET', `/v/${slug}`);
   assert.equal(page.status, 200);
   assert.match(page.text, /Zone house captain/);
+  assert.match(page.text, /Hi-rise building captain/);
   assert.match(page.text, /Burmashave/);
   await pub('POST', `/v/${slug}`, { name: 'Repeat Person', email: 'repeat@example.org', roles: 'phoning' }, { accept: 'application/json' });
   await pub('POST', `/v/${slug}`, { name: 'Repeat Person', email: 'repeat@example.org', roles: 'driver' }, { accept: 'application/json' });

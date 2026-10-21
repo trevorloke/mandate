@@ -4,10 +4,16 @@
 // decides where it sits (bottom sheet on phones, right panel on desktop).
 // Also exports AddDoorForm — the same person.create flow for a tapped spot
 // that has no door yet.
+//
+// Offline: every contact.log goes through the outbox (logContact), so a knock
+// tapped with no signal is saved on the phone and sent later — the card still
+// shows the rating straight away. Sign requests and new people need the
+// server, so those say plainly that they need signal.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { action } from '../api.js';
+import { action, ApiError } from '../api.js';
+import { logContact } from '../offline.js';
 import { SIGN_KINDS, ratingByCode } from '@starbase/shared/canvass';
 import RatingButtons, { RatingChip } from './RatingButtons.jsx';
 import '../pages/map.css';
@@ -34,6 +40,21 @@ const CHANNEL_BUTTONS = [
   { code: 'text', label: 'Text', at: 'by text' },
 ];
 const CHANNEL_AT = Object.fromEntries(CHANNEL_BUTTONS.map((c) => [c.code, c.at]));
+
+export const QUEUED_MSG = 'Saved offline — sends when you\'re back online';
+// Queued with signal showing: the server didn't answer (dead zone, outage).
+const QUEUED_NO_SERVER_MSG = 'Saved on this phone — sends once the server answers';
+export const OFFLINE_MSG = 'You\'re offline — try this again when you have signal';
+const SIGNED_OUT_MSG = 'Your sign-in ran out — sign in again, then tap this again';
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+// fetch() rejects with a TypeError (not an ApiError) when there's no network.
+const offlineError = (err) => isOffline() || !(err instanceof ApiError);
+// What to tell the canvasser when the server says no.
+const refusalMsg = (err, fallback) => {
+  if (offlineError(err)) return OFFLINE_MSG;
+  if (err.status === 401) return SIGNED_OUT_MSG;
+  return err.message || fallback;
+};
 
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 // Drop any extension ("604-555-0101 ext 2", "x2", "#2") before stripping to
@@ -81,11 +102,14 @@ const doorPerson = (p, fallback = {}) => ({
 // Everything that can change when a door is touched. ['person'] as a prefix,
 // not just ['person', id]: every profile also lists its household (name +
 // rating), so rating or adding someone here changes their housemates' pages.
+// ['turfs'] / ['turf', id]: turf stats (doors done, rated) and the walk
+// list's done ticks come from contacts and ratings, and a new door lands in
+// whichever turf it falls inside.
 // Only mounted queries refetch; the rest are just marked stale.
 function useRefresh() {
   const queryClient = useQueryClient();
   return () => {
-    for (const key of ['doors', 'persons', 'person', 'signs', 'contacts', 'brief']) {
+    for (const key of ['doors', 'persons', 'person', 'signs', 'contacts', 'brief', 'turfs', 'turf']) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -130,6 +154,7 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { setError('Name is required'); return; }
+    if (isOffline()) { setError(OFFLINE_MSG); toast(OFFLINE_MSG); return; }
     setBusy(true);
     setError(null);
     try {
@@ -149,7 +174,9 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
       refresh();
       onDone(res.person.id);
     } catch (err) {
-      setError(err.message);
+      const msg = refusalMsg(err, 'Could not save that person — try again');
+      setError(msg);
+      if (offlineError(err)) toast(msg);
       setBusy(false);
     }
   };
@@ -182,6 +209,7 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
     // Whitespace passes `required`; the server trims names (→ 400) and a
     // blank address would make an unaddressed pin, not a door.
     if (!form.name.trim() || !form.address.trim()) { setError('Name and address are required'); return; }
+    if (isOffline()) { setError(OFFLINE_MSG); toast(OFFLINE_MSG); return; }
     setBusy(true);
     setError(null);
     try {
@@ -201,7 +229,9 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
       refresh();
       onDone(res.person.id);
     } catch (err) {
-      setError(err.message);
+      const msg = refusalMsg(err, 'Could not save that person — try again');
+      setError(msg);
+      if (offlineError(err)) toast(msg);
       setBusy(false);
     }
   };
@@ -265,7 +295,9 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     const prev = { code: ratingOf(person), at: person.rated_at ?? null };
     if (rating) setRating(person, rating, new Date().toISOString());
     try {
-      await action('contact.log', {
+      // The outbox: sends now when there's signal, saves on the phone when
+      // there isn't (and replays exactly once — the server dedupes on its id).
+      const { queued } = await logContact({
         person_id: person.id,
         channel: via,
         outcome,
@@ -278,6 +310,12 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         setPending(null);
         setChannel('door');
       }
+      if (queued) {
+        // Keep the optimistic rating; Shell refreshes everything once the
+        // outbox sends. Refetching now would only pause (offline) or fail.
+        toast(isOffline() ? QUEUED_MSG : QUEUED_NO_SERVER_MSG);
+        return;
+      }
       const what = rating
         ? `${rating} · ${ratingByCode(rating)?.label}`
         : outcome === 'contacted'
@@ -286,8 +324,10 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       toast(`Logged ${what} — ${person.name}`);
       refresh();
     } catch (err) {
+      // Only a refusal lands here (bad input, no permission) — network
+      // trouble is queued above, never thrown.
       if (rating) setRating(person, prev.code, prev.at);
-      toast(err.message || 'Could not log that');
+      toast(refusalMsg(err, 'Could not log that — try again'));
     } finally {
       setBusy(false);
     }
@@ -295,6 +335,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
 
   const placeSign = async (kind) => {
     if (!sel || busy) return;
+    if (isOffline()) { toast(OFFLINE_MSG); return; }
     setBusy(true);
     try {
       const res = await action('sign.place', {
@@ -313,7 +354,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       }
       refresh();
     } catch (err) {
-      toast(err.message || 'Could not request that sign');
+      toast(refusalMsg(err, 'Could not request that sign — try again'));
     } finally {
       setBusy(false);
     }

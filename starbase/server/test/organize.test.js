@@ -97,6 +97,31 @@ test('event: public page, RSVP with guests, capacity enforced, listing counts, b
   assert.ok((await mgr.get('/api/brief')).json.events.some((x) => x.slug === 'town-hall'));
 });
 
+test('event: end time and capacity can be cleared; a deleted link is reusable; re-going respects capacity', async () => {
+  const starts = new Date(Date.now() + 6 * 86400e3).toISOString();
+  const e = (await mgr.action('cevent.create', { slug: 'house-party', title: 'House party', starts_at: starts,
+    ends_at: new Date(Date.now() + 6 * 86400e3 + 7200e3).toISOString(), capacity: 2 })).json.event;
+  await pub('POST', `/e/${slug}/house-party`, { name: 'G One' }, { accept: 'application/json' });
+  const two = await pub('POST', `/e/${slug}/house-party`, { name: 'G Two' }, { accept: 'application/json' });
+  assert.equal(two.status, 200);
+  const rs = (await mgr.get(`/api/campaign-events/${e.id}/rsvps`)).json.rsvps;
+  await mgr.action('rsvp.setStatus', { id: rs[0].id, status: 'cancelled' });
+  await pub('POST', `/e/${slug}/house-party`, { name: 'G Three' }, { accept: 'application/json' });
+  const back = await mgr.action('rsvp.setStatus', { id: rs[0].id, status: 'going' });
+  assert.equal(back.status, 409, 'cancelled → going cannot overfill');
+  assert.equal((await mgr.action('cevent.update', { id: e.id, capacity: null, ends_at: null })).status, 200);
+  const row = (await mgr.get('/api/campaign-events')).json.events.find((x) => x.id === e.id);
+  assert.equal(row.capacity, null);
+  assert.equal(row.ends_at, null);
+  assert.equal((await mgr.action('rsvp.setStatus', { id: rs[0].id, status: 'going' })).status, 200, 'no cap now');
+  assert.equal((await mgr.action('cevent.update', { id: e.id, title: 'House party!' })).status, 200);
+  assert.equal((await mgr.get('/api/campaign-events')).json.events.find((x) => x.id === e.id).capacity, null, 'omitted key leaves it');
+  assert.equal((await mgr.action('cevent.delete', { id: e.id })).status, 200);
+  const reuse = await mgr.action('cevent.create', { slug: 'house-party', title: 'House party 2', starts_at: starts });
+  assert.equal(reuse.status, 200, 'a deleted event frees its link');
+  assert.equal((await pub('GET', `/e/${slug}/house-party`)).status, 200);
+});
+
 // ── Donations ──
 const donate = (fields) => pub('POST', `/d/${slug}`, new URLSearchParams(fields).toString(),
   { 'content-type': 'application/x-www-form-urlencoded' });

@@ -152,13 +152,17 @@ export const ORGANIZE_ACTIONS = {
       public: z.boolean().nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
+      // null clears ends_at / capacity; an omitted key leaves it as is.
       const n = await tx.query(
         `update campaign_events set title = coalesce($3, title), description = coalesce($4, description),
-           location = coalesce($5, location), starts_at = coalesce($6, starts_at), ends_at = coalesce($7, ends_at),
-           capacity = coalesce($8, capacity), public = coalesce($9, public)
+           location = coalesce($5, location), starts_at = coalesce($6, starts_at),
+           ends_at = case when $10 then $7::timestamptz else ends_at end,
+           capacity = case when $11 then $8::int else capacity end,
+           public = coalesce($9, public)
          where id = $1 and workspace_id = $2 and deleted_at is null`,
         [input.id, ctx.workspaceId, input.title || null, input.description ?? null, input.location ?? null,
-         input.starts_at || null, input.ends_at || null, input.capacity ?? null, input.public ?? null],
+         input.starts_at || null, input.ends_at ?? null, input.capacity ?? null, input.public ?? null,
+         'ends_at' in input, 'capacity' in input],
       );
       if (n.affectedRows === 0) throw httpError(404, 'event not found');
       const { id, ...patch } = input;
@@ -171,8 +175,10 @@ export const ORGANIZE_ACTIONS = {
     roles: DESK_ROLES,
     input: z.object({ id: uuid() }),
     handler: async (tx, ctx, input, emit) => {
+      // Free the link so a new event can reuse it.
       const n = await tx.query(
-        'update campaign_events set deleted_at = now() where id = $1 and workspace_id = $2 and deleted_at is null',
+        `update campaign_events set deleted_at = now(), slug = slug || '--deleted-' || left(id::text, 8)
+         where id = $1 and workspace_id = $2 and deleted_at is null`,
         [input.id, ctx.workspaceId],
       );
       if (n.affectedRows === 0) throw httpError(404, 'event not found');
@@ -185,11 +191,19 @@ export const ORGANIZE_ACTIONS = {
     roles: DESK_ROLES,
     input: z.object({ id: uuid(), status: z.enum(['going', 'cancelled', 'attended']) }),
     handler: async (tx, ctx, input, emit) => {
-      const n = await tx.query(
-        'update event_rsvps set status = $3 where id = $1 and workspace_id = $2',
-        [input.id, ctx.workspaceId, input.status],
-      );
-      if (n.affectedRows === 0) throw httpError(404, 'RSVP not found');
+      const cur = (await tx.query(
+        `select r.status, r.guests, r.event_id, e.capacity from event_rsvps r join campaign_events e on e.id = r.event_id
+         where r.id = $1 and r.workspace_id = $2`, [input.id, ctx.workspaceId],
+      )).rows[0];
+      if (!cur) throw httpError(404, 'RSVP not found');
+      if (cur.status === 'cancelled' && input.status !== 'cancelled' && cur.capacity) {
+        const going = (await tx.query(
+          `select coalesce(sum(1 + guests), 0)::int as n from event_rsvps where event_id = $1 and status <> 'cancelled'`,
+          [cur.event_id],
+        )).rows[0].n;
+        if (going + 1 + cur.guests > cur.capacity) throw httpError(409, 'event is at capacity');
+      }
+      await tx.query('update event_rsvps set status = $3 where id = $1 and workspace_id = $2', [input.id, ctx.workspaceId, input.status]);
       emit('rsvp', input.id, 'update', { status: input.status });
       return input;
     },

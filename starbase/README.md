@@ -33,8 +33,9 @@ open `/join/:token`, set a password, and land on the map (volunteers) or Today.
 - **Signs**: billboard, large, lawn, with status and location.
 - **Donors**: one-time, monthly, **star** ($1K+/yr or $100+/mo), **superstar**
   ($3K+/yr or $250+/mo) — derived from real gifts, never self-declared.
-- **Volunteer roles** (14): driver, scrutineer, doorknocking, mainstreeting,
-  phoning, data entry, event hosting, zone house captain, food, translation
+- **Volunteer roles** (15): driver, scrutineer, doorknocking, mainstreeting,
+  phoning, data entry, event hosting, zone house captain, hi-rise building
+  captain (+building), food, translation
   (+language), burmashave, community committee (+area), policy, administration.
 - **Tags**: free-form, seeded with media, VIP, endorser, host, …
 - **Socials**: per-person handles for Facebook, Instagram, X, TikTok, YouTube,
@@ -54,7 +55,7 @@ Public pages, no login, linkable from the site (workspace slug from signup):
 
 - `/p/:slug/:petition` — petition signature page
 - `/n/:slug` — newsletter signup · `/u/:subscriptionId` — one-click unsubscribe
-- `/v/:slug` — volunteer signup with the 14 roles
+- `/v/:slug` — volunteer signup with the 15 roles
 
 The site can also keep its own forms and post JSON here (CORS-open):
 
