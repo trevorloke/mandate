@@ -62,56 +62,77 @@ either `DATABASE_URL=postgres://…` or a volume at `/data`.
 
 ## 3 · What to test, by role
 
-Invite real people from **Team** (top right, managers only). Each invite is a
-one-time link — emailed if email is connected, otherwise copy and text it.
+Invite real people from **Team** (tap your initials, top right — managers
+only). Each invite is a one-time link — emailed if email is connected,
+otherwise copy and text it.
+
+Every screen has one yellow button: that's the main job. Everything else is
+one tap away under **More**.
 
 ### Manager (you)
-- **Today** — doors this week, support bar, money raised, flagged gifts,
-  upcoming shift and event, your turf.
+- **Today** — three big numbers (doors this week · support · raised); tap
+  *Support* for the breakdown by candidate. **Needs you** lists what's waiting:
+  gifts over the limit, open pledges, filings due, shifts short of people,
+  signs to put up.
 - **Outreach → Website** — set the Imagine Surrey website address; copy the
   public volunteer page (`/v/imagine-surrey`), newsletter page
   (`/n/imagine-surrey`), petition, event, and donate (`/d/imagine-surrey`)
-  links; try the embed snippets on a test page of the site.
+  links; *For your web developer* has the embed code for the site.
 - **Team** — invite a volunteer and a staff member; change a role.
 
 ### Volunteer (on a phone)
-- Open the invite link → set a password → lands on the **Map**.
-- Tap a door → rate **1 · 2 · 3 · 4 · 4D · 4B · 4F · 4N · 4C**, or *No answer*;
-  request a lawn sign; **Call** / **Text** open the phone's dialer and log in
-  one tap.
-- **Today → Your turf → Walk list** — doors in walking order (odd side up,
-  even side back); rate as you go.
-- **Offline**: turn on airplane mode, rate three doors (they say *saved
+- Open the invite link → set a password → lands on the **Map**. Tabs:
+  **Today · Map · Calls · Shifts**.
+- **Today → Start canvassing** opens your walk list (doors in walking order:
+  odd side up, even side back). Tap a door → **1 · 2 · 3 · 4** (each says what
+  it means). **4** asks *Voting for?* — McCallum · Locke · Annis · van Vliet ·
+  Randhawa · Not sure. A toast confirms; *Change* fixes a mis-tap.
+- **More** on a door: note, Call / Text (the phone's own dialer), request a
+  lawn / large sign or billboard (with Undo), add a person at the door.
+- **Calls** — one person at a time: Call or Text, then rate; *No answer*,
+  *Refused*, *Skip*.
+- **Shifts** — *Count me in* on an open shift; *Can't make it* to drop out.
+- **Signs** (from Today when there are signs to put up) — *Put up ✓*.
+- **Offline**: turn on airplane mode, rate three doors (they say *Saved
   offline*), turn it off — they send once, never twice.
-- Confirm a volunteer **never sees money**: no Money tab, no totals, no gifts
-  on profiles.
+- Confirm a volunteer **never sees money or the supporter list**: no Money,
+  People or Outreach; typing those addresses lands back on Today.
 
 ### Staff
-- **People** — filter by rating, tag (media, VIP…), or volunteer role; open a
-  profile; add tags, roles, social handles; **Phone bank** / **Text bank**.
-- **Shifts** — create a shift with instructions and a link, assign
-  volunteers, **Notify everyone** (email + text).
-- **Signs** — place billboard / large / lawn signs; move requested → installed.
-- **Map → Turfs → Draw turf** — tap the corners of an area, name it, assign a
-  volunteer.
+- **People** — search; **Filter** by rating, tag (media, VIP…), or volunteer
+  role (incl. *Hi-rise building captain*); open a profile; add tags, roles,
+  social handles. **More → Call list / Text list** opens Calls with the same
+  filter.
+- **Shifts** — **New shift** (what, when, where, how many; role,
+  instructions and link under *More details*), **Add volunteer**, then
+  **Notify everyone** (email + text). Without email/text connected it says
+  *Saved* — nothing claims to be sent.
+- **Signs** — tap Requested / Installed / Removed to filter; **Add sign**.
+- **Map → filter button → Draw turf** — tap the corners, name it, assign a
+  canvasser.
 
 ### Treasurer
-- **Money** — log a gift; log enough to one donor to cross the annual limit
-  (sample: *Arjun Mehta* is already flagged). Donor tiers on profiles:
+- **Money** — **Log a gift**; log enough to one donor to cross the annual
+  limit (sample: *Arjun Mehta* is already over). Donor tiers on profiles:
   star ($1K+/yr or $100+/mo), superstar ($3K+/yr or $250+/mo).
 - **Donate page** (`/d/imagine-surrey`, in a private window): try without the
   eligibility boxes (refused), more than the annual limit (refused), then a
-  real pledge → it appears in **Money → Pledges** → *Mark received* turns it
+  real pledge → it appears under **Money → Needs you** → *Received* turns it
   into a gift (cap-checked).
-- **Today → Verify my books** — replays the tamper-evident log.
+- **Today → More → Verify my books** replays the tamper-evident log;
   **Export all data** downloads everything.
 
+### Public volunteer page
+- `/v/imagine-surrey` in a private window: tick *Hi-rise building captain* —
+  it asks which building; *Translation* asks the language. Each ticked role is
+  saved with its own detail, and the note lands once on the person's profile.
+
 ### Import your own lists
-**People → Import CSV.** Try `starbase/samples/surrey-import-test.csv` first —
+**People → More → Import.** Try `starbase/samples/surrey-import-test.csv` first —
 fictional people at *public building* addresses (City Hall, rec centres). The
 check step should report **8 new, 1 merged** (Jordan Lee appears twice with
 the same email), and **2 refused** (one row has no name, one has rating "7").
-Then **Place everyone on the map** looks the addresses up with the BC Address
+Then **Place on map** looks the addresses up with the BC Address
 Geocoder (needs internet).
 
 For your real voters list: map its columns on the second step; re-importing
@@ -128,5 +149,5 @@ the same file never creates duplicates.
 - The BC municipal contribution limit is seeded at the 2022 figure
   ($1,250) — **confirm the current indexed amount with Elections BC** and set
   it before relying on cap checks.
-- Phone and text banks use the phone's own dialer and messages (no
+- Calls and texts use the phone's own dialer and messages (no
   auto-dialer).

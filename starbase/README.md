@@ -5,19 +5,25 @@ door on it, a one-tap rating scale at the door, phone, and by text — with
 signs, volunteers, shifts, money, compliance, and outreach around it. Lives
 beside the legacy app in this repo; nothing in the repo root is touched.
 
-## The seven things a campaign does (the whole sidebar)
+## The seven things a campaign does (the whole tab bar)
+
+Every screen is built to [SIMPLE.md](SIMPLE.md): one job per screen, one yellow
+button, no paragraphs, everything else one tap away.
 
 | Screen | What it is |
 |---|---|
-| **Today** | Doors this week, the support bar, money raised, flags, upcoming shifts, filings |
-| **Map** | Field mode. Houses as clickable pins; tap a door → rate, log, request a sign, call/text |
-| **People** | Everyone, filterable by rating / tag / role; profiles with socials, roles, gifts, history; phone + text banks |
-| **Shifts** | Schedule volunteers, assign by role, notify by email + text with instructions and a link |
+| **Today** | Desk: three big numbers (doors · support · raised) and *Needs you*. Volunteers: one big *Start canvassing* and their next shift |
+| **Map** | Field mode. Houses as clickable pins; tap a door → rate, log, request a sign, call/text. Turfs and walk lists |
+| **People** | Everyone, filterable by rating / tag / role; profiles with socials, roles, gifts, history; **Calls** works a list one person at a time |
+| **Shifts** | Schedule volunteers, assign by role, notify by email + text with instructions and a link; volunteers tap *Count me in* |
 | **Money** | Gifts (one-time / monthly) with the entity-keyed cap engine; donor tiers; filings |
 | **Signs** | Billboards (4×8), large (4×4), lawn — requested → installed → removed |
 | **Outreach** | Newsletter + press-release blasts, petitions, and the Imagine Surrey website bridge |
 
-Managers reach **Team** from the header: invite volunteers and staff by email
+Volunteers get four tabs — **Today · Map · Calls · Shifts** — plus *Signs to
+put up* for sign crews; desk-only addresses send them back to Today.
+
+Managers reach **Team** from the account menu (their initials): invite volunteers and staff by email
 (or copy the join link and text it), set roles, see pending invites. Invitees
 open `/join/:token`, set a password, and land on the map (volunteers) or Today.
 
@@ -27,6 +33,8 @@ open `/join/:token`, set a password, and land on the map (volunteers) or Today.
 `4D` McCallum · `4B` Surrey Connect / Locke · `4F` Surrey First / Annis ·
 `4N` SurreyNow / van Vliet · `4C` Surrey Conservatives / Randhawa
 (`shared/canvass.js` — one vocabulary for server validation and the UI).
+On screen the buttons read *1 Strong yes · 2 Lean yes · 3 Undecided ·
+4 Opposed*; tapping 4 asks *Voting for?* with the five surnames or *Not sure*.
 
 ### What's tracked
 
@@ -45,9 +53,9 @@ open `/join/:token`, set a password, and land on the map (volunteers) or Today.
 
 | | Starbase today | Next |
 |---|---|---|
-| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, phone/text banks | turf cutting & assignment, survey builder, offline replica (v0.2 sync) |
+| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, offline door knocks | survey builder, full offline replica |
 | **Action Builder** | assessments (= the rating scale), tags, roles, relational notes, event-logged every touch | custom assessment ladders per campaign, relationship graph |
-| **Action Network** | newsletter list + signup page + unsubscribe, press list + releases, petitions with public pages, volunteer signup page, website JSON bridge | event RSVP pages, donation pages, ladders of engagement, A/B subject lines |
+| **Action Network** | newsletter list + signup page + unsubscribe, press list + releases, petitions with public pages, volunteer signup page, event RSVP pages, donation pages (Stripe or pledges), website JSON bridge | ladders of engagement, A/B subject lines |
 
 ## Website bridge (Imagine Surrey)
 
@@ -55,14 +63,16 @@ Public pages, no login, linkable from the site (workspace slug from signup):
 
 - `/p/:slug/:petition` — petition signature page
 - `/n/:slug` — newsletter signup · `/u/:subscriptionId` — one-click unsubscribe
-- `/v/:slug` — volunteer signup with the 15 roles
+- `/v/:slug` — volunteer signup with the 15 roles (a hi-rise captain is asked
+  which building; translators, which language)
 
 The site can also keep its own forms and post JSON here (CORS-open):
 
 ```http
 POST /api/public/:slug/signup
 { "kind": "newsletter" | "volunteer" | "petition", "name", "email", "phone",
-  "roles": ["doorknocking"], "petition": "<petition-slug>", "subscribe": true }
+  "roles": ["highrise_captain"], "detail_highrise_captain": "<building>",
+  "petition": "<petition-slug>", "subscribe": true, "note": "…" }
 ```
 
 Every public submission lands in the directory as a Person (deduped by email),
