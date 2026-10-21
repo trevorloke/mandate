@@ -63,6 +63,11 @@ export const ACTIONS = {
       )).rows[0];
       if (!cur) throw httpError(404, 'person not found');
       const next = { ...rowToPerson(cur), ...patch };
+      // A changed address makes the old pin wrong: drop it (the person lands in
+      // the map's "place" list) unless the same patch supplies new coordinates.
+      const addrChanged = ('address' in patch && (patch.address || null) !== (cur.address || null))
+        || ('unit' in patch && (patch.unit || null) !== (cur.unit || null));
+      if (addrChanged && !('lat' in patch) && !('lng' in patch)) { next.lat = null; next.lng = null; }
       await tx.query(
         `update persons set kind = $3, name = $4, email = $5, phone = $6, address = $7,
            unit = $8, city = $9, postal = $10, lat = $11, lng = $12, tags = $13, socials = $14,

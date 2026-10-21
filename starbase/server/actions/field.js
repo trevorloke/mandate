@@ -21,7 +21,7 @@ const isoTs = () => z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, 'expected
 
 const requirePerson = async (tx, workspaceId, id) => {
   const p = (await tx.query(
-    'select id, name, email, phone, address from persons where id = $1 and workspace_id = $2 and deleted_at is null',
+    'select id, name, email, phone, address, lat, lng from persons where id = $1 and workspace_id = $2 and deleted_at is null',
     [id, workspaceId],
   )).rows[0];
   if (!p) throw httpError(400, 'person not found in this workspace');
@@ -91,6 +91,7 @@ export const FIELD_ACTIONS = {
       if (input.person_id) {
         const p = await requirePerson(tx, ctx.workspaceId, input.person_id);
         address = address || p.address;
+        if (lat == null && lng == null && p.lat != null && p.lng != null) { lat = p.lat; lng = p.lng; }
       }
       const id = newId();
       await tx.query(

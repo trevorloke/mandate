@@ -331,10 +331,13 @@ app.get('/records/:type', async (c) => {
     params.push(ts, id);
     where += ` and (created_at, id) < ($3::timestamptz, $4::uuid)`;
   }
-  const { rows } = await c.get('db').query(
-    `select * from ${t.table} where ${where} order by created_at desc, id desc limit $2`,
-    params,
-  );
+  // Gifts carry the donor's name so the ledger needs no per-row lookups.
+  const select = type === 'gift'
+    ? `select g.*, p.name as person_name from gifts g left join persons p on p.id = g.person_id
+       where ${where.replace(/\b(workspace_id|deleted_at|created_at|id)\b/g, 'g.$1')}
+       order by g.created_at desc, g.id desc limit $2`
+    : `select * from ${t.table} where ${where} order by created_at desc, id desc limit $2`;
+  const { rows } = await c.get('db').query(select, params);
   const next = rows.length === limit
     ? `${new Date(rows[rows.length - 1].created_at).toISOString()}~${rows[rows.length - 1].id}`
     : null;

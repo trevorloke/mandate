@@ -15,9 +15,9 @@ const NAV = [
   { to: '/map',      label: 'Map' },
   { to: '/people',   label: 'People' },
   { to: '/shifts',   label: 'Shifts' },
-  { to: '/money',    label: 'Money' },
+  { to: '/money',    label: 'Money',    desk: true },
   { to: '/signs',    label: 'Signs' },
-  { to: '/outreach', label: 'Outreach' },
+  { to: '/outreach', label: 'Outreach', desk: true },
 ];
 
 export default function Shell({ me }) {
@@ -25,6 +25,7 @@ export default function Shell({ me }) {
   const queryClient = useQueryClient();
 
   const canMoney = me.role !== 'volunteer';
+  const nav = NAV.filter((n) => canMoney || !n.desk); // volunteers: field screens only
   useEffect(() => {
     if (!canMoney) return undefined;
     const onKey = (e) => {
@@ -49,7 +50,7 @@ export default function Shell({ me }) {
         <div className="nav-inner">
           <NavLink to="/" className="brand">Starbase</NavLink>
           <nav className="links" aria-label="Main">
-            {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}</NavLink>)}
+            {nav.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}</NavLink>)}
           </nav>
           <span className="spacer" />
           <span className="ws">{me.workspace.name}</span>
@@ -63,8 +64,8 @@ export default function Shell({ me }) {
           <Outlet context={{ me }} />
         </Suspense>
       </main>
-      <nav className="tabbar" aria-label="Main (mobile)">
-        {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}</NavLink>)}
+      <nav className="tabbar" aria-label="Main (mobile)" style={{ gridTemplateColumns: `repeat(${nav.length}, 1fr)` }}>
+        {nav.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}</NavLink>)}
       </nav>
     </>
   );

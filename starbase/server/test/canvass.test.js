@@ -184,3 +184,43 @@ test('brief carries field stats, rating breakdown, signs, provider flags', async
   assert.equal(typeof b.json.providers.email, 'boolean');
   assert.equal(typeof b.json.providers.text, 'boolean');
 });
+
+test('changing an address drops the stale pin; supplying new coordinates keeps them', async () => {
+  const p = await c.createPerson('Mover', { address: '100 Old St', lat: 49.1, lng: -122.8 });
+  const moved = await c.action('person.update', { id: p.id, address: '200 New Ave' });
+  assert.equal(moved.status, 200);
+  let prof = (await c.get(`/api/persons/${p.id}`)).json.person;
+  assert.equal(prof.lat, null, 'old pin cleared');
+  assert.equal(prof.address, '200 New Ave');
+  await c.action('person.update', { id: p.id, address: '300 Third Rd', lat: 49.2, lng: -122.7 });
+  prof = (await c.get(`/api/persons/${p.id}`)).json.person;
+  assert.equal(prof.lat, 49.2, 'new coordinates in the same patch are kept');
+  await c.action('person.update', { id: p.id, phone: '604-555-0333' });
+  prof = (await c.get(`/api/persons/${p.id}`)).json.person;
+  assert.equal(prof.lat, 49.2, 'non-address edits leave the pin alone');
+});
+
+test('a sign requested at a pinned person inherits the pin, so it shows on the map', async () => {
+  const p = await c.createPerson('Pinned Host', { address: '9000 Pin St', lat: 49.15, lng: -122.81 });
+  const s = await c.action('sign.place', { person_id: p.id, kind: 'large' });
+  assert.equal(s.status, 200);
+  const doors = (await c.get('/api/map/doors')).json;
+  const sign = doors.signs.find((x) => x.id === s.json.sign.id);
+  assert.equal(sign.lat, 49.15);
+  assert.equal(sign.lng, -122.81);
+});
+
+test('the gift ledger carries donor names (no per-row lookups)', async () => {
+  const p = await c.createPerson('Named Donor');
+  await c.action('gift.log', { person_id: p.id, amount_cents: 1000, date: '2026-05-01' });
+  const page1 = await c.get('/api/records/gift?limit=2');
+  assert.equal(page1.status, 200);
+  assert.ok(page1.json.records.every((r) => typeof r.person_name === 'string'));
+  assert.equal(page1.json.records[0].person_name, 'Named Donor');
+  if (page1.json.next) {
+    const page2 = await c.get(`/api/records/gift?limit=2&cursor=${encodeURIComponent(page1.json.next)}`);
+    assert.equal(page2.status, 200, 'cursor still works with the join');
+    const ids = new Set(page1.json.records.map((r) => r.id));
+    assert.ok(page2.json.records.every((r) => !ids.has(r.id)), 'no overlap across pages');
+  }
+});
