@@ -91,6 +91,7 @@ create table if not exists contacts (
   outcome text not null check (outcome in ('contacted', 'no_answer', 'refused', 'moved', 'inaccessible')),
   rating text,
   note text,
+  client_id uuid,
   created_by uuid references users(id),
   created_at timestamptz not null default now()
 );
@@ -239,6 +240,85 @@ create table if not exists events (
 );
 create index if not exists events_entity_idx on events (workspace_id, entity_type, entity_id);
 
+-- Turfs: polygons drawn on the map, assigned to canvassers; walk lists are
+-- the located doors inside.
+create table if not exists turfs (
+  id uuid primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  name text not null,
+  polygon jsonb not null,
+  color text,
+  notes text,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+create table if not exists turf_members (
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  turf_id uuid not null references turfs(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (turf_id, user_id)
+);
+
+-- Public campaign events (town halls, rallies, house parties) with RSVPs.
+create table if not exists campaign_events (
+  id uuid primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  slug text not null,
+  title text not null,
+  description text,
+  location text,
+  starts_at timestamptz not null,
+  ends_at timestamptz,
+  capacity int,
+  public boolean not null default true,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  unique (workspace_id, slug)
+);
+create table if not exists event_rsvps (
+  id uuid primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  event_id uuid not null references campaign_events(id) on delete cascade,
+  person_id uuid references persons(id) on delete set null,
+  name text not null,
+  email text,
+  phone text,
+  guests int not null default 0,
+  status text not null default 'going' check (status in ('going', 'cancelled', 'attended')),
+  created_at timestamptz not null default now()
+);
+create index if not exists rsvp_event_idx on event_rsvps (workspace_id, event_id);
+
+-- Online donations: a pledge is created at the donate page; it becomes a gift
+-- when payment is confirmed (Stripe webhook) or the treasurer marks it received.
+create table if not exists pledges (
+  id uuid primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  person_id uuid references persons(id) on delete set null,
+  name text not null,
+  email text not null,
+  phone text,
+  address text not null,
+  amount_cents int not null check (amount_cents > 0),
+  cadence text not null default 'one-time' check (cadence in ('one-time', 'monthly')),
+  status text not null default 'pledged' check (status in ('pledged', 'pending', 'paid', 'received', 'cancelled')),
+  attest jsonb not null default '{}',
+  stripe_session_id text,
+  gift_id uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists pledges_ws_idx on pledges (workspace_id, status);
+
+-- Stripe webhook deliveries already applied (retries must not double-count).
+create table if not exists stripe_events (
+  id text primary key,
+  workspace_id uuid references workspaces(id) on delete cascade,
+  type text not null,
+  created_at timestamptz not null default now()
+);
+
 -- Contribution-cap rules, per jurisdiction and year. Seeded with the BC
 -- provincial annual individual limit; VERIFY the current indexed amount with
 -- Elections BC before relying on it for a filing year. Workspaces may
@@ -274,11 +354,20 @@ alter table persons add column if not exists socials jsonb not null default '{}'
 alter table persons add column if not exists rating text;
 alter table persons add column if not exists rated_at timestamptz;
 alter table gifts add column if not exists cadence text;
+alter table contacts add column if not exists client_id uuid;
+create unique index if not exists contacts_client_idx on contacts (workspace_id, client_id) where client_id is not null;
 `;
 
 export const bootstrap = async (db) => {
-  await db.exec(CORE);
-  for (const key of recordTypeKeys()) await db.exec(ddlFor(key));
-  await db.exec(ALTERS);
-  await db.exec(SEED);
+  // Several instances may boot against one Postgres at once; serialize DDL.
+  const lock = db.kind === 'postgres';
+  if (lock) await db.query('select pg_advisory_lock(7271989)');
+  try {
+    await db.exec(CORE);
+    for (const key of recordTypeKeys()) await db.exec(ddlFor(key));
+    await db.exec(ALTERS);
+    await db.exec(SEED);
+  } finally {
+    if (lock) await db.query('select pg_advisory_unlock(7271989)');
+  }
 };

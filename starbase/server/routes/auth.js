@@ -14,7 +14,11 @@ import {
 
 const app = new Hono();
 
-const cookieOpts = { httpOnly: true, sameSite: 'Lax', path: '/' };
+// Secure cookies behind TLS: on in production unless STARBASE_SECURE_COOKIES=0
+// (e.g. a local container on plain http); force on anywhere with =1.
+const secureFlag = process.env.STARBASE_SECURE_COOKIES;
+const secure = secureFlag ? secureFlag === '1' : process.env.NODE_ENV === 'production';
+const cookieOpts = { httpOnly: true, sameSite: 'Lax', path: '/', secure, maxAge: 30 * 86400 };
 
 const signupInput = z.object({
   name: z.string().trim().min(1).max(200),

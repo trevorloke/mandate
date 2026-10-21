@@ -11,6 +11,8 @@ import { ACTIONS, httpError } from '../actions/index.js';
 import { tierFor } from '../lib/tiers.js';
 import { emailConfigured, textConfigured } from '../lib/notify.js';
 import { RECORD_TYPES } from '@starbase/shared/registry';
+import dataRoutes from './data.js';
+import { pointInPolygon, groupDoors, walkOrder } from '../lib/geo.js';
 
 const app = new Hono();
 
@@ -31,6 +33,7 @@ app.use('*', async (c, next) => {
 const DESK_ONLY_READS = [
   /^\/api\/records\//, /^\/api\/export$/, /^\/api\/events$/, /^\/api\/audit\/verify$/,
   /^\/api\/subscriptions$/, /^\/api\/blasts$/, /^\/api\/petitions\/[^/]+\/signatures$/,
+  /^\/api\/pledges$/, /^\/api\/campaign-events\/[^/]+\/rsvps$/, /^\/api\/members$/,
 ];
 app.use('*', async (c, next) => {
   if (c.get('ctx').role === 'volunteer' && c.req.method === 'GET'
@@ -193,6 +196,124 @@ app.get('/persons/:id', async (c) => {
     return c.json({ person: personRow(person), gifts: [], totals: [], contacts, roles, signs, shifts, donor: null, household });
   }
   return c.json({ person: personRow(person), gifts, totals, contacts, roles, signs, shifts, donor, household });
+});
+
+app.route('/data', dataRoutes); // import · geocode · sample (desk roles; own guard)
+
+// ── Turfs + walk lists ──
+const parseJ = (v, d) => (typeof v === 'string' ? JSON.parse(v) : (v ?? d));
+const loadLocated = async (db, ws) => (await db.query(
+  `select p.id, p.name, p.phone, p.address, p.unit, p.lat, p.lng, p.rating, p.tags,
+          (select max(c.created_at) from contacts c where c.person_id = p.id) as last_contact_at,
+          (select c.outcome from contacts c where c.person_id = p.id order by c.created_at desc limit 1) as last_outcome
+   from persons p where p.workspace_id = $1 and p.deleted_at is null and p.lat is not null and p.lng is not null`,
+  [ws],
+)).rows.map((p) => ({ ...p, tags: parseJ(p.tags, []) }));
+
+const turfStats = (polygon, located) => {
+  const inside = located.filter((p) => pointInPolygon(p.lat, p.lng, polygon));
+  const doors = groupDoors(inside);
+  const doneDoor = (d) => d.persons.some((p) => p.last_contact_at);
+  return {
+    doors: doors.length,
+    people: inside.length,
+    doorsDone: doors.filter(doneDoor).length,
+    rated: inside.filter((p) => p.rating).length,
+  };
+};
+
+app.get('/turfs', async (c) => {
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const desk = ctx.role !== 'volunteer';
+  const turfs = (await db.query(
+    desk
+      ? 'select * from turfs where workspace_id = $1 and deleted_at is null order by created_at'
+      : `select t.* from turfs t join turf_members m on m.turf_id = t.id and m.user_id = $2
+         where t.workspace_id = $1 and t.deleted_at is null order by t.created_at`,
+    desk ? [ctx.workspaceId] : [ctx.workspaceId, ctx.user.id],
+  )).rows;
+  const members = (await db.query(
+    `select m.turf_id, u.id, u.name from turf_members m join users u on u.id = m.user_id where m.workspace_id = $1`,
+    [ctx.workspaceId],
+  )).rows;
+  const located = await loadLocated(db, ctx.workspaceId);
+  return c.json({
+    turfs: turfs.map((t) => {
+      const polygon = parseJ(t.polygon, []);
+      return {
+        id: t.id, name: t.name, color: t.color, notes: t.notes, polygon, created_at: t.created_at,
+        members: members.filter((m) => m.turf_id === t.id).map(({ id, name }) => ({ id, name })),
+        ...turfStats(polygon, located),
+      };
+    }),
+  });
+});
+
+app.get('/turfs/:id/walk', async (c) => {
+  if (badId(c)) return c.json({ error: 'not found' }, 404);
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const t = (await db.query('select * from turfs where id = $1 and workspace_id = $2 and deleted_at is null',
+    [c.req.param('id'), ctx.workspaceId])).rows[0];
+  if (!t) return c.json({ error: 'not found' }, 404);
+  if (ctx.role === 'volunteer') {
+    const mine = (await db.query('select 1 from turf_members where turf_id = $1 and user_id = $2', [t.id, ctx.user.id])).rows[0];
+    if (!mine) return c.json({ error: 'this turf is not assigned to you' }, 403);
+  }
+  const polygon = parseJ(t.polygon, []);
+  const located = await loadLocated(db, ctx.workspaceId);
+  const doors = walkOrder(groupDoors(located.filter((p) => pointInPolygon(p.lat, p.lng, polygon))));
+  return c.json({
+    turf: { id: t.id, name: t.name, color: t.color, notes: t.notes, polygon },
+    doors: doors.map((d) => ({ ...d, done: d.persons.some((p) => p.last_contact_at) })),
+    stats: turfStats(polygon, located),
+  });
+});
+
+// Team members for assignment pickers (desk roles; /team stays manager-only).
+app.get('/members', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select u.id, u.name, m.role from memberships m join users u on u.id = m.user_id
+     where m.workspace_id = $1 order by u.name`, [ctx.workspaceId],
+  );
+  return c.json({ members: rows });
+});
+
+// ── Campaign events + RSVPs ──
+app.get('/campaign-events', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select e.*,
+       coalesce((select sum(1 + r.guests) from event_rsvps r where r.event_id = e.id and r.status <> 'cancelled'), 0)::int as going,
+       coalesce((select count(*) from event_rsvps r where r.event_id = e.id and r.status = 'attended'), 0)::int as attended
+     from campaign_events e where e.workspace_id = $1 and e.deleted_at is null order by e.starts_at`,
+    [ctx.workspaceId],
+  );
+  return c.json({ events: rows, slug: ctx.workspace.slug });
+});
+
+app.get('/campaign-events/:id/rsvps', async (c) => {
+  if (badId(c)) return c.json({ error: 'not found' }, 404);
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select id, person_id, name, email, phone, guests, status, created_at from event_rsvps
+     where workspace_id = $1 and event_id = $2 order by created_at`,
+    [ctx.workspaceId, c.req.param('id')],
+  );
+  return c.json({ rsvps: rows });
+});
+
+// ── Pledges (money roles) ──
+app.get('/pledges', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select id, person_id, name, email, phone, address, amount_cents, cadence, status, gift_id, stripe_session_id, created_at
+     from pledges where workspace_id = $1 order by created_at desc limit 500`,
+    [ctx.workspaceId],
+  );
+  return c.json({ pledges: rows, slug: ctx.workspace.slug, stripe: !!process.env.STRIPE_SECRET_KEY });
 });
 
 // ── Team (managers) ──
@@ -408,6 +529,21 @@ app.get('/brief', async (c) => {
   const signs = (await db.query(
     `select status, count(*)::int as n from signs where workspace_id = $1 group by status`, [ws],
   )).rows;
+  const events = (await db.query(
+    `select e.id, e.slug, e.title, e.starts_at, e.location, e.capacity,
+       coalesce((select sum(1 + r.guests) from event_rsvps r where r.event_id = e.id and r.status <> 'cancelled'), 0)::int as going
+     from campaign_events e where e.workspace_id = $1 and e.deleted_at is null and e.starts_at >= now()
+     order by e.starts_at limit 3`, [ws],
+  )).rows;
+  const myTurfs = (await db.query(
+    `select t.id, t.name from turfs t join turf_members m on m.turf_id = t.id and m.user_id = $2
+     where t.workspace_id = $1 and t.deleted_at is null order by t.created_at`, [ws, ctx.user.id],
+  )).rows;
+  const openPledges = (await db.query(
+    `select count(*)::int as n, coalesce(sum(amount_cents), 0)::int as cents from pledges
+     where workspace_id = $1 and status in ('pledged', 'pending')`, [ws],
+  )).rows[0];
+  const sampleLoaded = !!(ctx.workspace.settings?.sample);
   const activation = {
     steps: [
       { key: 'person', label: 'Add your first person', done: people.total > 0 },
@@ -428,6 +564,10 @@ app.get('/brief', async (c) => {
     ratings: Object.fromEntries(ratings.map((r) => [r.rating, r.n])),
     shifts,
     signs: Object.fromEntries(signs.map((r) => [r.status, r.n])),
+    events,
+    myTurfs,
+    pledges: desk ? openPledges : null,
+    sampleLoaded,
     providers: { email: emailConfigured(), text: textConfigured() },
     activation,
     generatedAt: new Date().toISOString(),

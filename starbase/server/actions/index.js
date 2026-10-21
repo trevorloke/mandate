@@ -6,8 +6,9 @@
 import { z } from 'zod';
 import { zodFor } from '@starbase/shared/registry';
 import { newId } from '../lib/events.js';
-import { checkCap } from '../lib/cap.js';
+import { logGift } from '../lib/gifts.js';
 import { FIELD_ACTIONS, personFieldExtensions } from './field.js';
+import { ORGANIZE_ACTIONS } from './organize.js';
 import { httpError } from './util.js';
 export { httpError };
 
@@ -86,43 +87,7 @@ export const ACTIONS = {
   'gift.log': {
     roles: MONEY_ROLES,
     input: zodFor('gift'),
-    handler: async (tx, ctx, input, emit) => {
-      const donor = (await tx.query(
-        'select id, name from persons where id = $1 and workspace_id = $2 and deleted_at is null',
-        [input.person_id, ctx.workspaceId],
-      )).rows[0];
-      if (!donor) throw httpError(400, 'donor not found in this workspace — create the person first');
-
-      const id = newId();
-      await tx.query(
-        `insert into gifts (id, workspace_id, person_id, amount_cents, date, method, cadence, note)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, ctx.workspaceId, input.person_id, input.amount_cents, input.date,
-         input.method || null, input.cadence || 'one-time', input.note || null],
-      );
-
-      // Cap check inside the same transaction: the SUM already includes this
-      // gift, so the exact crossing record is the one that gets flagged.
-      const cap = await checkCap(tx, {
-        workspaceId: ctx.workspaceId,
-        personId: input.person_id,
-        date: input.date,
-        jurisdiction: ctx.workspace.jurisdiction,
-        settings: ctx.workspace.settings,
-      });
-      let flagReason = null;
-      if (cap.checked && cap.over) {
-        flagReason = `${donor.name} is at $${(cap.totalCents / 100).toFixed(2)} for ${cap.year} — over the $${(cap.capCents / 100).toFixed(2)} limit (${cap.source})`;
-        await tx.query(
-          'update gifts set flagged = true, flag_reason = $3 where id = $1 and workspace_id = $2',
-          [id, ctx.workspaceId, flagReason],
-        );
-      }
-
-      const payload = { id, ...input, flagged: !!flagReason, flag_reason: flagReason };
-      emit('gift', id, 'create', payload);
-      return { gift: payload, compliance: cap };
-    },
+    handler: (tx, ctx, input, emit) => logGift(tx, ctx.workspace, input, emit),
   },
 
   'gift.void': {
@@ -196,6 +161,7 @@ export const ACTIONS = {
   },
 
   ...FIELD_ACTIONS,
+  ...ORGANIZE_ACTIONS,
 };
 
 const isoDate = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));

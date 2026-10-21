@@ -38,15 +38,25 @@ export const FIELD_ACTIONS = {
       outcome: z.enum(OUTCOMES),
       rating: z.enum(RATING_CODES).nullish(),
       note: z.string().max(2000).nullish(),
+      // Offline outbox key: a knock replayed after reconnecting is the same
+      // knock, never a second one.
+      client_id: uuid().nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
       await requirePerson(tx, ctx.workspaceId, input.person_id);
+      if (input.client_id) {
+        const dup = (await tx.query(
+          'select id, person_id, channel, outcome, rating, note from contacts where workspace_id = $1 and client_id = $2',
+          [ctx.workspaceId, input.client_id],
+        )).rows[0];
+        if (dup) return { contact: dup, duplicate: true };
+      }
       const id = newId();
       await tx.query(
-        `insert into contacts (id, workspace_id, person_id, channel, outcome, rating, note, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        `insert into contacts (id, workspace_id, person_id, channel, outcome, rating, note, client_id, created_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [id, ctx.workspaceId, input.person_id, input.channel, input.outcome,
-         input.rating || null, input.note || null, ctx.user.id],
+         input.rating || null, input.note || null, input.client_id || null, ctx.user.id],
       );
       if (input.rating) {
         await tx.query(
@@ -516,6 +526,9 @@ export const FIELD_ACTIONS = {
       name: z.string().trim().min(1).max(200).nullish(),
       candidate: z.string().max(200).nullish(),
       website: z.string().max(500).nullish(), // e.g. the Imagine Surrey site
+      // Shown on the donate page when card payments aren't connected, e.g.
+      // "E-transfer to donate@imaginesurrey.ca" or a cheque mailing address.
+      donate_instructions: z.string().max(2000).nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
       const cur = (await tx.query(
@@ -523,12 +536,13 @@ export const FIELD_ACTIONS = {
       )).rows[0];
       const settings = typeof cur.settings === 'string' ? JSON.parse(cur.settings) : (cur.settings || {});
       if (input.website !== undefined && input.website !== null) settings.website = input.website;
+      if (input.donate_instructions !== undefined && input.donate_instructions !== null) settings.donateInstructions = input.donate_instructions;
       await tx.query(
         `update workspaces set name = coalesce($2, name), candidate = coalesce($3, candidate), settings = $4
          where id = $1`,
         [ctx.workspaceId, input.name || null, input.candidate ?? null, JSON.stringify(settings)],
       );
-      emit('workspace', ctx.workspaceId, 'update', { name: input.name, candidate: input.candidate, website: input.website });
+      emit('workspace', ctx.workspaceId, 'update', { name: input.name, candidate: input.candidate, website: input.website, donate_instructions: input.donate_instructions });
       return { ok: true };
     },
   },

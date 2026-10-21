@@ -6,6 +6,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
 import publicRoutes from './routes/public.js';
+import { getDb } from './db/client.js';
 
 export const app = new Hono();
 
@@ -21,7 +22,17 @@ app.get('*', serveStatic({ root: './web/dist', path: 'index.html' }));
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
 if (isMain) {
   const port = Number(process.env.PORT) || 3200;
-  serve({ fetch: app.fetch, port }, () => {
+  const server = serve({ fetch: app.fetch, port }, () => {
     console.log(`starbase on :${port}`);
   });
+  // Deploys send SIGTERM: stop accepting requests, then close the database so
+  // the embedded store flushes cleanly.
+  const shutdown = async (sig) => {
+    console.log(`${sig}: shutting down`);
+    server.close();
+    try { await (await getDb()).close(); } catch { /* already closed */ }
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
