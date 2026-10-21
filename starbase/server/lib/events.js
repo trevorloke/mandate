@@ -41,13 +41,16 @@ export const runAction = async (db, { workspaceId, actorId, action, clientTs }, 
     let prev = ws.last_event_hash;
     for (const ev of pending) {
       seq += 1;
-      const payloadHash = sha256(canonical(ev.payload));
+      // Normalize exactly as it will be stored (drops undefined, etc.) so the
+      // hash we compute is the hash a verifier recomputes from the row.
+      const payload = JSON.parse(JSON.stringify(ev.payload ?? {}));
+      const payloadHash = sha256(canonical(payload));
       const hash = chainHash(prev, seq, action, ev.entityType, ev.entityId, ev.op, actorId, payloadHash);
       await tx.query(
         `insert into events (workspace_id, seq, action, entity_type, entity_id, op, payload, actor_id, client_ts, payload_hash, hash)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [workspaceId, seq, action, ev.entityType, ev.entityId, ev.op,
-         JSON.stringify(ev.payload), actorId || null, clientTs || null, payloadHash, hash],
+         JSON.stringify(payload), actorId || null, clientTs || null, payloadHash, hash],
       );
       prev = hash;
     }

@@ -24,6 +24,8 @@ export const RECORD_TYPES = {
       { key: 'date',         label: 'Date',   type: 'date',   required: true },
       { key: 'method',       label: 'Method', type: 'select',
         options: ['card', 'etransfer', 'cheque', 'cash', 'in-kind'] },
+      { key: 'cadence',      label: 'Cadence', type: 'select',
+        options: ['one-time', 'monthly'], default: 'one-time' },
       { key: 'note',         label: 'Note',   type: 'text' },
     ],
   },

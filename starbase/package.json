@@ -1,9 +1,9 @@
 {
-  "name": "mandate-v2",
+  "name": "starbase",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Mandate rebuilt: five primitives, one event log. See ../README.md and v2/README.md.",
+  "description": "Starbase — the campaign OS for Imagine Surrey. See starbase/README.md.",
   "workspaces": [
     "shared",
     "server",

@@ -1,5 +1,5 @@
 // Database client. PGlite (embedded Postgres) by default — file-backed via
-// MANDATE_V2_DATA, in-memory otherwise (tests). A hosted deployment sets
+// STARBASE_DATA, in-memory otherwise (tests). A hosted deployment sets
 // DATABASE_URL and swaps in node-postgres behind the same tiny interface:
 //   db.query(sql, params) → { rows }
 //   db.transaction(async (tx) => ...) → serialized, rolls back on throw
@@ -14,7 +14,7 @@ const create = async () => {
     // PGlite is real Postgres, so the SQL below is already the contract.
     throw new Error('DATABASE_URL support lands with deployment (v0.3); unset it for now.');
   }
-  const dataDir = process.env.MANDATE_V2_DATA; // e.g. ./data/mandate — omit for in-memory
+  const dataDir = process.env.STARBASE_DATA; // e.g. ./data/mandate — omit for in-memory
   const db = dataDir ? new PGlite(dataDir) : new PGlite();
   await bootstrap(db);
   return db;

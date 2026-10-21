@@ -1,15 +1,17 @@
-// Mandate v2 server. Hono app: /api/auth (public), /api/* (workspace-scoped),
+// Starbase server. Hono app: /api/auth (public), /api/* (workspace-scoped),
 // static web build. Exported for in-process tests via app.request().
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
+import publicRoutes from './routes/public.js';
 
 export const app = new Hono();
 
-app.get('/api/health', (c) => c.json({ ok: true, service: 'mandate-v2' }));
+app.get('/api/health', (c) => c.json({ ok: true, service: 'starbase' }));
 app.route('/api/auth', authRoutes);
+app.route('/', publicRoutes); // /p, /n, /v, /u, /api/public — no auth
 app.route('/api', apiRoutes);
 
 // Static web build (SPA fallback to index.html for URL routing).
@@ -20,6 +22,6 @@ const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split
 if (isMain) {
   const port = Number(process.env.PORT) || 3200;
   serve({ fetch: app.fetch, port }, () => {
-    console.log(`mandate v2 on :${port}`);
+    console.log(`starbase on :${port}`);
   });
 }

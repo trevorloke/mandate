@@ -96,7 +96,7 @@ test('brief composes money, flags, filings, activation', async () => {
 test('export carries everything: persons, records, and the event log', async () => {
   const ex = await a.get('/api/export');
   assert.equal(ex.status, 200);
-  assert.equal(ex.json.format, 'mandate-v2-export');
+  assert.equal(ex.json.format, 'starbase-export');
   assert.ok(ex.json.persons.length >= 1);
   assert.ok(ex.json.gifts.length >= 1);
   assert.ok(ex.json.events.length >= 2);

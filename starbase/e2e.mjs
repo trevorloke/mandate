@@ -149,7 +149,7 @@ const exp = await page.evaluate(async () => {
   const j = await r.json();
   return { status: r.status, format: j.format, events: (j.events || []).length, gifts: (j.gifts || []).length };
 });
-check('export returns full snapshot with event log', exp.status === 200 && exp.format === 'mandate-v2-export' && exp.events >= 4 && exp.gifts >= 1, JSON.stringify(exp));
+check('export returns full snapshot with event log', exp.status === 200 && exp.format === 'starbase-export' && exp.events >= 4 && exp.gifts >= 1, JSON.stringify(exp));
 
 await browser.close();
 const fails = results.filter((r) => !r).length;

@@ -1,0 +1,410 @@
+// The workspace API. Reads are cursor-paginated and workspace-scoped; writes
+// go exclusively through POST /api/actions/:name. GET /api/events is the
+// sync protocol AND the public API — the same endpoint the app uses — and
+// GET /api/export is the contractual one-click full-fidelity export.
+import { Hono } from 'hono';
+import { getCookie } from 'hono/cookie';
+import { getDb } from '../db/client.js';
+import { loadContext, SESSION_COOKIE } from '../lib/auth.js';
+import { runAction, verifyChain } from '../lib/events.js';
+import { ACTIONS, httpError } from '../actions/index.js';
+import { tierFor } from '../lib/tiers.js';
+import { emailConfigured, textConfigured } from '../lib/notify.js';
+import { RECORD_TYPES } from '@starbase/shared/registry';
+
+const app = new Hono();
+
+// Auth + context middleware.
+app.use('*', async (c, next) => {
+  const db = await getDb();
+  const ctx = await loadContext(db, getCookie(c, SESSION_COOKIE));
+  if (!ctx) return c.json({ error: 'not signed in' }, 401);
+  c.set('db', db);
+  c.set('ctx', ctx);
+  await next();
+});
+
+// ── Actions: the only write path ──
+app.post('/actions/:name', async (c) => {
+  const name = c.req.param('name');
+  const action = ACTIONS[name];
+  if (!action) return c.json({ error: `unknown action '${name}'` }, 404);
+  const ctx = c.get('ctx');
+  if (!action.roles.includes(ctx.role)) {
+    return c.json({ error: `role '${ctx.role}' may not perform ${name}` }, 403);
+  }
+  const parsed = action.input.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    const i = parsed.error.issues[0];
+    return c.json({ error: `${i.path.join('.') || 'input'}: ${i.message}` }, 400);
+  }
+  try {
+    const { result, lastSeq } = await runAction(
+      c.get('db'),
+      { workspaceId: ctx.workspaceId, actorId: ctx.user.id, action: name },
+      (tx, emit) => action.handler(tx, ctx, parsed.data, emit),
+    );
+    return c.json({ ...result, seq: lastSeq });
+  } catch (e) {
+    if (e.status) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+});
+
+app.get('/actions', (c) => {
+  const ctx = c.get('ctx');
+  const names = Object.entries(ACTIONS)
+    .filter(([, a]) => a.roles.includes(ctx.role))
+    .map(([name]) => name);
+  return c.json({ actions: names });
+});
+
+// ── Persons: search (picker), filters (tag / rating / role / has), map, profile ──
+const parseJson = (v, fallback) => (typeof v === 'string' ? JSON.parse(v) : (v ?? fallback));
+const personRow = (r) => ({
+  ...r,
+  tags: parseJson(r.tags, []),
+  socials: parseJson(r.socials, {}),
+});
+
+app.get('/persons', async (c) => {
+  const ctx = c.get('ctx');
+  const q = (c.req.query('q') || '').trim();
+  const tag = (c.req.query('tag') || '').trim();
+  const rating = (c.req.query('rating') || '').trim();
+  const role = (c.req.query('role') || '').trim();
+  const has = (c.req.query('has') || '').trim();       // phone | email | location
+  const limit = Math.min(Number(c.req.query('limit')) || 25, 2000);
+  const like = `%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
+  const params = [ctx.workspaceId, q, like, limit];
+  let where = `p.workspace_id = $1 and p.deleted_at is null
+       and ($2 = '' or p.name ilike $3 or p.email ilike $3 or p.address ilike $3 or p.phone ilike $3)`;
+  if (tag) { params.push(JSON.stringify(tag)); where += ` and p.tags @> $${params.length}::jsonb`; }
+  if (rating) { params.push(rating); where += ` and p.rating = $${params.length}`; }
+  if (role) {
+    params.push(role);
+    where += ` and exists (select 1 from volunteer_roles v where v.person_id = p.id and v.role = $${params.length})`;
+  }
+  if (has === 'phone') where += ' and p.phone is not null';
+  if (has === 'email') where += ' and p.email is not null';
+  if (has === 'location') where += ' and p.lat is not null and p.lng is not null';
+  const { rows } = await c.get('db').query(
+    `select p.id, p.kind, p.name, p.email, p.phone, p.address, p.unit, p.city, p.postal,
+            p.lat, p.lng, p.tags, p.socials, p.rating, p.rated_at
+     from persons p where ${where}
+     order by lower(p.name) limit $4`,
+    params,
+  );
+  return c.json({ persons: rows.map(personRow) });
+});
+
+// Everything a door card needs, keyed by address: persons at that address,
+// their ratings, and any signs. Only located persons (lat/lng set).
+app.get('/map/doors', async (c) => {
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const persons = (await db.query(
+    `select id, name, phone, email, address, unit, lat, lng, rating, rated_at, tags
+     from persons where workspace_id = $1 and deleted_at is null and lat is not null and lng is not null
+     order by lower(address), lower(name) limit 5000`,
+    [ctx.workspaceId],
+  )).rows.map(personRow);
+  const signs = (await db.query(
+    `select id, person_id, address, lat, lng, kind, status from signs
+     where workspace_id = $1 and status <> 'removed'`,
+    [ctx.workspaceId],
+  )).rows;
+  const unlocated = (await db.query(
+    `select count(*)::int as n from persons where workspace_id = $1 and deleted_at is null and address is not null and lat is null`,
+    [ctx.workspaceId],
+  )).rows[0].n;
+  return c.json({ persons, signs, unlocated });
+});
+
+app.get('/persons/:id', async (c) => {
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const person = (await db.query(
+    `select id, kind, name, email, phone, address, unit, city, postal, lat, lng, tags, socials, rating, rated_at, created_at
+     from persons where id = $1 and workspace_id = $2 and deleted_at is null`,
+    [c.req.param('id'), ctx.workspaceId],
+  )).rows[0];
+  if (!person) return c.json({ error: 'not found' }, 404);
+  const gifts = (await db.query(
+    `select id, amount_cents, date, method, cadence, note, flagged, flag_reason from gifts
+     where workspace_id = $1 and person_id = $2 and deleted_at is null order by date desc limit 200`,
+    [ctx.workspaceId, person.id],
+  )).rows;
+  const totals = (await db.query(
+    `select extract(year from date)::int as year, sum(amount_cents)::bigint as total_cents
+     from gifts where workspace_id = $1 and person_id = $2 and deleted_at is null
+     group by 1 order by 1 desc`,
+    [ctx.workspaceId, person.id],
+  )).rows;
+  const contacts = (await db.query(
+    `select c.id, c.channel, c.outcome, c.rating, c.note, c.created_at, u.name as by_name
+     from contacts c left join users u on u.id = c.created_by
+     where c.workspace_id = $1 and c.person_id = $2 order by c.created_at desc limit 100`,
+    [ctx.workspaceId, person.id],
+  )).rows;
+  const roles = (await db.query(
+    'select id, role, detail from volunteer_roles where workspace_id = $1 and person_id = $2 order by role',
+    [ctx.workspaceId, person.id],
+  )).rows;
+  const signs = (await db.query(
+    'select id, kind, status, note, created_at from signs where workspace_id = $1 and person_id = $2 order by created_at desc',
+    [ctx.workspaceId, person.id],
+  )).rows;
+  const shifts = (await db.query(
+    `select a.id as assignment_id, a.status, s.id, s.title, s.starts_at, s.location
+     from shift_assignments a join shifts s on s.id = a.shift_id
+     where a.workspace_id = $1 and a.person_id = $2 and s.deleted_at is null order by s.starts_at desc limit 50`,
+    [ctx.workspaceId, person.id],
+  )).rows;
+  const donor = await tierFor(db, ctx.workspaceId, person.id);
+  const household = (await db.query(
+    `select id, name, rating from persons
+     where workspace_id = $1 and deleted_at is null and id <> $2 and address is not null
+       and lower(address) = lower($3) and coalesce(unit, '') = coalesce($4, '')`,
+    [ctx.workspaceId, person.id, person.address || '', person.unit || null],
+  )).rows;
+  return c.json({ person: personRow(person), gifts, totals, contacts, roles, signs, shifts, donor, household });
+});
+
+// ── Field reads ──
+app.get('/signs', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select s.*, p.name as person_name from signs s left join persons p on p.id = s.person_id
+     where s.workspace_id = $1 order by s.status, s.created_at desc limit 1000`,
+    [ctx.workspaceId],
+  );
+  return c.json({ signs: rows });
+});
+
+app.get('/contacts', async (c) => {
+  const ctx = c.get('ctx');
+  const limit = Math.min(Number(c.req.query('limit')) || 100, 500);
+  const { rows } = await c.get('db').query(
+    `select c.id, c.person_id, p.name as person_name, c.channel, c.outcome, c.rating, c.note, c.created_at, u.name as by_name
+     from contacts c join persons p on p.id = c.person_id left join users u on u.id = c.created_by
+     where c.workspace_id = $1 order by c.created_at desc limit $2`,
+    [ctx.workspaceId, limit],
+  );
+  return c.json({ contacts: rows });
+});
+
+app.get('/shifts', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select s.*,
+            (select count(*)::int from shift_assignments a where a.shift_id = s.id and a.status in ('assigned', 'confirmed')) as filled
+     from shifts s where s.workspace_id = $1 and s.deleted_at is null
+     order by s.starts_at limit 500`,
+    [ctx.workspaceId],
+  );
+  return c.json({ shifts: rows });
+});
+
+app.get('/shifts/:id', async (c) => {
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const shift = (await db.query(
+    'select * from shifts where id = $1 and workspace_id = $2 and deleted_at is null',
+    [c.req.param('id'), ctx.workspaceId],
+  )).rows[0];
+  if (!shift) return c.json({ error: 'not found' }, 404);
+  const assignees = (await db.query(
+    `select a.id as assignment_id, a.status, a.notified_at, a.notify_email, a.notify_text,
+            p.id, p.name, p.email, p.phone
+     from shift_assignments a join persons p on p.id = a.person_id
+     where a.shift_id = $1 and a.workspace_id = $2 order by p.name`,
+    [shift.id, ctx.workspaceId],
+  )).rows;
+  return c.json({ shift, assignees });
+});
+
+app.get('/petitions', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select p.*, (select count(*)::int from petition_signatures s where s.petition_id = p.id) as signatures
+     from petitions p where p.workspace_id = $1 order by p.created_at desc`,
+    [ctx.workspaceId],
+  );
+  return c.json({ petitions: rows, slug: ctx.workspace.slug });
+});
+
+app.get('/petitions/:id/signatures', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select id, name, email, phone, address, subscribe, created_at from petition_signatures
+     where workspace_id = $1 and petition_id = $2 order by created_at desc limit 2000`,
+    [ctx.workspaceId, c.req.param('id')],
+  );
+  return c.json({ signatures: rows });
+});
+
+app.get('/subscriptions', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select id, email, name, status, source, created_at from subscriptions
+     where workspace_id = $1 order by created_at desc limit 5000`,
+    [ctx.workspaceId],
+  );
+  return c.json({
+    subscriptions: rows,
+    subscribed: rows.filter((r) => r.status === 'subscribed').length,
+    slug: ctx.workspace.slug,
+  });
+});
+
+app.get('/blasts', async (c) => {
+  const ctx = c.get('ctx');
+  const { rows } = await c.get('db').query(
+    `select id, kind, subject, status, provider_note, audience_count, sent_at, created_at from blasts
+     where workspace_id = $1 order by created_at desc limit 200`,
+    [ctx.workspaceId],
+  );
+  const media = (await c.get('db').query(
+    `select count(*)::int as n from persons where workspace_id = $1 and deleted_at is null and email is not null and tags @> '"media"'::jsonb`,
+    [ctx.workspaceId],
+  )).rows[0].n;
+  return c.json({ blasts: rows, mediaContacts: media, emailConfigured: emailConfigured() });
+});
+
+// ── Records: generic cursor-paginated reads per registry type ──
+app.get('/records/:type', async (c) => {
+  const type = c.req.param('type');
+  const t = RECORD_TYPES[type];
+  if (!t) return c.json({ error: `unknown record type '${type}'` }, 404);
+  const ctx = c.get('ctx');
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 200);
+  const cursor = c.req.query('cursor') || null; // created_at|id tuple cursor
+  const params = [ctx.workspaceId, limit];
+  let where = 'workspace_id = $1 and deleted_at is null';
+  if (cursor) {
+    const [ts, id] = cursor.split('~');
+    params.push(ts, id);
+    where += ` and (created_at, id) < ($3::timestamptz, $4::uuid)`;
+  }
+  const { rows } = await c.get('db').query(
+    `select * from ${t.table} where ${where} order by created_at desc, id desc limit $2`,
+    params,
+  );
+  const next = rows.length === limit
+    ? `${new Date(rows[rows.length - 1].created_at).toISOString()}~${rows[rows.length - 1].id}`
+    : null;
+  return c.json({ records: rows, next });
+});
+
+// ── Events: the sync protocol / public API ──
+app.get('/events', async (c) => {
+  const ctx = c.get('ctx');
+  const since = Number(c.req.query('since') || 0);
+  const limit = Math.min(Number(c.req.query('limit')) || 200, 1000);
+  const { rows } = await c.get('db').query(
+    `select seq, action, entity_type, entity_id, op, payload, actor_id, server_ts, hash
+     from events where workspace_id = $1 and seq > $2 order by seq limit $3`,
+    [ctx.workspaceId, since, limit],
+  );
+  return c.json({ events: rows, cursor: rows.length ? Number(rows[rows.length - 1].seq) : since });
+});
+
+// ── Audit: verify my books ──
+app.get('/audit/verify', async (c) => {
+  const ctx = c.get('ctx');
+  return c.json(await verifyChain(c.get('db'), ctx.workspaceId));
+});
+
+// ── Brief: Today, composed server-side ──
+app.get('/brief', async (c) => {
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const ws = ctx.workspaceId;
+  const money = (await db.query(
+    `select coalesce(sum(amount_cents), 0)::bigint as total,
+            coalesce(sum(amount_cents) filter (where date >= current_date - 7), 0)::bigint as week,
+            count(*)::int as gifts
+     from gifts where workspace_id = $1 and deleted_at is null`, [ws],
+  )).rows[0];
+  const flagged = (await db.query(
+    `select g.id, g.amount_cents, g.date, g.flag_reason, p.name as donor
+     from gifts g join persons p on p.id = g.person_id
+     where g.workspace_id = $1 and g.deleted_at is null and g.flagged order by g.date desc limit 10`, [ws],
+  )).rows;
+  const filings = (await db.query(
+    `select id, name, due_date, status, (due_date - current_date)::int as days_left
+     from filings where workspace_id = $1 and deleted_at is null and status = 'upcoming'
+     order by due_date limit 5`, [ws],
+  )).rows;
+  const people = (await db.query(
+    `select count(*)::int as total from persons where workspace_id = $1 and deleted_at is null`, [ws],
+  )).rows[0];
+  // Field: touches this week by channel, and the support picture from ratings.
+  const field = (await db.query(
+    `select count(*) filter (where created_at >= current_date - 7)::int as week,
+            count(*) filter (where created_at >= current_date - 7 and channel = 'door')::int as doors,
+            count(*) filter (where created_at >= current_date - 7 and channel = 'phone')::int as calls,
+            count(*) filter (where created_at >= current_date - 7 and channel = 'text')::int as texts
+     from contacts where workspace_id = $1`, [ws],
+  )).rows[0];
+  const ratings = (await db.query(
+    `select rating, count(*)::int as n from persons
+     where workspace_id = $1 and deleted_at is null and rating is not null group by rating`, [ws],
+  )).rows;
+  const shifts = (await db.query(
+    `select s.id, s.title, s.starts_at, s.location, s.capacity,
+            (select count(*)::int from shift_assignments a where a.shift_id = s.id and a.status in ('assigned', 'confirmed')) as filled
+     from shifts s where s.workspace_id = $1 and s.deleted_at is null and s.starts_at >= now()
+     order by s.starts_at limit 5`, [ws],
+  )).rows;
+  const signs = (await db.query(
+    `select status, count(*)::int as n from signs where workspace_id = $1 group by status`, [ws],
+  )).rows;
+  const activation = {
+    steps: [
+      { key: 'person', label: 'Add your first person', done: people.total > 0 },
+      { key: 'gift', label: 'Log your first gift', done: Number(money.gifts) > 0 },
+      { key: 'filing', label: 'Add a filing deadline', done: (await db.query(
+        'select count(*)::int as n from filings where workspace_id = $1', [ws],
+      )).rows[0].n > 0 },
+    ],
+  };
+  activation.complete = activation.steps.every((s) => s.done);
+  return c.json({
+    money: { totalCents: Number(money.total), weekCents: Number(money.week), gifts: Number(money.gifts) },
+    flagged,
+    filings,
+    people,
+    field: { week: field.week, doors: field.doors, calls: field.calls, texts: field.texts },
+    ratings: Object.fromEntries(ratings.map((r) => [r.rating, r.n])),
+    shifts,
+    signs: Object.fromEntries(signs.map((r) => [r.status, r.n])),
+    providers: { email: emailConfigured(), text: textConfigured() },
+    activation,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
+// ── Export: contractual open data — everything, one click ──
+app.get('/export', async (c) => {
+  const ctx = c.get('ctx');
+  const db = c.get('db');
+  const ws = ctx.workspaceId;
+  const out = {
+    format: 'starbase-export',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    workspace: ctx.workspace,
+    persons: (await db.query('select * from persons where workspace_id = $1', [ws])).rows,
+    events: (await db.query('select * from events where workspace_id = $1 order by seq', [ws])).rows,
+  };
+  for (const t of Object.values(RECORD_TYPES)) {
+    out[t.table] = (await db.query(`select * from ${t.table} where workspace_id = $1`, [ws])).rows;
+  }
+  c.header('Content-Disposition', 'attachment; filename="starbase-export.json"');
+  return c.json(out);
+});
+
+export default app;
+export { httpError };

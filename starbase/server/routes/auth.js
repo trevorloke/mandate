@@ -21,8 +21,19 @@ const signupInput = z.object({
   password: z.string().min(8).max(200),
   workspaceName: z.string().trim().min(1).max(200),
   candidate: z.string().trim().max(200).optional(),
-  jurisdiction: z.enum(['bc-provincial', 'bc-municipal', 'federal']).default('bc-provincial'),
+  jurisdiction: z.enum(['bc-municipal', 'bc-provincial', 'federal']).default('bc-municipal'),
 });
+
+// URL slug for the workspace's public pages (/p/:slug/…, /n/:slug, /v/:slug).
+const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'campaign';
+const uniqueSlug = async (tx, base) => {
+  for (let i = 0; i < 50; i++) {
+    const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    const taken = (await tx.query('select 1 from workspaces where slug = $1', [candidate])).rows[0];
+    if (!taken) return candidate;
+  }
+  return `${base}-${Math.random().toString(36).slice(2, 6)}`;
+};
 
 app.post('/signup', async (c) => {
   const db = await getDb();
@@ -41,8 +52,9 @@ app.post('/signup', async (c) => {
         [userId, email, input.name, passwordHash],
       );
       await tx.query(
-        'insert into workspaces (id, name, candidate, jurisdiction) values ($1, $2, $3, $4)',
-        [workspaceId, input.workspaceName, input.candidate || null, input.jurisdiction],
+        'insert into workspaces (id, name, slug, candidate, jurisdiction) values ($1, $2, $3, $4, $5)',
+        [workspaceId, input.workspaceName, await uniqueSlug(tx, slugify(input.workspaceName)),
+         input.candidate || null, input.jurisdiction],
       );
       await tx.query(
         'insert into memberships (user_id, workspace_id, role) values ($1, $2, $3)',

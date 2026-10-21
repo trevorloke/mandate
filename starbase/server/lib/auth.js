@@ -53,7 +53,7 @@ export const loadContext = async (db, token) => {
   if (!token) return null;
   const { rows } = await db.query(
     `select u.id as user_id, u.email, u.name as user_name, m.role,
-            w.id as workspace_id, w.name as ws_name, w.candidate, w.jurisdiction, w.settings
+            w.id as workspace_id, w.name as ws_name, w.slug as ws_slug, w.candidate, w.jurisdiction, w.settings
      from sessions s
      join users u on u.id = s.user_id
      join memberships m on m.user_id = s.user_id and m.workspace_id = s.workspace_id
@@ -68,7 +68,7 @@ export const loadContext = async (db, token) => {
     role: r.role,
     workspaceId: r.workspace_id,
     workspace: {
-      id: r.workspace_id, name: r.ws_name, candidate: r.candidate,
+      id: r.workspace_id, name: r.ws_name, slug: r.ws_slug, candidate: r.candidate,
       jurisdiction: r.jurisdiction,
       settings: typeof r.settings === 'string' ? JSON.parse(r.settings) : (r.settings || {}),
     },

@@ -22,7 +22,7 @@ jobs:
       - name: Lint
         run: npm run lint   # errors block; react-hooks compiler diagnostics surface as warnings
 
-  v2:
+  starbase:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +30,10 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-        working-directory: v2
+        working-directory: starbase
       - name: Test (event log, cap engine, API)
         run: npm test
-        working-directory: v2
+        working-directory: starbase
       - name: Build (web)
         run: npm run build
-        working-directory: v2
+        working-directory: starbase

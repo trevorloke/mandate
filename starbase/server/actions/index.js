@@ -4,9 +4,12 @@
 // buttons, and the public API all call the same registry via POST
 // /api/actions/:name; there is no other way to mutate campaign data.
 import { z } from 'zod';
-import { zodFor } from '@mandate/shared/registry';
+import { zodFor } from '@starbase/shared/registry';
 import { newId } from '../lib/events.js';
 import { checkCap } from '../lib/cap.js';
+import { FIELD_ACTIONS, personFieldExtensions } from './field.js';
+import { httpError } from './util.js';
+export { httpError };
 
 const MONEY_ROLES = ['manager', 'treasurer', 'staff'];
 const PEOPLE_ROLES = ['manager', 'treasurer', 'staff'];
@@ -18,11 +21,15 @@ const personInput = z.object({
   email: z.string().email().max(320).nullish(),
   phone: z.string().max(40).nullish(),
   address: z.string().max(1000).nullish(),
+  ...personFieldExtensions,
 });
 
 const rowToPerson = (r) => ({
   id: r.id, kind: r.kind, name: r.name, email: r.email,
-  phone: r.phone, address: r.address,
+  phone: r.phone, address: r.address, unit: r.unit, city: r.city, postal: r.postal,
+  lat: r.lat, lng: r.lng,
+  tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : (r.tags || []),
+  socials: typeof r.socials === 'string' ? JSON.parse(r.socials) : (r.socials || {}),
 });
 
 export const ACTIONS = {
@@ -32,10 +39,12 @@ export const ACTIONS = {
     handler: async (tx, ctx, input, emit) => {
       const id = newId();
       await tx.query(
-        `insert into persons (id, workspace_id, kind, name, email, phone, address)
-         values ($1, $2, $3, $4, $5, $6, $7)`,
+        `insert into persons (id, workspace_id, kind, name, email, phone, address, unit, city, postal, lat, lng, tags, socials)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [id, ctx.workspaceId, input.kind, input.name, input.email || null,
-         input.phone || null, input.address || null],
+         input.phone || null, input.address || null, input.unit || null,
+         input.city || null, input.postal || null, input.lat ?? null, input.lng ?? null,
+         JSON.stringify(input.tags || []), JSON.stringify(input.socials || {})],
       );
       const payload = { id, ...input };
       emit('person', id, 'create', payload);
@@ -55,10 +64,14 @@ export const ACTIONS = {
       if (!cur) throw httpError(404, 'person not found');
       const next = { ...rowToPerson(cur), ...patch };
       await tx.query(
-        `update persons set kind = $3, name = $4, email = $5, phone = $6, address = $7, updated_at = now()
+        `update persons set kind = $3, name = $4, email = $5, phone = $6, address = $7,
+           unit = $8, city = $9, postal = $10, lat = $11, lng = $12, tags = $13, socials = $14,
+           updated_at = now()
          where id = $1 and workspace_id = $2`,
         [id, ctx.workspaceId, next.kind, next.name, next.email || null,
-         next.phone || null, next.address || null],
+         next.phone || null, next.address || null, next.unit || null,
+         next.city || null, next.postal || null, next.lat ?? null, next.lng ?? null,
+         JSON.stringify(next.tags || []), JSON.stringify(next.socials || {})],
       );
       emit('person', id, 'update', patch);
       return { person: next };
@@ -77,10 +90,10 @@ export const ACTIONS = {
 
       const id = newId();
       await tx.query(
-        `insert into gifts (id, workspace_id, person_id, amount_cents, date, method, note)
-         values ($1, $2, $3, $4, $5, $6, $7)`,
+        `insert into gifts (id, workspace_id, person_id, amount_cents, date, method, cadence, note)
+         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [id, ctx.workspaceId, input.person_id, input.amount_cents, input.date,
-         input.method || null, input.note || null],
+         input.method || null, input.cadence || 'one-time', input.note || null],
       );
 
       // Cap check inside the same transaction: the SUM already includes this
@@ -176,12 +189,8 @@ export const ACTIONS = {
       return { filing: { id, ...next } };
     },
   },
+
+  ...FIELD_ACTIONS,
 };
 
 const isoDate = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
-
-export const httpError = (status, message) => {
-  const e = new Error(message);
-  e.status = status;
-  return e;
-};
