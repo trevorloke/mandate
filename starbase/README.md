@@ -17,6 +17,10 @@ beside the legacy app in this repo; nothing in the repo root is touched.
 | **Signs** | Billboards (4×8), large (4×4), lawn — requested → installed → removed |
 | **Outreach** | Newsletter + press-release blasts, petitions, and the Imagine Surrey website bridge |
 
+Managers reach **Team** from the header: invite volunteers and staff by email
+(or copy the join link and text it), set roles, see pending invites. Invitees
+open `/join/:token`, set a password, and land on the map (volunteers) or Today.
+
 ### The rating scale (door, phone, text)
 
 `1` strong support · `2` lean support · `3` undecided · `4` opposed (unknown) ·
@@ -65,6 +69,12 @@ tagged by source, and is appended to the event log under a system actor.
 
 ## Sending email and text
 
+Set `STARBASE_PUBLIC_URL` (e.g. `https://starbase.imaginesurrey.ca`) so links
+in outbound mail — newsletter unsubscribe footers, invite links — point at the
+public host. Every newsletter ends with "Sent by <campaign>" and the reader's
+own one-click unsubscribe link. Shift messages render in campaign time
+(`America/Vancouver` unless `settings.tz` says otherwise).
+
 Provider-pluggable, no SDKs: `RESEND_API_KEY` (+ `MAIL_FROM`) for email,
 `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` for SMS. Without
 them, blasts and shift notifications are recorded as **queued** per recipient
@@ -88,15 +98,19 @@ defaults to `bc-municipal` (LECFA).
 Database: PGlite (embedded, real Postgres) — in-memory for tests, file-backed
 via `STARBASE_DATA=./data`; hosted Postgres via `DATABASE_URL` in v0.3.
 Tenancy is a membership (`user × workspace × role`: manager / treasurer /
-staff / volunteer). Volunteers can log contacts, place pins, and request
-signs; they cannot touch money or edit people.
+staff / volunteer). **Volunteers** can rate doors, log calls and texts, drop
+pins, and request signs. The server never shows them money (profiles return no
+gifts, totals, or donor tier; Today has no money), and refuses them the gift
+ledger, exports, the raw event log, the audit replay, and the subscriber,
+signature, and blast lists.
 
 ## Run
 
 ```sh
 cd starbase
 npm install
-npm test                 # 39 server tests, in-memory Postgres, no setup
+npm test                 # server suite, in-memory Postgres, no setup
+node e2e.mjs             # browser journey against a running server (see header)
 npm run build            # web → web/dist
 STARBASE_DATA=./data node server/index.js   # API + web on :3200
 ```

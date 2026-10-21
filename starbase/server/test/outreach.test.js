@@ -151,3 +151,40 @@ test('public writes append to the event log under a system actor', async () => {
   const verify = await c.get('/api/audit/verify');
   assert.equal(verify.json.ok, true);
 });
+
+test('with a provider: every newsletter carries the recipient’s own unsubscribe link; press does not', async () => {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  process.env.RESEND_API_KEY = 'test-key';
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://api.resend.com/')) {
+      sent.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ id: 'msg' }), { status: 200 });
+    }
+    return realFetch(url, init);
+  };
+  try {
+    const news = await c.action('blast.send', { kind: 'newsletter', subject: 'Footer check', body: 'Body text' });
+    assert.equal(news.status, 200);
+    assert.equal(news.json.blast.status, 'sent');
+    const subs = (await c.get('/api/subscriptions')).json.subscriptions.filter((s) => s.status === 'subscribed');
+    assert.equal(sent.length, subs.length);
+    for (const s of subs) {
+      const msg = sent.find((m) => m.to[0] === s.email);
+      assert.ok(msg, `sent to ${s.email}`);
+      assert.match(msg.text, /^Body text/);
+      assert.ok(msg.text.includes(`/u/${s.id}`), 'own unsubscribe link');
+      assert.match(msg.text, /Sent by Imagine Surrey/);
+    }
+    const links = sent.map((m) => m.text.match(/\/u\/([0-9a-f-]{36})/)[1]);
+    assert.equal(new Set(links).size, links.length, 'links are per-recipient');
+
+    sent.length = 0;
+    const press = await c.action('blast.send', { kind: 'press', subject: 'Release', body: 'News' });
+    assert.equal(press.json.blast.status, 'sent');
+    assert.ok(sent.every((m) => !m.text.includes('/u/')), 'press has no newsletter unsubscribe link');
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.RESEND_API_KEY;
+  }
+});

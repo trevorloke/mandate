@@ -1,8 +1,10 @@
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import App from './App.jsx';
+// app.css first: page stylesheets (imported by App's pages) must load after
+// the shared primitives so single-class page rules can override them.
 import './app.css';
+import App from './App.jsx';
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -4,8 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../api.js';
 
 const JURISDICTIONS = [
-  { value: 'bc-provincial', label: 'BC — Provincial' },
   { value: 'bc-municipal', label: 'BC — Municipal' },
+  { value: 'bc-provincial', label: 'BC — Provincial' },
   { value: 'federal', label: 'Federal (Canada)' },
 ];
 
@@ -13,7 +13,7 @@ export default function Signup() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
-    name: '', email: '', password: '', workspaceName: '', jurisdiction: 'bc-provincial',
+    name: '', email: '', password: '', workspaceName: '', jurisdiction: 'bc-municipal',
   });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +37,7 @@ export default function Signup() {
 
   return (
     <div className="auth-page">
-      <span className="brand">Mandate</span>
+      <span className="brand">Starbase</span>
       <h1>Start your campaign</h1>
       <form onSubmit={submit}>
         <div className="field">
@@ -57,7 +57,7 @@ export default function Signup() {
         </div>
         <div className="field">
           <label htmlFor="su-workspace">Workspace name</label>
-          <input id="su-workspace" className="input" required placeholder="Friends of …"
+          <input id="su-workspace" className="input" required placeholder="Imagine Surrey"
             value={form.workspaceName} onChange={set('workspaceName')} />
         </div>
         <div className="field">

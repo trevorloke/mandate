@@ -64,13 +64,15 @@ export const sendText = async ({ to, body }) => {
 
 // Shift notification copy: time, place, instructions, link — one message,
 // both channels.
-export const shiftMessage = (shift, workspaceName) => {
+// Times render in the campaign's zone, never the server's (a UTC host would
+// otherwise tell Surrey volunteers the wrong hour).
+export const shiftMessage = (shift, workspaceName, timeZone = 'America/Vancouver') => {
   const when = new Date(shift.starts_at).toLocaleString('en-CA', {
-    weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone,
   });
   const lines = [
     `You're scheduled: ${shift.title}`,
-    when + (shift.ends_at ? ` – ${new Date(shift.ends_at).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' })}` : ''),
+    when + (shift.ends_at ? ` – ${new Date(shift.ends_at).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', timeZone })}` : ''),
     shift.location ? `Where: ${shift.location}` : null,
     shift.instructions ? `Instructions: ${shift.instructions}` : null,
     shift.link ? `Details: ${shift.link}` : null,

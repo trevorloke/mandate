@@ -28,7 +28,7 @@ export default function Login() {
 
   return (
     <div className="auth-page">
-      <span className="brand">Mandate</span>
+      <span className="brand">Starbase</span>
       <h1>Sign in</h1>
       <form onSubmit={submit}>
         <div className="field">

@@ -19,10 +19,30 @@ app.use('*', async (c, next) => {
   const db = await getDb();
   const ctx = await loadContext(db, getCookie(c, SESSION_COOKIE));
   if (!ctx) return c.json({ error: 'not signed in' }, 401);
+  // Public base URL for links in outbound mail (unsubscribe, petitions).
+  ctx.publicUrl = (process.env.STARBASE_PUBLIC_URL || new URL(c.req.url).origin).replace(/\/$/, '');
   c.set('db', db);
   c.set('ctx', ctx);
   await next();
 });
+
+// Volunteers canvass, phone, and place signs; they never see money, the
+// subscriber/signature lists, the raw event log, or bulk exports.
+const DESK_ONLY_READS = [
+  /^\/api\/records\//, /^\/api\/export$/, /^\/api\/events$/, /^\/api\/audit\/verify$/,
+  /^\/api\/subscriptions$/, /^\/api\/blasts$/, /^\/api\/petitions\/[^/]+\/signatures$/,
+];
+app.use('*', async (c, next) => {
+  if (c.get('ctx').role === 'volunteer' && c.req.method === 'GET'
+      && DESK_ONLY_READS.some((re) => re.test(c.req.path))) {
+    return c.json({ error: 'volunteers cannot view this' }, 403);
+  }
+  await next();
+});
+
+// Path ids are uuids; anything else is simply not found (not a 500).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const badId = (c) => !UUID_RE.test(c.req.param('id') || '');
 
 // ── Actions: the only write path ──
 app.post('/actions/:name', async (c) => {
@@ -122,6 +142,7 @@ app.get('/map/doors', async (c) => {
 });
 
 app.get('/persons/:id', async (c) => {
+  if (badId(c)) return c.json({ error: 'not found' }, 404);
   const ctx = c.get('ctx');
   const db = c.get('db');
   const person = (await db.query(
@@ -168,7 +189,28 @@ app.get('/persons/:id', async (c) => {
        and lower(address) = lower($3) and coalesce(unit, '') = coalesce($4, '')`,
     [ctx.workspaceId, person.id, person.address || '', person.unit || null],
   )).rows;
+  if (ctx.role === 'volunteer') {
+    return c.json({ person: personRow(person), gifts: [], totals: [], contacts, roles, signs, shifts, donor: null, household });
+  }
   return c.json({ person: personRow(person), gifts, totals, contacts, roles, signs, shifts, donor, household });
+});
+
+// ── Team (managers) ──
+app.get('/team', async (c) => {
+  const ctx = c.get('ctx');
+  if (ctx.role !== 'manager') return c.json({ error: 'managers only' }, 403);
+  const db = c.get('db');
+  const members = (await db.query(
+    `select u.id, u.name, u.email, m.role, m.created_at from memberships m join users u on u.id = m.user_id
+     where m.workspace_id = $1 order by m.created_at`,
+    [ctx.workspaceId],
+  )).rows;
+  const invites = (await db.query(
+    `select id, email, role, created_at, expires_at from invites
+     where workspace_id = $1 and accepted_at is null and expires_at > now() order by created_at desc`,
+    [ctx.workspaceId],
+  )).rows;
+  return c.json({ members, invites });
 });
 
 // ── Field reads ──
@@ -207,6 +249,7 @@ app.get('/shifts', async (c) => {
 });
 
 app.get('/shifts/:id', async (c) => {
+  if (badId(c)) return c.json({ error: 'not found' }, 404);
   const ctx = c.get('ctx');
   const db = c.get('db');
   const shift = (await db.query(
@@ -235,6 +278,7 @@ app.get('/petitions', async (c) => {
 });
 
 app.get('/petitions/:id/signatures', async (c) => {
+  if (badId(c)) return c.json({ error: 'not found' }, 404);
   const ctx = c.get('ctx');
   const { rows } = await c.get('db').query(
     `select id, name, email, phone, address, subscribe, created_at from petition_signatures
@@ -371,10 +415,11 @@ app.get('/brief', async (c) => {
     ],
   };
   activation.complete = activation.steps.every((s) => s.done);
+  const desk = ctx.role !== 'volunteer';
   return c.json({
-    money: { totalCents: Number(money.total), weekCents: Number(money.week), gifts: Number(money.gifts) },
-    flagged,
-    filings,
+    money: desk ? { totalCents: Number(money.total), weekCents: Number(money.week), gifts: Number(money.gifts) } : null,
+    flagged: desk ? flagged : [],
+    filings: desk ? filings : [],
     people,
     field: { week: field.week, doors: field.doors, calls: field.calls, texts: field.texts },
     ratings: Object.fromEntries(ratings.map((r) => [r.rating, r.n])),

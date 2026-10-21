@@ -40,6 +40,21 @@ create table if not exists sessions (
   expires_at timestamptz not null
 );
 
+-- Invites: how volunteers and staff join a campaign. Only the token hash is
+-- stored; the join link is shown once to the inviter (and emailed if possible).
+create table if not exists invites (
+  id uuid primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  email text not null,
+  role text not null check (role in ('manager', 'treasurer', 'staff', 'volunteer')),
+  token_hash text not null unique,
+  created_by uuid references users(id),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  accepted_at timestamptz
+);
+create index if not exists invites_ws_idx on invites (workspace_id) where accepted_at is null;
+
 -- The Person primitive: one canonical row per person/org, first-class.
 create table if not exists persons (
   id uuid primary key,

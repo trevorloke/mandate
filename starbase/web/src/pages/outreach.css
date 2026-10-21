@@ -1,0 +1,252 @@
+/* Outreach — newsletter · press · petitions · website bridge.
+   Page-specific styles only; primitives (.card .table .btn .chip .banner .toast)
+   come from app.css. Everything here is prefixed ot- so it never collides.
+   NOTE: app.css is imported after the page tree (main.jsx), so it lands later
+   in the bundle — any rule that overrides a primitive (.btn .chip .toast) must
+   out-specify it (e.g. .btn.ot-btn-sm), never rely on source order. */
+
+/* ── Tab strip (URL-driven, /outreach/:tab) ── */
+.ot-tabs {
+  display: flex;
+  gap: var(--s-1);
+  border-bottom: 1px solid var(--rule-2);
+  margin-bottom: var(--s-5);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.ot-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--text-3);
+  padding: 0 var(--s-3);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.ot-tab:hover { color: var(--text-1); }
+.ot-tab.active { color: var(--text-1); border-bottom-color: var(--mark); }
+.ot-tab .n {
+  font-size: 10px;
+  color: var(--text-4);
+  background: var(--paper-1);
+  border-radius: 999px;
+  padding: 1px 6px;
+  letter-spacing: 0.04em;
+}
+.ot-tab.active .n { background: var(--mark-soft); color: var(--text-1); }
+
+/* ── Layout ── */
+.ot-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-4); align-items: start; margin-bottom: var(--s-4); }
+.ot-row > .card { margin-bottom: 0; }
+@media (max-width: 720px) { .ot-row { grid-template-columns: 1fr; } }
+
+.ot-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); flex-wrap: wrap; margin-bottom: var(--s-3); }
+.ot-head .eyebrow { margin-bottom: 0; }
+.ot-head h2 { margin: 0; }
+.ot-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.ot-lede { color: var(--text-2); margin: 0 0 var(--s-3); }
+.ot-lede a { text-decoration: none; border-bottom: 1px dotted var(--rule-2); }
+.ot-lede a:hover { border-bottom-color: var(--ink); }
+
+/* Big quiet number */
+.ot-stat .n {
+  font-size: 44px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.ot-stat .sub { color: var(--text-3); margin-top: 2px; }
+
+/* ── Tap-sized buttons (field-friendly) ── */
+.btn.ot-btn-tap { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; font-size: 12px; }
+.btn.ot-btn-sm { padding: 4px 9px; font-size: 10px; min-height: 28px; }
+
+/* ── Share box: mono URL + Copy ── */
+.ot-share { display: flex; flex-direction: column; gap: var(--s-2); }
+.ot-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  border: var(--border);
+  border-radius: var(--r-ctrl);
+  background: var(--paper);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+}
+.ot-link-row .label { flex: 0 0 auto; }
+.ot-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--text-1);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--rule-2);
+}
+.ot-link:hover { border-bottom-color: var(--ink); }
+.ot-link-row .btn { flex: 0 0 auto; min-height: 36px; display: inline-flex; align-items: center; }
+.btn.ot-copy[data-copied='true'] { background: var(--ok); color: var(--paper); border-color: var(--ok); }
+.ot-note { color: var(--text-3); font-size: 13px; margin: 0; }
+.ot-note code { font-family: var(--font-mono); font-size: 11.5px; background: var(--paper-1); padding: 1px 4px; border-radius: 2px; }
+.ot-link-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.ot-link-list .ot-link-row .label { min-width: 92px; }
+.ot-link-caption { font-size: 14px; font-weight: 600; margin: 0 0 var(--s-1); }
+@media (max-width: 720px) {
+  .ot-link-row { flex-wrap: wrap; }
+  .ot-link-list .ot-link-row .label { min-width: 100%; }
+}
+
+/* ── Compose ── */
+.ot-compose textarea.input { min-height: 180px; resize: vertical; line-height: 1.5; }
+.ot-compose .ot-foot { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; margin-top: var(--s-2); }
+.ot-hint { font-size: 12.5px; color: var(--text-3); line-height: 1.45; }
+.ot-compose .ot-audience { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--text-3); }
+.ot-confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  background: var(--mark-soft);
+  border: 1px solid var(--mark-deep);
+  border-radius: var(--r-ctrl);
+  padding: var(--s-2) var(--s-3);
+}
+.ot-confirm span { font-size: 14px; }
+
+/* Blast result — status colour is one rule: sent = ok, queued = mark, failed = danger */
+.ot-result {
+  border: 1px solid var(--rule-2);
+  border-left-width: 4px;
+  border-radius: var(--r-card);
+  background: var(--paper-0);
+  padding: var(--s-3) var(--s-4);
+  margin: var(--s-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.ot-result .ot-result-head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.ot-result .ot-result-head strong { font-size: 15px; }
+.ot-result[data-status='sent']   { border-color: var(--ok); }
+.ot-result[data-status='queued'] { border-color: var(--mark-deep); background: var(--mark-soft); }
+.ot-result[data-status='failed'] { border-color: var(--danger); }
+.ot-result .detail { color: var(--text-2); font-size: 14px; }
+.ot-result .provider { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
+.ot-status-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text-4);
+}
+.ot-status-dot[data-status='sent']   { background: var(--ok); }
+.ot-status-dot[data-status='queued'] { background: var(--mark); box-shadow: inset 0 0 0 1px var(--mark-deep); }
+.ot-status-dot[data-status='failed'] { background: var(--danger); }
+
+/* ── Tables ── */
+.ot-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table.ot-table td { vertical-align: middle; } /* beats app.css .table td (baseline) */
+.ot-table .when { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ot-table .email { font-family: var(--font-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.ot-table .act { text-align: right; white-space: nowrap; }
+.ot-table tr.off td { color: var(--text-4); }
+.ot-table tr.off td .email { color: var(--text-4); }
+.ot-table .subject { font-weight: 600; }
+.chip.ot-chip-ghost { color: var(--text-4); border-color: var(--rule); }
+.chip.ot-chip-kind { text-transform: none; letter-spacing: 0.04em; }
+.ot-empty { color: var(--text-3); padding: var(--s-3) 0; font-style: italic; }
+.table td.ot-empty { padding: var(--s-3) var(--s-2); }
+.ot-row-note { font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-3); margin-top: 2px; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .ot-table .col-wide { display: none; } }
+
+/* Inline add (email + name + button) */
+.ot-inline-add { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--rule); }
+.ot-inline-add .field { margin-bottom: 0; flex: 1 1 180px; }
+.ot-inline-add .btn { min-height: 38px; display: inline-flex; align-items: center; }
+
+/* ── Petitions ── */
+.ot-petitions { list-style: none; margin: 0; padding: 0; }
+.ot-petition { padding: var(--s-3) 0; border-bottom: 1px solid var(--rule); }
+.ot-petition:last-child { border-bottom: 0; }
+.ot-petition-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); flex-wrap: wrap; }
+.ot-petition-head .title { font-size: 17px; font-weight: 600; margin: 0; }
+.ot-petition-head .meta { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.ot-petition-head .sigs { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ot-petition-head .sigs strong { font-size: 15px; }
+.ot-petition .ot-link-row { margin-top: var(--s-2); }
+.ot-petition .ot-petition-actions { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; margin-top: var(--s-2); }
+.ot-petition.off .title { color: var(--text-3); }
+.ot-body { white-space: pre-line; }
+.ot-expander { margin-top: var(--s-2); border-top: 1px dashed var(--rule); padding-top: var(--s-2); }
+.ot-switch[aria-pressed='true'] { background: var(--ok); color: var(--paper); border-color: var(--ok); }
+.ot-switch[aria-pressed='true']:hover { background: var(--ok); border-color: var(--ok); opacity: 0.9; }
+.ot-slug-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
+
+/* ── Website tab ── */
+.ot-site-current { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-bottom: var(--s-2); }
+.ot-site-current a { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+.ot-site-form { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; }
+.ot-site-form .field { margin-bottom: 0; flex: 1 1 260px; }
+.ot-site-form .btn { min-height: 38px; display: inline-flex; align-items: center; }
+
+.ot-seg { display: inline-flex; border: var(--border-2); border-radius: var(--r-ctrl); overflow: hidden; }
+.ot-seg button {
+  min-height: 36px;
+  border: 0;
+  border-right: 1px solid var(--rule-2);
+  background: var(--paper-0);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.ot-seg button:last-child { border-right: 0; }
+.ot-seg button:hover { background: var(--paper-1); }
+.ot-seg button[aria-pressed='true'] { background: var(--ink); color: var(--paper-0); }
+.ot-seg button:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
+
+.ot-pre-wrap { position: relative; margin-top: var(--s-2); }
+.ot-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-1);
+  background: var(--paper);
+  border: var(--border);
+  border-radius: var(--r-ctrl);
+  padding: var(--s-3) var(--s-3) var(--s-3);
+  overflow-x: auto;
+  tab-size: 2;
+  max-height: 420px;
+}
+.ot-pre-wrap .ot-copy { position: absolute; top: var(--s-2); right: var(--s-2); }
+/* Phones: the floating Copy would cover the first code line — stack it above. */
+@media (max-width: 720px) {
+  .ot-pre-wrap { display: flex; flex-direction: column; gap: var(--s-2); }
+  .ot-pre-wrap .ot-copy { position: static; align-self: flex-end; }
+}
+
+/* ── Toast: keep above the phone tab bar ── */
+.toast.ot-toast { max-width: calc(100vw - 32px); text-align: center; }
+@media (max-width: 720px) { .toast.ot-toast { bottom: calc(56px + env(safe-area-inset-bottom) + var(--s-3)); } }
+
+/* ── Touch screens: every control gets a full 44px target ── */
+@media (pointer: coarse) {
+  .btn.ot-btn-sm,
+  .ot-link-row .btn,
+  .ot-seg button,
+  .ot-inline-add .btn,
+  .ot-site-form .btn,
+  .toast.ot-toast .btn { min-height: 44px; }
+  .btn.ot-btn-sm { padding: 0 14px; font-size: 11px; }
+  .ot-tab { min-height: 48px; }
+}

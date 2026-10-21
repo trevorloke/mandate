@@ -7,6 +7,7 @@ import {
   RATING_CODES, CHANNELS, OUTCOMES, SIGN_KIND_CODES, SIGN_STATUSES,
   VOLUNTEER_ROLE_CODES, SOCIAL_PLATFORMS, SHIFT_STATUSES,
 } from '@starbase/shared/canvass';
+import { createHash, randomBytes } from 'node:crypto';
 import { newId } from '../lib/events.js';
 import { sendEmail, sendText, shiftMessage } from '../lib/notify.js';
 import { httpError } from './util.js';
@@ -245,11 +246,25 @@ export const FIELD_ACTIONS = {
     roles: DESK_ROLES,
     input: z.object({ id: uuid(), status: z.enum(SHIFT_STATUSES) }),
     handler: async (tx, ctx, input, emit) => {
-      const n = await tx.query(
+      const cur = (await tx.query(
+        `select a.status, a.shift_id, s.capacity from shift_assignments a join shifts s on s.id = a.shift_id
+         where a.id = $1 and a.workspace_id = $2`,
+        [input.id, ctx.workspaceId],
+      )).rows[0];
+      if (!cur) throw httpError(404, 'assignment not found');
+      const ACTIVE = ['assigned', 'confirmed'];
+      if (cur.capacity && ACTIVE.includes(input.status) && !ACTIVE.includes(cur.status)) {
+        const n = (await tx.query(
+          `select count(*)::int as n from shift_assignments
+           where shift_id = $1 and workspace_id = $2 and status in ('assigned', 'confirmed')`,
+          [cur.shift_id, ctx.workspaceId],
+        )).rows[0].n;
+        if (n >= cur.capacity) throw httpError(409, 'shift is at capacity');
+      }
+      await tx.query(
         'update shift_assignments set status = $3 where id = $1 and workspace_id = $2',
         [input.id, ctx.workspaceId, input.status],
       );
-      if (n.affectedRows === 0) throw httpError(404, 'assignment not found');
       emit('shift_assignment', input.id, 'update', { status: input.status });
       return { id: input.id, status: input.status };
     },
@@ -274,7 +289,7 @@ export const FIELD_ACTIONS = {
         [input.shift_id, ctx.workspaceId],
       )).rows;
 
-      const message = shiftMessage(shift, ctx.workspace.name);
+      const message = shiftMessage(shift, ctx.workspace.name, ctx.workspace.settings?.tz || 'America/Vancouver');
       const results = [];
       for (const a of assignees) {
         const emailRes = a.email
@@ -392,7 +407,7 @@ export const FIELD_ACTIONS = {
     handler: async (tx, ctx, input, emit) => {
       const audience = input.kind === 'newsletter'
         ? (await tx.query(
-            `select email, name from subscriptions where workspace_id = $1 and status = 'subscribed'`,
+            `select id, email, name from subscriptions where workspace_id = $1 and status = 'subscribed'`,
             [ctx.workspaceId],
           )).rows
         : (await tx.query(
@@ -410,8 +425,13 @@ export const FIELD_ACTIONS = {
       const id = newId();
       let sent = 0, failed = 0, queued = 0;
       const recipientRows = [];
+      // Every newsletter identifies the sender and carries the recipient's own
+      // one-click unsubscribe link (/u/:subscriptionId).
+      const footer = (r) => input.kind === 'newsletter'
+        ? `\n\n—\nSent by ${ctx.workspace.name}.\nUnsubscribe: ${ctx.publicUrl || ''}/u/${r.id}`
+        : `\n\n—\n${ctx.workspace.name}`;
       for (const r of audience) {
-        const res = await sendEmail({ to: r.email, subject: input.subject, text: input.body });
+        const res = await sendEmail({ to: r.email, subject: input.subject, text: input.body + footer(r) });
         if (res.status === 'sent') sent += 1;
         else if (res.status === 'failed') failed += 1;
         else queued += 1;
@@ -433,6 +453,58 @@ export const FIELD_ACTIONS = {
       }
       emit('blast', id, 'create', { kind: input.kind, subject: input.subject, audience: audience.length, status });
       return { blast: { id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note } };
+    },
+  },
+
+  // ── Team: invite volunteers and staff; change roles ──
+  'member.invite': {
+    roles: MANAGER_ONLY,
+    input: z.object({
+      email: z.string().email().max(320),
+      role: z.enum(['manager', 'treasurer', 'staff', 'volunteer']),
+    }),
+    handler: async (tx, ctx, input, emit) => {
+      const email = input.email.toLowerCase();
+      const already = (await tx.query(
+        `select 1 from memberships m join users u on u.id = m.user_id
+         where m.workspace_id = $1 and u.email = $2`,
+        [ctx.workspaceId, email],
+      )).rows[0];
+      if (already) throw httpError(409, `${email} is already on the team`);
+      const token = randomBytes(24).toString('hex');
+      const id = newId();
+      await tx.query(
+        `insert into invites (id, workspace_id, email, role, token_hash, created_by, expires_at)
+         values ($1, $2, $3, $4, $5, $6, now() + interval '14 days')`,
+        [id, ctx.workspaceId, email, input.role,
+         createHash('sha256').update(token).digest('hex'), ctx.user.id],
+      );
+      const joinUrl = `${ctx.publicUrl || ''}/join/${token}`;
+      const mail = await sendEmail({
+        to: email,
+        subject: `Join ${ctx.workspace.name} on Starbase`,
+        text: `${ctx.user.name} invited you to join ${ctx.workspace.name} as ${input.role}.\n\nSet your password and get started: ${joinUrl}\n\nThis link expires in 14 days.`,
+      });
+      // The token never enters the event log — only who was invited, as what.
+      emit('invite', id, 'create', { email, role: input.role });
+      return { invite: { id, email, role: input.role }, joinUrl, email: mail.status };
+    },
+  },
+
+  'member.setRole': {
+    roles: MANAGER_ONLY,
+    input: z.object({ user_id: uuid(), role: z.enum(['manager', 'treasurer', 'staff', 'volunteer']) }),
+    handler: async (tx, ctx, input, emit) => {
+      if (input.user_id === ctx.user.id && input.role !== 'manager') {
+        throw httpError(400, 'you cannot remove your own manager role');
+      }
+      const n = await tx.query(
+        'update memberships set role = $3 where user_id = $1 and workspace_id = $2',
+        [input.user_id, ctx.workspaceId, input.role],
+      );
+      if (n.affectedRows === 0) throw httpError(404, 'member not found');
+      emit('membership', input.user_id, 'update', { role: input.role });
+      return { user_id: input.user_id, role: input.role };
     },
   },
 

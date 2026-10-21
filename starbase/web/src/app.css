@@ -1,4 +1,4 @@
-/* Mandate v2 — one stylesheet.
+/* Starbase — one stylesheet.
    Ink on paper, ported from v1 tokens.css: warm off-white paper, deep ink,
    one editorial serif for body + display, one operator mono for micro-labels,
    hairline rules, the yellow mark accent. ~12 primitives, no per-screen CSS. */
@@ -351,3 +351,23 @@ h2 { font-size: 18px; }
 }
 .check { font-family: var(--font-mono); }
 .done { text-decoration: line-through; color: var(--text-4); }
+
+/* ── 11. Mobile tab bar (field mode) ── */
+.tabbar { display: none; }
+@media (max-width: 720px) {
+  .nav .links { display: none; }
+  .nav .ws { display: none; }
+  .page { padding-bottom: 64px; }
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    background: var(--paper-0); border-top: 1px solid var(--ink);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar a {
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    text-decoration: none; color: var(--text-3); text-align: center; padding: 10px 2px 9px;
+    border-top: 2px solid transparent; margin-top: -1px;
+  }
+  .tabbar a.active { color: var(--text-1); border-top-color: var(--mark); }
+}

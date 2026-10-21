@@ -4,6 +4,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { getDb } from '../db/client.js';
 import { newId } from '../lib/events.js';
 import {
@@ -96,6 +97,62 @@ app.post('/login', async (c) => {
   const token = await createSession(db, user.id, membership.workspace_id);
   setCookie(c, SESSION_COOKIE, token, cookieOpts);
   const ctx = await loadContext(db, token);
+  return c.json({ user: ctx.user, workspace: ctx.workspace, role: ctx.role });
+});
+
+// ── Invites: look up, then join (new account, or an existing one by password) ──
+const findInvite = async (db, token) => (await db.query(
+  `select i.id, i.email, i.role, i.workspace_id, w.name as workspace_name
+   from invites i join workspaces w on w.id = i.workspace_id
+   where i.token_hash = $1 and i.accepted_at is null and i.expires_at > now()`,
+  [createHash('sha256').update(String(token || '')).digest('hex')],
+)).rows[0];
+
+app.get('/invite/:token', async (c) => {
+  const db = await getDb();
+  const inv = await findInvite(db, c.req.param('token'));
+  if (!inv) return c.json({ error: 'this invite link is invalid or has expired' }, 404);
+  const existing = (await db.query('select 1 from users where email = $1', [inv.email])).rows[0];
+  return c.json({ email: inv.email, role: inv.role, workspaceName: inv.workspace_name, hasAccount: !!existing });
+});
+
+const joinInput = z.object({
+  token: z.string().min(10).max(200),
+  name: z.string().trim().min(1).max(200).optional(),
+  password: z.string().min(8).max(200),
+});
+
+app.post('/join', async (c) => {
+  const db = await getDb();
+  const parsed = joinInput.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.issues[0].message }, 400);
+  const { token, name, password } = parsed.data;
+  const inv = await findInvite(db, token);
+  if (!inv) return c.json({ error: 'this invite link is invalid or has expired' }, 404);
+
+  let user = (await db.query('select id, password_hash from users where email = $1', [inv.email])).rows[0];
+  if (user && !(await verifyPassword(password, user.password_hash))) {
+    return c.json({ error: 'that password does not match your existing Starbase account' }, 401);
+  }
+  if (!user && !name) return c.json({ error: 'name required' }, 400);
+  const userId = user?.id || newId();
+  const passwordHash = user ? null : await hashPassword(password);
+  await db.transaction(async (tx) => {
+    if (!user) {
+      await tx.query('insert into users (id, email, name, password_hash) values ($1, $2, $3, $4)',
+        [userId, inv.email, name, passwordHash]);
+    }
+    await tx.query(
+      `insert into memberships (user_id, workspace_id, role) values ($1, $2, $3)
+       on conflict (user_id, workspace_id) do nothing`,
+      [userId, inv.workspace_id, inv.role],
+    );
+    const n = await tx.query('update invites set accepted_at = now() where id = $1 and accepted_at is null', [inv.id]);
+    if (n.affectedRows === 0) throw new Error('invite already used');
+  });
+  const sessionToken = await createSession(db, userId, inv.workspace_id);
+  setCookie(c, SESSION_COOKIE, sessionToken, cookieOpts);
+  const ctx = await loadContext(db, sessionToken);
   return c.json({ user: ctx.user, workspace: ctx.workspace, role: ctx.role });
 });
 
