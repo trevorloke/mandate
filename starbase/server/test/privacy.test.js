@@ -81,14 +81,16 @@ test('malformed ids are 404, not 500', async () => {
 });
 
 test('shift messages render in campaign time regardless of server zone', () => {
+  // July: Pacific time is UTC−7 under both the old rules and BC's year-round
+  // time, so this stays true whichever tz database the host ships.
   const msg = shiftMessage({
-    title: 'Saturday canvass', starts_at: '2026-11-07T18:00:00Z', ends_at: '2026-11-07T21:00:00Z',
+    title: 'Saturday canvass', starts_at: '2026-07-11T17:00:00Z', ends_at: '2026-07-11T20:00:00Z',
     location: 'Newton Rec', instructions: 'Meet north entrance', link: 'https://imaginesurrey.ca/canvass',
   }, 'Imagine Surrey');
-  assert.match(msg, /Saturday, November 7/);
-  assert.match(msg, /10:00/, '18:00 UTC is 10:00 in Vancouver (PST)');
-  assert.doesNotMatch(msg, /18:00|6:00/);
-  assert.match(msg, /1:00/, 'end time 21:00 UTC is 1:00 p.m.');
+  assert.match(msg, /Saturday, July 11/);
+  assert.match(msg, /10:00/, '17:00 UTC is 10:00 in Vancouver');
+  assert.doesNotMatch(msg, /17:00|5:00/, 'not rendered in UTC');
+  assert.match(msg, /1:00/, 'end time 20:00 UTC is 1:00 p.m.');
   assert.match(msg, /Where: Newton Rec/);
   assert.match(msg, /Details: https:\/\/imaginesurrey\.ca\/canvass/);
   assert.match(msg, /— Imagine Surrey$/);
