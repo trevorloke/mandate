@@ -74,6 +74,9 @@ one tap away under **More**.
   *Support* for the breakdown by candidate. **Needs you** lists what's waiting:
   gifts over the limit, open pledges, filings due, shifts short of people,
   signs to put up.
+- **Outreach → Newsletter** — without email connected, a newsletter is
+  *Saved — not sent*; connect email (Resend) and tap *Send now*. A send
+  that partly fails says *Sent to 1 of 2 — 1 failed* with *Try again*.
 - **Outreach → Website** — set the Imagine Surrey website address; copy the
   public volunteer page (`/v/imagine-surrey`), newsletter page
   (`/n/imagine-surrey`), petition, event, and donate (`/d/imagine-surrey`)
@@ -96,7 +99,9 @@ one tap away under **More**.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved
   offline*), turn it off — they send once, never twice.
 - Confirm a volunteer **never sees money or the supporter list**: no Money,
-  People or Outreach; typing those addresses lands back on Today.
+  People or Outreach; typing those addresses lands back on Today. (The
+  server enforces this too: their browser never receives other people's
+  emails or donor tags.)
 
 ### Staff
 - **People** — search; **Filter** by rating, tag (media, VIP…), or volunteer
@@ -105,9 +110,11 @@ one tap away under **More**.
   filter.
 - **Shifts** — **New shift** (what, when, where, how many; role,
   instructions and link under *More details*), **Add volunteer**, then
-  **Notify everyone** (email + text). Without email/text connected it says
-  *Saved* — nothing claims to be sent.
-- **Signs** — tap Requested / Installed / Removed to filter; **Add sign**.
+  **Notify everyone** (email + text). Without email/text connected the
+  button says *Save — nothing sends*; once connected, *Notify again* reaches
+  them. Nothing on any screen claims to be sent unless it was.
+- **Signs** — tap *To put up* / *Up* / *Taken down* to filter; **Add a sign**
+  (it needs an address); a request that never went up can be *Cancelled*.
 - **Map → filter button → Draw turf** — tap the corners, name it, assign a
   canvasser.
 
@@ -117,8 +124,9 @@ one tap away under **More**.
   star ($1K+/yr or $100+/mo), superstar ($3K+/yr or $250+/mo).
 - **Donate page** (`/d/imagine-surrey`, in a private window): try without the
   eligibility boxes (refused), more than the annual limit (refused), then a
-  real pledge → it appears under **Money → Needs you** → *Received* turns it
-  into a gift (cap-checked).
+  real pledge → it appears under **Money → Needs you** → *Mark paid* turns it
+  into a gift (cap-checked). Voiding that gift reopens the pledge; a monthly
+  pledge stays open and is marked paid month by month.
 - **Today → More → Verify my books** replays the tamper-evident log;
   **Export all data** downloads everything.
 
