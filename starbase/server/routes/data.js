@@ -20,10 +20,17 @@ const parseJson = (v, d) => (typeof v === 'string' ? JSON.parse(v) : (v ?? d));
 const norm = (s) => String(s ?? '').trim();
 const lower = (s) => norm(s).toLowerCase();
 const digits = (s) => norm(s).replace(/\D+/g, '');
+// Names compare case-insensitively, trimmed, with runs of spaces as one.
+const nameKey = (s) => lower(s).replace(/\s+/g, ' ');
+// Nothing to tell two people of the same name apart: no email, phone or address.
+const nameOnly = (p) => !p.email && !p.phone && !p.address;
 
 // ── Import ──
 // The client parses the CSV and maps columns; the server validates, dedupes,
-// and writes in one transaction per call (≤ 2000 rows).
+// and writes in one transaction per call (≤ 2000 rows). A row matches a
+// person on file by email, then name + phone, then name + address; a row with
+// none of the three matches a person of the same name who has none either.
+// Anything else is new — so importing the same file again doubles no one.
 const rowSchema = z.object({
   name: z.string().max(300).nullish(),
   first: z.string().max(150).nullish(),
@@ -85,13 +92,16 @@ app.post('/import', async (c) => {
   const run = async (tx, emit, write = true) => {
     const existing = (await tx.query(
       `select id, name, email, phone, address, unit, city, postal, tags, rating from persons
-       where workspace_id = $1 and deleted_at is null`, [ctx.workspaceId],
+       where workspace_id = $1 and deleted_at is null order by created_at, id`, [ctx.workspaceId],
     )).rows.map((p) => ({ ...p, tags: parseJson(p.tags, []) }));
     const byEmail = new Map(); const byNamePhone = new Map(); const byNameAddr = new Map();
+    const byName = new Map(); // name-only people (the oldest of a name wins)
     const index = (p) => {
       if (p.email) byEmail.set(lower(p.email), p);
-      if (p.phone) byNamePhone.set(`${lower(p.name)}|${digits(p.phone)}`, p);
-      if (p.address) byNameAddr.set(`${lower(p.name)}|${lower(p.address)}|${lower(p.unit)}`, p);
+      if (p.phone) byNamePhone.set(`${nameKey(p.name)}|${digits(p.phone)}`, p);
+      if (p.address) byNameAddr.set(`${nameKey(p.name)}|${lower(p.address)}|${lower(p.unit)}`, p);
+      const k = nameKey(p.name);
+      if (nameOnly(p)) { if (!byName.has(k)) byName.set(k, p); } else if (byName.get(k) === p) byName.delete(k);
     };
     existing.forEach(index);
 
@@ -99,8 +109,9 @@ app.post('/import', async (c) => {
     const decisions = [];
     for (const r of clean) {
       const match = (r.email && byEmail.get(r.email))
-        || (r.phone && byNamePhone.get(`${lower(r.name)}|${digits(r.phone)}`))
-        || (r.address && byNameAddr.get(`${lower(r.name)}|${lower(r.address)}|${lower(r.unit)}`));
+        || (r.phone && byNamePhone.get(`${nameKey(r.name)}|${digits(r.phone)}`))
+        || (r.address && byNameAddr.get(`${nameKey(r.name)}|${lower(r.address)}|${lower(r.unit)}`))
+        || (nameOnly(r) && byName.get(nameKey(r.name)));
       if (match) {
         // Merge: fill blanks, union tags — never overwrite what's on file.
         const patch = {};
@@ -205,25 +216,52 @@ app.post('/geocode', async (c) => {
 });
 
 // ── Sample data ──
+// POST /sample records every row it creates, by id, in settings.sample.ids;
+// DELETE /sample removes exactly those rows and nothing else. What you made
+// yourself stays, even when it hangs on a sample row — a gift, sign, knock,
+// role or booking on a sample voter keeps that voter (no longer marked
+// sample), and a booking you made on the sample shift, an RSVP to the sample
+// town hall or a signature on the sample petition keeps that shift, event or
+// petition. Sample gifts are voided (an event on the books, never a silent
+// delete); everything else sample-made is deleted with a 'void' event.
 const SAMPLE_TAG = 'sample';
+const SAMPLE_KEYS = ['persons', 'contacts', 'roles', 'gifts', 'signs', 'shifts', 'assignments',
+  'petitions', 'events', 'subscriptions', 'turfs'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const idLists = (src = {}) => Object.fromEntries(SAMPLE_KEYS.map((k) => [
+  k, Array.isArray(src[k]) ? [...new Set(src[k].filter((v) => UUID_RE.test(String(v))))] : [],
+]));
+
+// "sample-town-hall-newton" is taken when a kept sample event still holds it.
+const freeSlug = async (tx, table, workspaceId, base) => {
+  const taken = new Set((await tx.query(
+    `select slug from ${table} where workspace_id = $1 and (slug = $2 or slug like $3)`,
+    [workspaceId, base, `${base}-%`],
+  )).rows.map((r) => r.slug));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
+};
 
 app.post('/sample', async (c) => {
   const ctx = c.get('ctx');
   if (ctx.role !== 'manager') return c.json({ error: 'managers only' }, 403);
   const db = c.get('db');
-  const already = (await db.query(
-    `select count(*)::int as n from persons where workspace_id = $1 and deleted_at is null and tags @> $2::jsonb`,
-    [ctx.workspaceId, JSON.stringify([SAMPLE_TAG])],
-  )).rows[0].n;
-  if (already > 0) return c.json({ error: 'sample data is already loaded — clear it first' }, 409);
-
   const S = buildSample();
   const year = new Date().getUTCFullYear();
-  const { result } = await runAction(db, { workspaceId: ctx.workspaceId, actorId: ctx.user.id, action: 'sample.load' }, async (tx, emit) => {
+  const W = ctx.workspaceId;
+  const { result } = await runAction(db, { workspaceId: W, actorId: ctx.user.id, action: 'sample.load' }, async (tx, emit) => {
+    // Checked under the workspace lock runAction holds: two taps load once.
+    const cur = (await tx.query('select settings from workspaces where id = $1', [W])).rows[0];
+    if (parseJson(cur?.settings, {}).sample) return { conflict: true };
+
+    const ids = idLists();
     const id = {};
     for (const p of [...S.people, ...S.media.map((m) => ({ ...m, key: m.name }))]) {
       const pid = newId();
       id[p.key] = pid;
+      ids.persons.push(pid);
       const tags = [SAMPLE_TAG, ...(S.tags[p.key] || []), ...(p.tags || [])];
       // Spread the knocks across the past week so Today has a realistic
       // picture. A rated person was rated by that knock, so rated_at is the
@@ -233,7 +271,7 @@ app.post('/sample', async (c) => {
         `insert into persons (id, workspace_id, name, email, phone, address, city, lat, lng, tags, socials, rating, rated_at)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
                  case when $12::text is null then null else now() - ($13 || ' hours')::interval end)`,
-        [pid, ctx.workspaceId, p.name, p.email || null, p.phone || null, p.address || null, p.city || null,
+        [pid, W, p.name, p.email || null, p.phone || null, p.address || null, p.city || null,
          p.lat ?? null, p.lng ?? null, JSON.stringify(tags), JSON.stringify(p.socials || {}), p.rating || null, hoursAgo],
       );
       emit('person', pid, 'create', { name: p.name, sample: true });
@@ -242,15 +280,17 @@ app.post('/sample', async (c) => {
         await tx.query(
           `insert into contacts (id, workspace_id, person_id, channel, outcome, rating, created_by, created_at)
            values ($1, $2, $3, $4, 'contacted', $5, $6, now() - ($7 || ' hours')::interval)`,
-          [cid, ctx.workspaceId, pid, p.channel || 'door', p.rating, ctx.user.id, hoursAgo],
+          [cid, W, pid, p.channel || 'door', p.rating, ctx.user.id, hoursAgo],
         );
+        ids.contacts.push(cid);
         emit('contact', cid, 'create', { person_id: pid, rating: p.rating, sample: true });
       }
     }
     for (const [who, role, detail] of S.roles) {
       const rid = newId();
       await tx.query('insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
-        [rid, ctx.workspaceId, id[who], role, detail || null]);
+        [rid, W, id[who], role, detail || null]);
+      ids.roles.push(rid);
       emit('volunteer_role', rid, 'create', { person_id: id[who], role, sample: true });
     }
     // Dates relative to today: monthly gifts are current (last week), one-time
@@ -259,19 +299,19 @@ app.post('/sample', async (c) => {
     for (const [i, [who, cents, cadence, method]] of S.gifts.entries()) {
       const daysBack = cadence === 'monthly' ? 3 + i : 14 + i * 11;
       const when = new Date(Math.max(jan1, Date.now() - daysBack * 86400e3)).toISOString().slice(0, 10);
-      await logGift(tx, ctx.workspace, {
+      const { gift } = await logGift(tx, ctx.workspace, {
         person_id: id[who], amount_cents: cents, date: when, method, cadence, note: 'sample',
       }, emit);
+      ids.gifts.push(gift.id);
     }
-    const signIds = [];
     for (const [who, kind, status, address, lat, lng] of S.signs) {
       const sid = newId();
       const p = who ? S.people.find((x) => x.key === who) : null;
       await tx.query(
         `insert into signs (id, workspace_id, person_id, address, lat, lng, kind, status, note) values ($1, $2, $3, $4, $5, $6, $7, $8, 'sample')`,
-        [sid, ctx.workspaceId, who ? id[who] : null, p?.address || address, p?.lat ?? lat, p?.lng ?? lng, kind, status],
+        [sid, W, who ? id[who] : null, p?.address || address, p?.lat ?? lat, p?.lng ?? lng, kind, status],
       );
-      signIds.push(sid);
+      ids.signs.push(sid);
       emit('sign', sid, 'create', { kind, status, sample: true });
     }
     // An upcoming Saturday shift, a petition, an event, the Newton turf.
@@ -281,80 +321,254 @@ app.post('/sample', async (c) => {
       `insert into shifts (id, workspace_id, title, role, location, starts_at, ends_at, instructions, link, capacity, created_by)
        values ($1, $2, 'Saturday canvass — Newton (sample)', 'doorknocking', 'Newton Rec Centre, 13730 72 Ave', $3, $4,
                'Meet at the north entrance. Bring water and comfortable shoes.', null, 8, $5)`,
-      [shiftId, ctx.workspaceId, sat.toISOString(), new Date(sat.getTime() + 3 * 3600e3).toISOString(), ctx.user.id],
+      [shiftId, W, sat.toISOString(), new Date(sat.getTime() + 3 * 3600e3).toISOString(), ctx.user.id],
     );
-    for (const who of ['Sam Ortiz', 'Gurpreet Sandhu', 'Priya Nair']) {
-      await tx.query('insert into shift_assignments (id, workspace_id, shift_id, person_id) values ($1, $2, $3, $4)',
-        [newId(), ctx.workspaceId, shiftId, id[who]]);
-    }
+    ids.shifts.push(shiftId);
     emit('shift', shiftId, 'create', { sample: true });
+    for (const who of ['Sam Ortiz', 'Gurpreet Sandhu', 'Priya Nair']) {
+      const aid = newId();
+      await tx.query('insert into shift_assignments (id, workspace_id, shift_id, person_id) values ($1, $2, $3, $4)',
+        [aid, W, shiftId, id[who]]);
+      ids.assignments.push(aid);
+      emit('shift_assignment', aid, 'create', { shift_id: shiftId, person_id: id[who], sample: true });
+    }
     const petitionId = newId();
     await tx.query(
-      `insert into petitions (id, workspace_id, slug, title, body) values ($1, $2, 'sample-skytrain-to-newton',
+      `insert into petitions (id, workspace_id, slug, title, body) values ($1, $2, $3,
         'Bring rapid transit down King George to Newton (sample)', 'Surrey deserves fast, frequent transit south of 72 Avenue. Add your name.')`,
-      [petitionId, ctx.workspaceId],
+      [petitionId, W, await freeSlug(tx, 'petitions', W, 'sample-skytrain-to-newton')],
     );
+    ids.petitions.push(petitionId);
     emit('petition', petitionId, 'create', { sample: true });
     const eventId = newId();
     const th = new Date(Date.now() + 10 * 86400e3); th.setUTCHours(2, 0, 0, 0); // 7pm Pacific, ~10 days out
     await tx.query(
       `insert into campaign_events (id, workspace_id, slug, title, description, location, starts_at, ends_at, capacity)
-       values ($1, $2, 'sample-town-hall-newton', 'Town hall: Imagine Newton (sample)',
+       values ($1, $2, $3, 'Town hall: Imagine Newton (sample)',
                'Bring your questions about transit, housing, and safety in Newton.', 'Newton Cultural Centre, 13530 72 Ave',
-               $3, $4, 120)`,
-      [eventId, ctx.workspaceId, th.toISOString(), new Date(th.getTime() + 2 * 3600e3).toISOString()],
+               $4, $5, 120)`,
+      [eventId, W, await freeSlug(tx, 'campaign_events', W, 'sample-town-hall-newton'),
+       th.toISOString(), new Date(th.getTime() + 2 * 3600e3).toISOString()],
     );
+    ids.events.push(eventId);
     emit('campaign_event', eventId, 'create', { sample: true });
     for (const email of S.subscribers) {
-      await tx.query(
+      // An address already on the list is yours: it is left alone, and not recorded.
+      const row = (await tx.query(
         `insert into subscriptions (id, workspace_id, email, status, source) values ($1, $2, $3, 'subscribed', 'sample')
-         on conflict (workspace_id, email) do nothing`,
-        [newId(), ctx.workspaceId, email],
-      );
+         on conflict (workspace_id, email) do nothing returning id`,
+        [newId(), W, email],
+      )).rows[0];
+      if (row) {
+        ids.subscriptions.push(row.id);
+        emit('subscription', row.id, 'create', { sample: true });
+      }
     }
     const turfId = newId();
     await tx.query('insert into turfs (id, workspace_id, name, polygon, color) values ($1, $2, $3, $4, $5)',
-      [turfId, ctx.workspaceId, S.turf.name, JSON.stringify(S.turf.polygon), '#2b6cb0']);
-    await tx.query('insert into turf_members (workspace_id, turf_id, user_id) values ($1, $2, $3)', [ctx.workspaceId, turfId, ctx.user.id]);
+      [turfId, W, S.turf.name, JSON.stringify(S.turf.polygon), '#2b6cb0']);
+    await tx.query('insert into turf_members (workspace_id, turf_id, user_id) values ($1, $2, $3)', [W, turfId, ctx.user.id]);
+    ids.turfs.push(turfId);
     emit('turf', turfId, 'create', { sample: true });
 
     await tx.query(
       `update workspaces set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{sample}', $2::jsonb) where id = $1`,
-      [ctx.workspaceId, JSON.stringify({ shiftIds: [shiftId], petitionIds: [petitionId], eventIds: [eventId], turfIds: [turfId], signIds, loadedAt: new Date().toISOString() })],
+      [W, JSON.stringify({ loadedAt: new Date().toISOString(), ids })],
     );
-    return { people: Object.keys(id).length, signs: signIds.length, gifts: S.gifts.length };
+    return { people: ids.persons.length, signs: ids.signs.length, gifts: ids.gifts.length };
   });
+  if (result.conflict) return c.json({ error: 'sample data is already loaded — clear it first' }, 409);
   return c.json({ loaded: true, ...result });
 });
+
+// A sample loaded before ids were recorded (settings.sample has only shift,
+// petition, event, turf and sign ids). Every row that load inserted carries
+// its transaction's now() as created_at — the same instant as its
+// 'sample.load' events — so that instant names them exactly; its knocks were
+// back-dated to before it, onto people created in it.
+const legacySampleIds = async (tx, W, marks) => {
+  const T = `(select server_ts from events where workspace_id = $1 and action = 'sample.load' order by seq desc limit 1)`;
+  const list = async (sql) => (await tx.query(sql, [W])).rows.map((r) => r.id);
+  const created = (table, extra = '') => list(`select id from ${table} where workspace_id = $1 and created_at = ${T}${extra}`);
+  return idLists({
+    persons: await created('persons'),
+    contacts: await list(`select c.id from contacts c join persons p on p.id = c.person_id
+      where c.workspace_id = $1 and p.created_at = ${T} and c.created_at <= p.created_at`),
+    roles: await created('volunteer_roles'),
+    gifts: await created('gifts'),
+    assignments: await created('shift_assignments'),
+    subscriptions: await created('subscriptions', ` and source = 'sample'`),
+    signs: marks.signIds,
+    shifts: marks.shiftIds,
+    petitions: marks.petitionIds,
+    events: marks.eventIds,
+    turfs: marks.turfIds,
+  });
+};
+
+const nOf = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// What a kept record is, in the campaign's words.
+const KINDS = [
+  ['gift', 'gift', 'gifts'], ['pledge', 'pledge', 'pledges'], ['sign', 'sign', 'signs'],
+  ['door', 'door knock', 'door knocks'], ['phone', 'call', 'calls'], ['text', 'text', 'texts'],
+  ['role', 'volunteer role', 'volunteer roles'], ['booking', 'shift booking', 'shift bookings'],
+  ['rsvp', 'RSVP', 'RSVPs'], ['signature', 'signature', 'signatures'],
+];
+const kindList = (byKind) => KINDS.filter(([k]) => byKind[k]).map(([k, one, many]) => nOf(byKind[k], one, many)).join(', ');
+
+const clearSample = async (tx, W, emit) => {
+  const rows = async (sql, params) => (await tx.query(sql, params)).rows;
+  const ws = (await rows('select settings from workspaces where id = $1', [W]))[0];
+  const marks = parseJson(ws?.settings, {}).sample;
+  if (!marks) return { cleared: 0, kept: 0, removed: {}, message: 'No sample data is loaded.' };
+  const ids = marks.ids ? idLists(marks.ids) : await legacySampleIds(tx, W, marks);
+
+  // ── 1. What of yours hangs on sample rows ──
+  const people = await rows(
+    `select id, name, tags, (rated_at is not null and rated_at <= created_at) as sample_rating
+     from persons where workspace_id = $1 and id = any($2::uuid[])`, [W, ids.persons],
+  );
+  const P = people.map((p) => p.id);
+  const real = new Set();            // 'kind:id': each of your records, once
+  const keptPeople = new Map();      // sample person id → { kind: n }
+  const note = (kind, id) => real.add(`${kind}:${id}`);
+  const onPerson = async (kind, sql, exclude) => {
+    for (const r of await rows(sql, exclude ? [W, P, exclude] : [W, P])) {
+      note(kind, r.id);
+      const k = kind === 'contact' ? r.channel : kind; // door / phone / text
+      const by = keptPeople.get(r.person_id) || {};
+      by[k] = (by[k] || 0) + 1;
+      keptPeople.set(r.person_id, by);
+    }
+  };
+  // Voided gifts count too: they are still in the books, and still name their donor.
+  await onPerson('gift', `select id, person_id from gifts where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.gifts);
+  await onPerson('pledge', `select id, person_id from pledges where workspace_id = $1 and person_id = any($2::uuid[])`);
+  await onPerson('sign', `select id, person_id from signs where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.signs);
+  await onPerson('contact', `select id, person_id, channel from contacts where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.contacts);
+  await onPerson('role', `select id, person_id from volunteer_roles where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.roles);
+  await onPerson('booking', `select id, person_id from shift_assignments where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.assignments);
+  await onPerson('rsvp', `select id, person_id from event_rsvps where workspace_id = $1 and person_id = any($2::uuid[])`);
+
+  // Sample shifts, events and petitions with your bookings, RSVPs or signatures on them.
+  const keepHosts = async (kind, hostSql, childSql, hostIds, exclude = null) => {
+    const hosts = await rows(hostSql, [W, hostIds]);
+    const children = await rows(childSql, exclude ? [W, hostIds, exclude] : [W, hostIds]);
+    for (const ch of children) note(kind, ch.id);
+    return hosts.map((h) => ({ ...h, n: children.filter((ch) => ch.host === h.id).length }));
+  };
+  const shifts = await keepHosts('booking',
+    'select id, title, deleted_at is null as live from shifts where workspace_id = $1 and id = any($2::uuid[])',
+    `select id, shift_id as host from shift_assignments
+     where workspace_id = $1 and shift_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.shifts, ids.assignments);
+  const events = await keepHosts('rsvp',
+    'select id, title, deleted_at is null as live from campaign_events where workspace_id = $1 and id = any($2::uuid[])',
+    'select id, event_id as host from event_rsvps where workspace_id = $1 and event_id = any($2::uuid[])', ids.events);
+  const petitions = await keepHosts('signature',
+    'select id, title, true as live from petitions where workspace_id = $1 and id = any($2::uuid[])',
+    'select id, petition_id as host from petition_signatures where workspace_id = $1 and petition_id = any($2::uuid[])', ids.petitions);
+  // A host you already deleted yourself keeps its records, hidden as you left it.
+  const kept = (hosts) => hosts.filter((h) => h.n > 0);
+  const told = (hosts) => kept(hosts).filter((h) => h.live);
+  const gone = (hosts) => hosts.filter((h) => h.n === 0).map((h) => h.id);
+
+  // ── 2. Remove what the sample made ──
+  const removed = {};
+  // Money: voided, never deleted — the gift leaves every total and the books say why.
+  const gifts = await rows(
+    `update gifts set deleted_at = now(), updated_at = now()
+     where workspace_id = $1 and id = any($2::uuid[]) and deleted_at is null returning id`, [W, ids.gifts],
+  );
+  for (const g of gifts) emit('gift', g.id, 'void', { sample: true });
+  removed.gifts = gifts.length;
+
+  const drop = async (key, entity, sql, list, payload = () => ({})) => {
+    const out = list.length ? await rows(sql, [W, list]) : [];
+    for (const r of out) emit(entity, r.id, 'void', { sample: true, ...payload(r) });
+    removed[key] = out.length;
+  };
+  await drop('contacts', 'contact', 'delete from contacts where workspace_id = $1 and id = any($2::uuid[]) returning id, person_id',
+    ids.contacts, (r) => ({ person_id: r.person_id }));
+  await drop('roles', 'volunteer_role', 'delete from volunteer_roles where workspace_id = $1 and id = any($2::uuid[]) returning id, person_id',
+    ids.roles, (r) => ({ person_id: r.person_id }));
+  await drop('signs', 'sign', 'delete from signs where workspace_id = $1 and id = any($2::uuid[]) returning id, kind, status, person_id, address',
+    ids.signs, (r) => ({ kind: r.kind, status: r.status, person_id: r.person_id || null, address: r.address || null }));
+  await drop('bookings', 'shift_assignment', 'delete from shift_assignments where workspace_id = $1 and id = any($2::uuid[]) returning id, shift_id, person_id',
+    ids.assignments, (r) => ({ shift_id: r.shift_id, person_id: r.person_id }));
+  await drop('shifts', 'shift', 'delete from shifts where workspace_id = $1 and id = any($2::uuid[]) returning id, title',
+    gone(shifts), (r) => ({ title: r.title }));
+  await drop('events', 'campaign_event', 'delete from campaign_events where workspace_id = $1 and id = any($2::uuid[]) returning id, title',
+    gone(events), (r) => ({ title: r.title }));
+  await drop('petitions', 'petition', 'delete from petitions where workspace_id = $1 and id = any($2::uuid[]) returning id, title',
+    gone(petitions), (r) => ({ title: r.title }));
+  await drop('turfs', 'turf', 'delete from turfs where workspace_id = $1 and id = any($2::uuid[]) returning id, name',
+    ids.turfs, (r) => ({ name: r.name }));
+  await drop('subscriptions', 'subscription',
+    `delete from subscriptions where workspace_id = $1 and id = any($2::uuid[]) and source = 'sample' returning id`,
+    ids.subscriptions);
+
+  // People: those holding your records stay, no longer marked sample (and
+  // unrated, if their only rating was the sample's made-up knock).
+  for (const p of people.filter((x) => keptPeople.has(x.id))) {
+    const tags = parseJson(p.tags, []).filter((t) => t !== SAMPLE_TAG);
+    await tx.query(
+      `update persons set tags = $3, rating = case when $4 then null else rating end,
+         rated_at = case when $4 then null else rated_at end, updated_at = now()
+       where id = $1 and workspace_id = $2`,
+      [p.id, W, JSON.stringify(tags), p.sample_rating],
+    );
+    emit('person', p.id, 'update', { tags, sample: false, ...(p.sample_rating ? { rating: null } : {}), kept: keptPeople.get(p.id) });
+  }
+  // The rest go. One whose voided sample gift is still in the books stays as
+  // a hidden (deleted) row so that gift keeps its donor; the others are deleted.
+  const leave = P.filter((pid) => !keptPeople.has(pid));
+  const donors = new Set((await rows(
+    'select distinct person_id from gifts where workspace_id = $1 and person_id = any($2::uuid[])', [W, leave],
+  )).map((r) => r.person_id));
+  const hide = leave.filter((pid) => donors.has(pid));
+  const del = leave.filter((pid) => !donors.has(pid));
+  if (hide.length) {
+    await tx.query('update persons set deleted_at = now(), updated_at = now() where workspace_id = $1 and id = any($2::uuid[]) and deleted_at is null', [W, hide]);
+  }
+  if (del.length) await tx.query('delete from persons where workspace_id = $1 and id = any($2::uuid[])', [W, del]);
+  for (const pid of leave) emit('person', pid, 'void', { sample: true });
+  removed.people = leave.length;
+
+  await tx.query(`update workspaces set settings = settings - 'sample' where id = $1`, [W]);
+
+  // ── 3. Say exactly what happened ──
+  const parts = [`Sample data cleared — ${nOf(leave.length, 'sample person', 'sample people')} removed.`];
+  if (keptPeople.size) {
+    const byKind = {};
+    for (const by of keptPeople.values()) for (const [k, n] of Object.entries(by)) byKind[k] = (byKind[k] || 0) + n;
+    parts.push(`Kept ${nOf(keptPeople.size, 'sample person', 'sample people')} with your own records on them (${kindList(byKind)}); they’re no longer marked sample.`);
+  }
+  for (const s of told(shifts)) parts.push(`Kept the shift “${s.title}”: ${nOf(s.n, 'booking on it is', 'bookings on it are')} yours.`);
+  for (const e of told(events)) parts.push(`Kept the event “${e.title}”: it has ${nOf(e.n, 'RSVP', 'RSVPs')}.`);
+  for (const p of told(petitions)) parts.push(`Kept the petition “${p.title}”: it has ${nOf(p.n, 'signature', 'signatures')}.`);
+  const summary = {
+    cleared: leave.length,
+    kept: real.size,
+    keptPeople: keptPeople.size,
+    keptShifts: kept(shifts).length,
+    keptEvents: kept(events).length,
+    keptPetitions: kept(petitions).length,
+    removed,
+    message: parts.join(' '),
+  };
+  emit('workspace', W, 'update', {
+    sampleCleared: leave.length, removed, kept: real.size,
+    keptPeople: [...keptPeople.keys()], keptShifts: kept(shifts).map((s) => s.id),
+    keptEvents: kept(events).map((e) => e.id), keptPetitions: kept(petitions).map((p) => p.id),
+  });
+  return summary;
+};
 
 app.delete('/sample', async (c) => {
   const ctx = c.get('ctx');
   if (ctx.role !== 'manager') return c.json({ error: 'managers only' }, 403);
-  const db = c.get('db');
-  const { result } = await runAction(db, { workspaceId: ctx.workspaceId, actorId: ctx.user.id, action: 'sample.clear' }, async (tx, emit) => {
-    const ws = (await tx.query('select settings from workspaces where id = $1', [ctx.workspaceId])).rows[0];
-    const marks = parseJson(ws.settings, {}).sample || {};
-    const ids = (await tx.query(
-      `select id from persons where workspace_id = $1 and tags @> $2::jsonb`, [ctx.workspaceId, JSON.stringify([SAMPLE_TAG])],
-    )).rows.map((r) => r.id);
-    const W = ctx.workspaceId;
-    if (ids.length) {
-      await tx.query('delete from gifts where workspace_id = $1 and person_id = any($2::uuid[])', [W, ids]);
-      await tx.query('delete from signs where workspace_id = $1 and person_id = any($2::uuid[])', [W, ids]);
-      await tx.query('delete from pledges where workspace_id = $1 and person_id = any($2::uuid[])', [W, ids]);
-      await tx.query('delete from persons where workspace_id = $1 and id = any($2::uuid[])', [W, ids]);
-    }
-    const del = async (table, list) => { if (list?.length) await tx.query(`delete from ${table} where workspace_id = $1 and id = any($2::uuid[])`, [W, list]); };
-    await del('signs', marks.signIds);
-    await del('shifts', marks.shiftIds);
-    await del('petitions', marks.petitionIds);
-    await del('campaign_events', marks.eventIds);
-    await del('turfs', marks.turfIds);
-    await tx.query(`delete from subscriptions where workspace_id = $1 and source = 'sample'`, [W]);
-    await tx.query(`update workspaces set settings = settings - 'sample' where id = $1`, [W]);
-    emit('workspace', W, 'update', { sampleCleared: ids.length });
-    return { cleared: ids.length };
-  });
+  const { result } = await runAction(c.get('db'), { workspaceId: ctx.workspaceId, actorId: ctx.user.id, action: 'sample.clear' },
+    (tx, emit) => clearSample(tx, ctx.workspaceId, emit));
   return c.json(result);
 });
 

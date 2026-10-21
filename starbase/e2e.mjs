@@ -187,8 +187,10 @@ await act('shift.assign', { shift_id: shift.id, person_id: P.sam.id });
 await go(`/shifts/${shift.id}`);
 await page.click('button:has-text("Notify everyone")');
 await sleep(300);
-check('notify asks in place before sending', /Email \+ text 1 person\?/.test(await text()));
-await page.click('.ops-confirm button:has-text("Send")');
+// No provider on the test server: the confirm button says so, never "Send".
+const confirmLabel = await page.$eval('.ops-confirm button.btn-primary', (el) => el.innerText).catch(() => '');
+check('notify asks in place before sending', /Email \+ text 1 person\?/.test(await text()) && /save — nothing sends/i.test(confirmLabel), confirmLabel);
+await page.click('.ops-confirm button.btn-primary');
 await sleep(900);
 await page.click('.ops-notify button:has-text("Details")').catch(() => {});
 t = await text();

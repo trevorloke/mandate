@@ -14,6 +14,7 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
 import RatingButtons, { RatingChip, ratingSay, ratingText, ratingWho } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
+import { queuedText } from '../components/queued.js';
 import { apiGet, action, ApiError } from '../api.js';
 import './people.css';
 
@@ -915,7 +916,8 @@ function CallsScreen() {
     setHeld(null);
     setCurrentId(next?.id ?? null);
     const what = rating ? `Rated ${ratingText(rating)}` : outcomeWord(outcome, channel);
-    showToast(`${firstName(p.name)} · ${what}${res.queued ? ' · saved offline' : ''}`, p);
+    // Not reached yet: the same words as the door card ("Saved on this phone — sends soon").
+    showToast(`${firstName(p.name)} · ${what}${res.queued ? ` · ${queuedText(res)}` : ''}`, p);
   };
   const skip = () => { const next = after(at); if (next) { refocus.current = focusInCard(); setCurrentId(next.id); } };
   const change = () => {

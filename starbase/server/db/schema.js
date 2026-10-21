@@ -306,6 +306,8 @@ create table if not exists pledges (
   attest jsonb not null default '{}',
   stripe_session_id text,
   gift_id uuid,
+  -- Monthly pledges stay open: the date of the latest gift received for one.
+  last_received_on date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -356,6 +358,11 @@ alter table persons add column if not exists rated_at timestamptz;
 alter table gifts add column if not exists cadence text;
 alter table contacts add column if not exists client_id uuid;
 create unique index if not exists contacts_client_idx on contacts (workspace_id, client_id) where client_id is not null;
+alter table pledges add column if not exists last_received_on date;
+-- The pledge a gift was received for (pledge.receive), so a void can reopen
+-- the pledge and a restore can close it again.
+alter table gifts add column if not exists pledge_id uuid;
+create index if not exists gifts_pledge_idx on gifts (workspace_id, pledge_id) where pledge_id is not null;
 `;
 
 export const bootstrap = async (db) => {

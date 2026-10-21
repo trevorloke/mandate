@@ -6,7 +6,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { getDb } from '../db/client.js';
-import { newId } from '../lib/events.js';
+import { newId, runAction } from '../lib/events.js';
 import {
   hashPassword, verifyPassword, dummyVerify,
   createSession, destroySession, loadContext, SESSION_COOKIE,
@@ -28,6 +28,13 @@ const signupInput = z.object({
   candidate: z.string().trim().max(200).optional(),
   jurisdiction: z.enum(['bc-municipal', 'bc-provincial', 'federal']).default('bc-municipal'),
 });
+
+// What the browser gets about the workspace: settings minus the sample
+// bookkeeping (the ids of every sample row), which only the server needs.
+const clientWorkspace = (ws) => {
+  const { sample, ...settings } = ws.settings || {};
+  return { ...ws, settings: sample ? { ...settings, sample: { loaded: true } } : settings };
+};
 
 // URL slug for the workspace's public pages (/p/:slug/…, /n/:slug, /v/:slug).
 const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'campaign';
@@ -72,10 +79,15 @@ app.post('/signup', async (c) => {
     }
     throw e;
   }
+  // The campaign's first entries: who created it and who holds access.
+  await runAction(db, { workspaceId, actorId: userId, action: 'workspace.create' }, async (tx, emit) => {
+    emit('workspace', workspaceId, 'create', { name: input.workspaceName, jurisdiction: input.jurisdiction });
+    emit('membership', userId, 'create', { email, role: 'manager' });
+  });
   const token = await createSession(db, userId, workspaceId);
   setCookie(c, SESSION_COOKIE, token, cookieOpts);
   const ctx = await loadContext(db, token);
-  return c.json({ user: ctx.user, workspace: ctx.workspace, role: ctx.role }, 201);
+  return c.json({ user: ctx.user, workspace: clientWorkspace(ctx.workspace), role: ctx.role }, 201);
 });
 
 app.post('/login', async (c) => {
@@ -101,7 +113,7 @@ app.post('/login', async (c) => {
   const token = await createSession(db, user.id, membership.workspace_id);
   setCookie(c, SESSION_COOKIE, token, cookieOpts);
   const ctx = await loadContext(db, token);
-  return c.json({ user: ctx.user, workspace: ctx.workspace, role: ctx.role });
+  return c.json({ user: ctx.user, workspace: clientWorkspace(ctx.workspace), role: ctx.role });
 });
 
 // ── Invites: look up, then join (new account, or an existing one by password) ──
@@ -141,23 +153,26 @@ app.post('/join', async (c) => {
   if (!user && !name) return c.json({ error: 'name required' }, 400);
   const userId = user?.id || newId();
   const passwordHash = user ? null : await hashPassword(password);
-  await db.transaction(async (tx) => {
+  // On the hash chain: who now has access to the campaign, and in what role.
+  await runAction(db, { workspaceId: inv.workspace_id, actorId: userId, action: 'member.join' }, async (tx, emit) => {
     if (!user) {
       await tx.query('insert into users (id, email, name, password_hash) values ($1, $2, $3, $4)',
         [userId, inv.email, name, passwordHash]);
     }
-    await tx.query(
+    const m = await tx.query(
       `insert into memberships (user_id, workspace_id, role) values ($1, $2, $3)
        on conflict (user_id, workspace_id) do nothing`,
       [userId, inv.workspace_id, inv.role],
     );
     const n = await tx.query('update invites set accepted_at = now() where id = $1 and accepted_at is null', [inv.id]);
     if (n.affectedRows === 0) throw new Error('invite already used');
+    emit('invite', inv.id, 'update', { accepted: true });
+    if (m.affectedRows > 0) emit('membership', userId, 'create', { email: inv.email, role: inv.role, user_id: userId });
   });
   const sessionToken = await createSession(db, userId, inv.workspace_id);
   setCookie(c, SESSION_COOKIE, sessionToken, cookieOpts);
   const ctx = await loadContext(db, sessionToken);
-  return c.json({ user: ctx.user, workspace: ctx.workspace, role: ctx.role });
+  return c.json({ user: ctx.user, workspace: clientWorkspace(ctx.workspace), role: ctx.role });
 });
 
 app.post('/logout', async (c) => {
@@ -171,7 +186,7 @@ app.get('/me', async (c) => {
   const db = await getDb();
   const ctx = await loadContext(db, getCookie(c, SESSION_COOKIE));
   if (!ctx) return c.json({ error: 'not signed in' }, 401);
-  return c.json({ user: ctx.user, workspace: ctx.workspace, role: ctx.role });
+  return c.json({ user: ctx.user, workspace: clientWorkspace(ctx.workspace), role: ctx.role });
 });
 
 export default app;

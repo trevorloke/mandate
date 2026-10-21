@@ -55,7 +55,7 @@ test('volunteer brief carries field stats but no money, flags, or filings', asyn
   assert.equal(d.json.flagged.length, 0, 'under the cap: nothing flagged');
 });
 
-test('volunteer person list: their own note rides along — the row shape is otherwise unchanged', async () => {
+test('volunteer person list: their own note rides along — same row shape, someone else\'s email is null', async () => {
   const db = await getDb();
   await db.query(
     `update persons set attrs = jsonb_set(coalesce(attrs, '{}'::jsonb), '{note}', to_jsonb('Call after 6'::text)) where id = $1`,
@@ -66,6 +66,10 @@ test('volunteer person list: their own note rides along — the row shape is oth
   assert.deepEqual(Object.keys(row).sort(), [
     'address', 'city', 'email', 'id', 'kind', 'lat', 'lng', 'name', 'note', 'phone', 'postal', 'rated_at', 'rating', 'socials', 'tags', 'unit',
   ], 'no gifts, totals, tiers or other attrs in the list');
+  assert.equal(row.email, null, 'the key stays; the address does not reach a volunteer');
+  assert.equal(row.phone, '604-555-0142', 'phones stay — volunteers call');
+  const deskRow = (await desk.get('/api/persons?has=phone')).json.persons.find((p) => p.id === donor.id);
+  assert.equal(deskRow.email, 'donor@example.org', 'desk roles still see it');
 });
 
 test('volunteer brief never carries flagged gifts or their numbers', async () => {
@@ -94,10 +98,99 @@ test('volunteer is refused the money ledger, exports, event log, audit, and supp
   }
 });
 
-test('volunteer field reads still work', async () => {
-  for (const path of ['/api/map/doors', '/api/persons?has=phone', '/api/shifts', '/api/contacts', '/api/signs', '/api/petitions']) {
+test('volunteer field reads still work; the campaign-wide contact feed is desk-only', async () => {
+  for (const path of ['/api/map/doors', '/api/persons?has=phone', '/api/shifts', '/api/signs', '/api/petitions']) {
     assert.equal((await vol.get(path)).status, 200, path);
   }
+  // Who knocked whom, with ratings and notes: no volunteer screen uses it.
+  const feed = await vol.get('/api/contacts');
+  assert.equal(feed.status, 403);
+  assert.equal(feed.json.contacts, undefined);
+  assert.equal((await desk.get('/api/contacts')).status, 200, 'desk roles still read it');
+});
+
+// A volunteer's browser gets phones and addresses (they call and knock), and
+// never another person's email or a tag that gives money away — on every
+// person read: the list, a profile, the map, a walk list. Their own record
+// keeps its email.
+const MONEY_TAGS = ['donor-prospect', 'Major Donor', 'lapsed'];
+test('volunteer JSON carries no one else\'s email and no donor tags; their own record keeps its email', async () => {
+  const me = (await vol.get('/api/auth/me')).json;
+  const myEmail = me.user.email;
+  const lat = 49.1913; const lng = -122.8490;
+  const neighbour = await desk.createPerson('Tagged Neighbour', {
+    email: 'quiet.reader@example.org', phone: '604-555-0143', address: '7100 King George Blvd', lat, lng,
+    tags: [...MONEY_TAGS, 'media', 'youth'],
+  });
+  const partner = await desk.createPerson('Neighbour Partner', {
+    email: 'partner.reader@example.org', address: '7100 King George Blvd', lat, lng, tags: ['lapsed'],
+  });
+  const self = await desk.createPerson('Vol Self', { email: myEmail, phone: '604-555-0144', address: '7102 King George Blvd', lat, lng: lng + 0.0002 });
+  const turf = (await desk.action('turf.create', {
+    name: 'Privacy block', polygon: [[lat + 0.001, lng - 0.001], [lat + 0.001, lng + 0.002], [lat - 0.001, lng + 0.002], [lat - 0.001, lng - 0.001]],
+  })).json.turf;
+  assert.equal((await desk.action('turf.assign', { turf_id: turf.id, user_id: me.user.id })).status, 200);
+
+  const reads = {
+    list: await vol.get('/api/persons?limit=2000'),
+    neighbour: await vol.get(`/api/persons/${neighbour.id}`),
+    self: await vol.get(`/api/persons/${self.id}`),
+    donor: await vol.get(`/api/persons/${donor.id}`),
+    map: await vol.get('/api/map/doors'),
+    walk: await vol.get(`/api/turfs/${turf.id}/walk`),
+  };
+  for (const [k, r] of Object.entries(reads)) assert.equal(r.status, 200, k);
+  const rows = [
+    ...reads.list.json.persons, reads.neighbour.json.person, reads.self.json.person, reads.donor.json.person,
+    ...reads.map.json.persons, ...reads.walk.json.doors.flatMap((d) => d.persons),
+  ];
+  assert.ok(rows.filter((p) => p.id === neighbour.id).length === 4, 'the neighbour is in all four reads');
+  assert.ok(rows.filter((p) => p.id === self.id).length === 4, 'so is the volunteer');
+  for (const p of rows) {
+    assert.ok('email' in p, `email key present (${p.name})`);
+    assert.equal(p.email, p.id === self.id ? myEmail : null, `email for ${p.name}`);
+    assert.ok(p.tags.every((t) => !/donor/i.test(t) && t.toLowerCase() !== 'lapsed'), `no money tags on ${p.name}`);
+  }
+  assert.deepEqual(reads.neighbour.json.person.tags, ['media', 'youth'], 'other tags stay');
+  assert.deepEqual(rows.find((p) => p.id === partner.id).tags, []);
+  // Not on screen AND not in the JSON the browser receives.
+  for (const [k, r] of Object.entries(reads)) {
+    const raw = JSON.stringify(r.json);
+    for (const leak of ['quiet.reader@example.org', 'partner.reader@example.org', 'donor@example.org', ...MONEY_TAGS]) {
+      assert.ok(!raw.includes(leak), `${k} leaks ${leak}`);
+    }
+  }
+  assert.ok(JSON.stringify(reads.self.json).includes(myEmail), 'own email on own record');
+  assert.equal(reads.neighbour.json.person.phone, '604-555-0143', 'phones stay');
+
+  // The desk still sees all of it.
+  const deskN = (await desk.get(`/api/persons/${neighbour.id}`)).json.person;
+  assert.equal(deskN.email, 'quiet.reader@example.org');
+  assert.deepEqual(deskN.tags, [...MONEY_TAGS, 'media', 'youth']);
+  const deskWalk = (await desk.get(`/api/turfs/${turf.id}/walk`)).json.doors.flatMap((d) => d.persons);
+  assert.equal(deskWalk.find((p) => p.id === neighbour.id).email, 'quiet.reader@example.org');
+  assert.ok((await desk.get('/api/map/doors')).json.persons.find((p) => p.id === neighbour.id).tags.includes('lapsed'));
+});
+
+test('volunteer filters never match on what they cannot see: no email search, no donor-tag filter, has=email is only them', async () => {
+  const me = (await vol.get('/api/auth/me')).json;
+  const ids = async (cl, qs) => (await cl.get(`/api/persons?${qs}`)).json.persons.map((p) => p.id);
+  const neighbour = (await desk.get('/api/persons?q=Tagged%20Neighbour')).json.persons[0];
+  const self = (await desk.get('/api/persons?q=Vol%20Self')).json.persons[0];
+
+  assert.deepEqual(await ids(vol, 'q=quiet.reader'), [], 'someone else\'s email finds no one');
+  assert.deepEqual(await ids(desk, 'q=quiet.reader'), [neighbour.id], 'the desk searches emails');
+  assert.deepEqual(await ids(vol, `q=${encodeURIComponent(me.user.email)}`), [self.id], 'their own email finds their own record');
+  assert.ok((await ids(vol, 'q=Tagged')).includes(neighbour.id), 'names still search');
+
+  for (const tag of MONEY_TAGS) {
+    assert.deepEqual(await ids(vol, `tag=${encodeURIComponent(tag)}`), [], `tag=${tag}`);
+    assert.ok((await ids(desk, `tag=${encodeURIComponent(tag)}`)).includes(neighbour.id), `desk tag=${tag}`);
+  }
+  assert.ok((await ids(vol, 'tag=media')).includes(neighbour.id), 'other tags still filter');
+
+  assert.deepEqual(await ids(vol, 'has=email&limit=2000'), [self.id], 'has=email: only the one email they may see');
+  assert.ok((await ids(desk, 'has=email&limit=2000')).includes(neighbour.id));
 });
 
 test('malformed ids are 404, not 500', async () => {

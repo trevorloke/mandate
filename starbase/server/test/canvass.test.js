@@ -212,7 +212,7 @@ test('donor tiers derive from gifts: one-time, monthly, star, superstar', async 
 test('brief carries field stats, rating breakdown, signs, provider flags', async () => {
   const b = await c.get('/api/brief');
   assert.ok(b.json.field.week >= 10);
-  assert.ok(b.json.field.doors >= 9);
+  assert.ok(b.json.field.doors >= 8, 'distinct doors: 13 knocks on Rating Tester are one door');
   assert.ok(b.json.ratings['4C'] >= 1);
   assert.ok(b.json.signs.requested >= 1 || b.json.signs.installed >= 1);
   assert.equal(typeof b.json.providers.email, 'boolean');
@@ -288,10 +288,12 @@ test('brief: field.mine is this week’s contacts the caller logged; the team nu
 
   const vf = (await vol.get('/api/brief')).json.field;
   assert.deepEqual(vf.mine, { doors: 3, calls: 1, texts: 0 }, 'the volunteer sees their own');
-  assert.deepEqual([vf.doors, vf.calls, vf.texts, vf.week], [5, 1, 1, 7], 'team numbers count everyone');
+  // Doors are distinct doors: the volunteer and the manager both knocked
+  // Mine Door 0, which is one door for the team.
+  assert.deepEqual([vf.doors, vf.calls, vf.texts, vf.week], [4, 1, 1, 7], 'team numbers count everyone');
   const mf = (await mgr.get('/api/brief')).json.field;
   assert.deepEqual(mf.mine, { doors: 2, calls: 0, texts: 1 }, 'the manager sees theirs');
-  assert.deepEqual([mf.doors, mf.calls, mf.texts], [5, 1, 1]);
+  assert.deepEqual([mf.doors, mf.calls, mf.texts], [4, 1, 1]);
 
   // Same week boundary as the team count: a knock from last week drops out of both.
   const db = await (await import('../db/client.js')).getDb();

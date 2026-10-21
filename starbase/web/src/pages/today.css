@@ -339,7 +339,8 @@ h2.today-h {
 .btn.today-danger:hover { background: var(--danger); color: var(--paper-0); border-color: var(--danger); }
 
 /* ── Toast: above the phone tab bar ── */
-.toast.today-toast { max-width: calc(100vw - 32px); }
+/* A long server message (Clear sample data) wraps to a readable width. */
+.toast.today-toast { max-width: min(560px, calc(100vw - 32px)); line-height: 1.45; }
 .toast.today-toast .btn { min-height: 44px; }
 
 @media (max-width: 720px) {

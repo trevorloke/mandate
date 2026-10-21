@@ -11,6 +11,19 @@
 //                                     own forms (kind: newsletter | volunteer | petition | rsvp)
 // Server-rendered HTML keeps these dead simple to link from the website;
 // the JSON endpoint lets the website keep its own design and post here.
+//
+// Every public write goes through runAction as the system (actor null), so
+// the hash-chained event log — "Verify my books" — covers it like any desk
+// action. The person a submission creates or tags is logged under
+// 'public.signup'; the submission itself under its own action:
+//   public.subscribe  newsletter signup (/n, bridge)  subscription create/update
+//   public.unsubscribe one-click unsubscribe (/u)    subscription update
+//   public.sign       petition signature (/p, bridge) petition_signature create
+//   public.rsvp       event RSVP (/e, bridge)         rsvp create
+//   public.volunteer  roles ticked + note (/v, bridge) volunteer_role create, person update
+//   public.pledge     donate page pledge (/d)         pledge create
+//   stripe.checkout   card checkout opened for a pledge  pledge update
+//   stripe.payment    Stripe webhook                  pledge update, gift create
 import { Hono } from 'hono';
 import { getDb } from '../db/client.js';
 import { runAction, newId } from '../lib/events.js';
@@ -36,11 +49,12 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', 
 const settingsOf = (ws) => (typeof ws.settings === 'string' ? JSON.parse(ws.settings) : (ws.settings || {}));
 
 // One plain page for every public form: the campaign name big at the top,
-// one column, thumb-sized inputs and one big button.
+// one column, thumb-sized inputs and one big button. ws may be null (a link
+// that names no campaign): the page then carries no campaign name.
 const page = (ws, title, inner) => {
-  const site = settingsOf(ws).website;
+  const site = ws ? settingsOf(ws).website : null;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · ${esc(ws.name)}</title>
+<title>${esc(title)}${ws ? ` · ${esc(ws.name)}` : ''}</title>
 <style>
   :root{--paper:#f8f6ef;--card:#fffdf7;--ink:#171410;--ink2:#5d5749;--rule:#d6d0bf;--mark:#f2c40f;--bad:#a83a2c}
   @media(prefers-color-scheme:dark){:root{--paper:#15120c;--card:#1d1a13;--ink:#ece7da;--ink2:#a59e8c;--rule:#3a362a;--mark:#d9b60e;--bad:#e08a8a}}
@@ -91,7 +105,7 @@ const page = (ws, title, inner) => {
   footer{margin-top:40px;border-top:1px solid var(--rule);padding-top:12px;font:13px/1.6 ui-monospace,Menlo,monospace;color:var(--ink2)}
   a{color:inherit}
 </style></head><body><main>
-<div class="camp">${esc(ws.name)}</div>
+${ws ? `<div class="camp">${esc(ws.name)}</div>` : ''}
 ${inner}
 <footer>${site ? `<a href="${esc(site)}">← ${esc(site.replace(/^https?:\/\//, ''))}</a> · ` : ''}Powered by Starbase</footer>
 </main></body></html>`;
@@ -105,11 +119,16 @@ const loadWs = async (db, slug) => {
   return ws;
 };
 
+// Run one public write as a system action (no actor): its table writes and
+// its events commit together, on the workspace's hash chain.
+const publicAction = async (db, ws, action, handler) =>
+  (await runAction(db, { workspaceId: ws.id, actorId: null, action }, handler)).result;
+
 // Create or reuse a person from a public submission (matched by email, else by
 // name+phone), tag them, and record the source. Runs as a system action.
 const upsertPersonFromPublic = async (db, ws, { name, email, phone, address }, tags) => {
   const em = email ? email.toLowerCase() : null;
-  const { result } = await runAction(db, { workspaceId: ws.id, actorId: null, action: 'public.signup' }, async (tx, emit) => {
+  return publicAction(db, ws, 'public.signup', async (tx, emit) => {
     let person = em
       ? (await tx.query('select id, tags from persons where workspace_id = $1 and lower(email) = $2 and deleted_at is null limit 1', [ws.id, em])).rows[0]
       : null;
@@ -131,17 +150,61 @@ const upsertPersonFromPublic = async (db, ws, { name, email, phone, address }, t
     emit('person', id, 'create', { name, email: em, phone, address, tags, source: 'public' });
     return { id, created: true };
   });
-  return result;
 };
 
-const subscribe = async (db, ws, email, name, source) => {
+// Put an email on the newsletter list inside the caller's action. A new
+// address is a create; a returning one is re-subscribed (and takes the newly
+// given name, if any). Signing up again with nothing new writes nothing, so
+// nothing is logged. The workspace row lock runAction holds serializes this
+// read-then-write against every other action.
+const subscribeTx = async (tx, emit, ws, email, name, source) => {
   const em = email.toLowerCase();
-  await db.query(
-    `insert into subscriptions (id, workspace_id, email, name, status, source) values ($1, $2, $3, $4, 'subscribed', $5)
-     on conflict (workspace_id, email) do update set status = 'subscribed', name = coalesce(excluded.name, subscriptions.name)`,
-    [newId(), ws.id, em, name || null, source],
+  const prev = (await tx.query(
+    'select id, name, status from subscriptions where workspace_id = $1 and email = $2', [ws.id, em],
+  )).rows[0];
+  if (prev) {
+    const nextName = name || prev.name || null;
+    if (prev.status === 'subscribed' && nextName === (prev.name || null)) return { id: prev.id, changed: false };
+    await tx.query(
+      `update subscriptions set status = 'subscribed', name = $3 where id = $1 and workspace_id = $2`,
+      [prev.id, ws.id, nextName],
+    );
+    emit('subscription', prev.id, 'update', { email: em, name: nextName, status: 'subscribed', source });
+    return { id: prev.id, changed: true };
+  }
+  const id = newId();
+  await tx.query(
+    `insert into subscriptions (id, workspace_id, email, name, status, source) values ($1, $2, $3, $4, 'subscribed', $5)`,
+    [id, ws.id, em, name || null, source],
   );
+  emit('subscription', id, 'create', { email: em, name: name || null, status: 'subscribed', source });
+  return { id, changed: true };
 };
+
+const subscribe = (db, ws, email, name, source) =>
+  publicAction(db, ws, 'public.subscribe', (tx, emit) => subscribeTx(tx, emit, ws, email, name, source));
+
+// A petition signature (plus the newsletter opt-in, when ticked) as one action.
+const signPetition = (db, ws, pet, { name, email, phone, address, wantsNews }) =>
+  publicAction(db, ws, 'public.sign', async (tx, emit) => {
+    const id = newId();
+    await tx.query(
+      `insert into petition_signatures (id, workspace_id, petition_id, name, email, phone, address, subscribe) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, ws.id, pet.id, name, email || null, phone || null, address || null, wantsNews],
+    );
+    emit('petition_signature', id, 'create', {
+      petition_id: pet.id, petition: pet.slug, name, email: email ? email.toLowerCase() : null,
+      phone: phone || null, address: address || null, subscribe: wantsNews,
+    });
+    if (wantsNews && email) await subscribeTx(tx, emit, ws, email, name, `petition:${pet.slug}`);
+    return { id };
+  });
+
+// Petitions by slug, open or closed: a closed one answers "closed", not "not found".
+const loadPetition = async (db, ws, slug) => (await db.query(
+  'select * from petitions where workspace_id = $1 and slug = $2', [ws.id, slug],
+)).rows[0];
+const closedPage = (ws, pet) => page(ws, pet.title, `<h1>${esc(pet.title)}</h1><div class="done">This petition is closed.</div>`);
 
 const str = (v, max = 300) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const emailOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -160,8 +223,9 @@ app.get('/p/:ws/:slug', async (c) => {
   const db = await getDb();
   const ws = await loadWs(db, c.req.param('ws'));
   if (!ws) return c.text('not found', 404);
-  const pet = (await db.query('select * from petitions where workspace_id = $1 and slug = $2 and active', [ws.id, c.req.param('slug')])).rows[0];
+  const pet = await loadPetition(db, ws, c.req.param('slug'));
   if (!pet) return c.text('petition not found', 404);
+  if (!pet.active) return c.html(closedPage(ws, pet), 410);
   const n = (await db.query('select count(*)::int as n from petition_signatures where petition_id = $1', [pet.id])).rows[0].n;
   return c.html(page(ws, pet.title, `
 <h1>${esc(pet.title)}</h1>
@@ -182,20 +246,17 @@ app.post('/p/:ws/:slug', async (c) => {
   const db = await getDb();
   const ws = await loadWs(db, c.req.param('ws'));
   if (!ws) return c.text('not found', 404);
-  const pet = (await db.query('select * from petitions where workspace_id = $1 and slug = $2 and active', [ws.id, c.req.param('slug')])).rows[0];
+  const pet = await loadPetition(db, ws, c.req.param('slug'));
   if (!pet) return c.text('petition not found', 404);
+  const wantsJson = (c.req.header('accept') || '').includes('application/json');
+  if (!pet.active) return wantsJson ? c.json({ error: 'this petition is closed' }, 410) : c.html(closedPage(ws, pet), 410);
   const b = await readBody(c);
   const name = str(b.name); const email = str(b.email, 320); const phone = str(b.phone, 40); const address = str(b.address, 400);
   if (!name) return c.text('name required', 400);
   if (email && !emailOk(email)) return c.text('invalid email', 400);
   const wantsNews = b.subscribe === '1' || b.subscribe === true || b.subscribe === 'true';
-  await db.query(
-    `insert into petition_signatures (id, workspace_id, petition_id, name, email, phone, address, subscribe) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [newId(), ws.id, pet.id, name, email || null, phone || null, address || null, wantsNews],
-  );
+  await signPetition(db, ws, pet, { name, email, phone, address, wantsNews });
   await upsertPersonFromPublic(db, ws, { name, email, phone, address }, ['petition', `petition:${pet.slug}`]);
-  if (wantsNews && email) await subscribe(db, ws, email, name, `petition:${pet.slug}`);
-  const wantsJson = (c.req.header('accept') || '').includes('application/json');
   if (wantsJson) return c.json({ ok: true });
   return c.html(page(ws, pet.title, `<h1>Thank you, ${esc(name.split(' ')[0])}.</h1><div class="done">Your signature on <b>${esc(pet.title)}</b> is recorded.</div>`));
 });
@@ -225,15 +286,34 @@ app.post('/n/:ws', async (c) => {
   await subscribe(db, ws, email, name, 'signup-page');
   if (name) await upsertPersonFromPublic(db, ws, { name, email }, ['newsletter']);
   if ((c.req.header('accept') || '').includes('application/json')) return c.json({ ok: true });
-  return c.html(page(ws, 'Subscribed', `<h1>You're in.</h1><div class="done">We'll write to <b>${esc(email)}</b>.</div>`));
+  // Only what happened: the address is on the list. Whether and when the
+  // campaign writes depends on email being connected, so this promises nothing.
+  return c.html(page(ws, 'Subscribed', `<h1>You're on the list.</h1><div class="done"><b>${esc(email)}</b> is on the newsletter list.</div>`));
 });
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const badUnsubscribe = (c) => c.html(page(null, 'Unsubscribe',
+  `<h1>This unsubscribe link isn't valid — reply to the email to be removed.</h1>`), 404);
+
 app.get('/u/:id', async (c) => {
+  const sid = c.req.param('id');
+  if (!UUID.test(sid)) return badUnsubscribe(c);
   const db = await getDb();
-  const row = (await db.query('select s.id, w.name, w.slug, w.settings from subscriptions s join workspaces w on w.id = s.workspace_id where s.id = $1', [c.req.param('id')])).rows[0];
-  if (!row) return c.text('not found', 404);
-  await db.query(`update subscriptions set status = 'unsubscribed' where id = $1`, [row.id]);
-  return c.html(page(row, 'Unsubscribed', `<h1>Unsubscribed.</h1><div class="done">You won't receive further newsletters from ${esc(row.name)}.</div>`));
+  const row = (await db.query(
+    'select s.id, s.workspace_id, w.name, w.slug, w.settings from subscriptions s join workspaces w on w.id = s.workspace_id where s.id = $1',
+    [sid],
+  )).rows[0];
+  if (!row) return badUnsubscribe(c);
+  const ws = { id: row.workspace_id, name: row.name, slug: row.slug, settings: row.settings };
+  // A second click finds them already off the list: nothing to write or log.
+  await publicAction(db, ws, 'public.unsubscribe', async (tx, emit) => {
+    const n = await tx.query(
+      `update subscriptions set status = 'unsubscribed' where id = $1 and workspace_id = $2 and status <> 'unsubscribed'`,
+      [row.id, ws.id],
+    );
+    if (n.affectedRows > 0) emit('subscription', row.id, 'update', { status: 'unsubscribed', source: 'unsubscribe-link' });
+  });
+  return c.html(page(ws, 'Unsubscribed', `<h1>Unsubscribed.</h1><div class="done">You won't receive further newsletters from ${esc(ws.name)}.</div>`));
 });
 
 // ── Volunteer signup ──
@@ -301,25 +381,34 @@ const ROLE_HAS_DETAIL = new Set(VOLUNTEER_ROLES.filter((r) => r.detail).map((r) 
 
 // Each ticked role keeps its own detail (detail_<code>: building, language,
 // community); the free "Anything else?" note is kept once, on the person.
+// One action for the lot; a signup that ticked nothing and wrote no note has
+// nothing to save beyond the person (logged by 'public.signup').
 const saveVolunteer = async (db, ws, personId, b) => {
   const roles = asList(b.roles);
-  for (const role of roles) {
-    const detail = ROLE_HAS_DETAIL.has(role) ? str(b[`detail_${role}`], 200) : '';
-    await db.query(
-      'insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
-      [newId(), ws.id, personId, role, detail || null],
-    );
-  }
   const note = str(b.note, 2000);
-  if (note) {
-    await db.query(
-      `update persons set attrs = jsonb_set(coalesce(attrs, '{}'::jsonb), '{note}',
-         to_jsonb(case when coalesce(attrs->>'note', '') = '' then $3::text else (attrs->>'note') || chr(10) || $3::text end)),
-         updated_at = now()
-       where id = $1 and workspace_id = $2`,
-      [personId, ws.id, note],
-    );
-  }
+  if (!roles.length && !note) return roles;
+  await publicAction(db, ws, 'public.volunteer', async (tx, emit) => {
+    for (const role of roles) {
+      const id = newId();
+      const detail = (ROLE_HAS_DETAIL.has(role) ? str(b[`detail_${role}`], 200) : '') || null;
+      await tx.query(
+        'insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
+        [id, ws.id, personId, role, detail],
+      );
+      emit('volunteer_role', id, 'create', { id, person_id: personId, role, detail, source: 'public' });
+    }
+    if (note) {
+      const row = (await tx.query(
+        `update persons set attrs = jsonb_set(coalesce(attrs, '{}'::jsonb), '{note}',
+           to_jsonb(case when coalesce(attrs->>'note', '') = '' then $3::text else (attrs->>'note') || chr(10) || $3::text end)),
+           updated_at = now()
+         where id = $1 and workspace_id = $2
+         returning attrs->>'note' as note`,
+        [personId, ws.id, note],
+      )).rows[0];
+      if (row) emit('person', personId, 'update', { note: row.note, added_note: note, source: 'public' });
+    }
+  });
   return roles;
 };
 
@@ -352,11 +441,25 @@ const rsvp = async (db, ws, ev, { name, email, phone, guests }) => {
   const g = Math.min(Math.max(Number(guests) || 0, 0), 10);
   if (ev.capacity && ev.going + 1 + g > ev.capacity) return { full: true };
   const { id: personId } = await upsertPersonFromPublic(db, ws, { name, email, phone }, ['event', `event:${ev.slug}`]);
-  await db.query(
-    `insert into event_rsvps (id, workspace_id, event_id, person_id, name, email, phone, guests) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [newId(), ws.id, ev.id, personId, name, email || null, phone || null, g],
-  );
-  return { ok: true };
+  return publicAction(db, ws, 'public.rsvp', async (tx, emit) => {
+    // Count again under the workspace lock: two RSVPs for the last seats
+    // can't both land.
+    if (ev.capacity) {
+      const going = (await tx.query(
+        `select coalesce(sum(1 + guests), 0)::int as n from event_rsvps where event_id = $1 and status <> 'cancelled'`, [ev.id],
+      )).rows[0].n;
+      if (going + 1 + g > ev.capacity) return { full: true };
+    }
+    const id = newId();
+    await tx.query(
+      `insert into event_rsvps (id, workspace_id, event_id, person_id, name, email, phone, guests) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, ws.id, ev.id, personId, name, email || null, phone || null, g],
+    );
+    emit('rsvp', id, 'create', {
+      event_id: ev.id, event: ev.slug, person_id: personId, name, email: email || null, phone: phone || null, guests: g, status: 'going',
+    });
+    return { ok: true, id };
+  });
 };
 
 app.get('/e/:ws/:slug', async (c) => {
@@ -464,7 +567,7 @@ app.post('/d/:ws', async (c) => {
   const cents = Math.round(Number.parseFloat(String(raw).replace(/[$,\s]/g, '')) * 100);
   if (!Number.isFinite(cents) || cents < 100) return fail('Choose an amount of at least $1.');
   if (!v.name || !v.address) return fail('Your full name and home address are required by election law.');
-  if (!emailOk(v.email)) return fail('A valid email is required for your receipt.');
+  if (!emailOk(v.email)) return fail('A valid email is required so the campaign can confirm your contribution.');
   const missing = ATTESTATIONS.filter(([k]) => !(b[`attest_${k}`] === '1' || b[`attest_${k}`] === true));
   if (missing.length) return fail('Please confirm each eligibility statement — only eligible individuals may contribute.');
 
@@ -488,25 +591,40 @@ app.post('/d/:ws', async (c) => {
 
   const { id: personId } = await upsertPersonFromPublic(db, ws,
     { name: v.name, email: v.email, phone: v.phone, address: v.address }, ['donor']);
-  const pledgeId = newId();
-  const attest = Object.fromEntries(ATTESTATIONS.map(([k]) => [k, true]));
-  await db.query(
-    `insert into pledges (id, workspace_id, person_id, name, email, phone, address, amount_cents, cadence, status, attest)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [pledgeId, ws.id, personId, v.name, v.email.toLowerCase(), v.phone || null, v.address, cents,
-     v.monthly ? 'monthly' : 'one-time', stripeConfigured() ? 'pending' : 'pledged', JSON.stringify({ ...attest, at: new Date().toISOString(), ip: ipOf(c) })],
-  );
+  const cadence = v.monthly ? 'monthly' : 'one-time';
+  // The attestation (what was ticked, when, from where) is part of the record
+  // and of its event, so the log shows the contributor declared eligibility.
+  const attest = { ...Object.fromEntries(ATTESTATIONS.map(([k]) => [k, true])), at: new Date().toISOString(), ip: ipOf(c) };
+  const pledgeId = await publicAction(db, ws, 'public.pledge', async (tx, emit) => {
+    const id = newId();
+    const status = stripeConfigured() ? 'pending' : 'pledged';
+    await tx.query(
+      `insert into pledges (id, workspace_id, person_id, name, email, phone, address, amount_cents, cadence, status, attest)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [id, ws.id, personId, v.name, v.email.toLowerCase(), v.phone || null, v.address, cents,
+       cadence, status, JSON.stringify(attest)],
+    );
+    emit('pledge', id, 'create', {
+      person_id: personId, name: v.name, email: v.email.toLowerCase(), phone: v.phone || null, address: v.address,
+      amount_cents: cents, cadence, status, attest, source: 'donate-page',
+    });
+    return id;
+  });
 
   if (stripeConfigured()) {
     try {
       const base = publicBase(c);
       const session = await createCheckoutSession({
-        pledge: { id: pledgeId, amount_cents: cents, cadence: v.monthly ? 'monthly' : 'one-time', email: v.email },
+        pledge: { id: pledgeId, amount_cents: cents, cadence, email: v.email },
         workspace: ws,
         successUrl: `${base}/d/${ws.slug}/thanks`,
         cancelUrl: `${base}/d/${ws.slug}`,
       });
-      await db.query('update pledges set stripe_session_id = $2 where id = $1', [pledgeId, session.id]);
+      await publicAction(db, ws, 'stripe.checkout', async (tx, emit) => {
+        await tx.query('update pledges set stripe_session_id = $3, updated_at = now() where id = $1 and workspace_id = $2',
+          [pledgeId, ws.id, session.id]);
+        emit('pledge', pledgeId, 'update', { stripe_session_id: session.id });
+      });
       return c.redirect(session.url, 303);
     } catch (e) {
       return fail(`Card payment isn't available right now (${String(e.message).slice(0, 120)}). Please try again shortly.`);
@@ -521,7 +639,7 @@ app.get('/d/:ws/thanks', async (c) => {
   const db = await getDb();
   const ws = await loadWs(db, c.req.param('ws'));
   if (!ws) return c.text('not found', 404);
-  return c.html(page(ws, 'Thank you', `<h1>Thank you.</h1><div class="done">Your contribution to ${esc(ws.name)} is being processed. A receipt is on its way to your email.</div>`));
+  return c.html(page(ws, 'Thank you', `<h1>Thank you.</h1><div class="done">Your contribution to ${esc(ws.name)} is being processed. Stripe emails the payment receipt.</div>`));
 });
 
 // Stripe → gifts. One-time: checkout.session.completed (paid). Monthly: every
@@ -563,12 +681,32 @@ app.post('/api/public/stripe/webhook', async (c) => {
     }
     const cents = paidOneTime ? Number(obj.amount_total) : Number(obj.amount_paid);
     const paidAt = new Date(((paidMonthly ? obj.status_transitions?.paid_at : obj.created) || evt.created) * 1000);
+    const date = paidAt.toISOString().slice(0, 10);
+    // pledge_id links each card gift to its pledge (as pledge.receive does), so
+    // voiding one keeps the pledge honest (lib/gifts.js).
     const { gift, compliance } = await logGift(tx, ws, {
-      person_id: pledge.person_id, amount_cents: cents, date: paidAt.toISOString().slice(0, 10),
+      person_id: pledge.person_id, amount_cents: cents, date,
       method: 'card', cadence: pledge.cadence, note: `Stripe ${paidOneTime ? obj.payment_intent || obj.id : obj.id}`,
+      pledge_id: pledge.id,
     }, emit);
-    await tx.query(`update pledges set status = 'paid', gift_id = coalesce(gift_id, $2), updated_at = now() where id = $1`, [pledge.id, gift.id]);
-    emit('pledge', pledge.id, 'update', { status: 'paid', gift_id: gift.id });
+    if (pledge.cadence === 'monthly') {
+      // A monthly pledge records its latest month in, like pledge.receive.
+      const row = (await tx.query(
+        `update pledges set status = 'paid',
+           gift_id = case when last_received_on is null or $3::date >= last_received_on then $2 else gift_id end,
+           last_received_on = greatest(coalesce(last_received_on, $3::date), $3::date), updated_at = now()
+         where id = $1 returning gift_id, last_received_on`,
+        [pledge.id, gift.id, date],
+      )).rows[0];
+      const lastOn = row.last_received_on instanceof Date ? row.last_received_on.toISOString().slice(0, 10) : String(row.last_received_on).slice(0, 10);
+      emit('pledge', pledge.id, 'update', { status: 'paid', gift_id: row.gift_id, last_received_on: lastOn });
+    } else {
+      const row = (await tx.query(
+        `update pledges set status = 'paid', gift_id = coalesce(gift_id, $2), updated_at = now() where id = $1 returning gift_id`,
+        [pledge.id, gift.id],
+      )).rows[0];
+      emit('pledge', pledge.id, 'update', { status: 'paid', gift_id: row.gift_id });
+    }
     return { gift_id: gift.id, flagged: gift.flagged, compliance };
   });
   return c.json({ ok: true, ...result });
@@ -606,15 +744,14 @@ app.post('/api/public/:ws/signup', async (c) => {
     return c.json({ ok: true, kind });
   }
   if (kind === 'petition') {
-    const pet = (await db.query('select id, slug from petitions where workspace_id = $1 and slug = $2 and active', [ws.id, str(b.petition, 60)])).rows[0];
+    const pet = await loadPetition(db, ws, str(b.petition, 60));
     if (!pet) return c.json({ error: 'unknown petition' }, 404);
+    if (!pet.active) return c.json({ error: 'this petition is closed' }, 410);
     if (!name) return c.json({ error: 'name required' }, 400);
-    await db.query(
-      `insert into petition_signatures (id, workspace_id, petition_id, name, email, phone, address, subscribe) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [newId(), ws.id, pet.id, name, email || null, phone || null, address || null, !!b.subscribe],
-    );
+    // A website checkbox posts true, "1", "true" or "on"; "0"/"false" is a no.
+    const wantsNews = [true, 1, '1', 'true', 'on', 'yes'].includes(b.subscribe);
+    await signPetition(db, ws, pet, { name, email, phone, address, wantsNews });
     await upsertPersonFromPublic(db, ws, { name, email, phone, address }, ['petition', `petition:${pet.slug}`]);
-    if (b.subscribe && email) await subscribe(db, ws, email, name, `petition:${pet.slug}`);
     return c.json({ ok: true, kind });
   }
   if (kind === 'rsvp') {

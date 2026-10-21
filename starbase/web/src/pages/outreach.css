@@ -248,7 +248,12 @@ a.ot-row:hover, button.ot-row:hover { background: var(--paper-1); }
 .ot-result[data-status='sent']   { border-color: var(--ok); }
 .ot-result[data-status='queued'] { border-color: var(--warn); }
 .ot-result[data-status='failed'] { border-color: var(--danger); }
-.ot-result .provider { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; padding: 0 var(--s-2) var(--s-2) 0; }
+/* Why some didn't go out, in plain words (never the provider's raw reply);
+   then a quiet "Try again · N" */
+.ot-result-why { font-size: 13px; color: var(--text-2); padding: 0 var(--s-2) var(--s-2) 0; }
+.ot-result-why a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.ot-result-acts { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-2); padding: 0 var(--s-2) var(--s-2) 0; }
+.ot-result-acts > .ot-confirm { align-self: stretch; width: auto; }
 /* The next step after the outcome ("Connect email, then Send now.") — same line, not bold */
 .ot-result-next { font-weight: 400; }
 .ot-result-next a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
@@ -379,6 +384,8 @@ a.ot-row:hover, button.ot-row:hover { background: var(--paper-1); }
 .ot-row--wrap > .ot-row__main { flex: 1 1 200px; }
 .ot-row__acts { flex: none; }
 .ot-body > .ot-result { margin: 0; }
+/* Send now · N / Try again · N under a row: a quiet button, not a bar */
+.ot-body > .btn { align-self: flex-start; }
 .ot-roles { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
 .ot-roles li { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: baseline; }
 .ot-roles strong { min-width: 96px; }

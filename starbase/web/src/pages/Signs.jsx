@@ -86,8 +86,11 @@ function NoteField({ sign, onSave }) {
 }
 
 // ── One sign: a row that opens in place ──
-function SignRow({ s, open, onToggle, busy, onUpdate }) {
+function SignRow({ s, open, onToggle, busy, onUpdate, onCancel }) {
   const bodyId = `sign-${s.id}`;
+  const [confirming, setConfirming] = useState(false);
+  // A request that never went up is taken back (sign.cancel), not "taken down".
+  const choices = s.status === 'requested' && onCancel ? SIGN_STATUSES.filter((st) => st !== 'removed') : SIGN_STATUSES;
   return (
     <li className="ops-item" data-open={open ? '' : undefined}>
       <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
@@ -111,13 +114,24 @@ function SignRow({ s, open, onToggle, busy, onUpdate }) {
             </p>
           )}
           <div className="ops-seg" role="group" aria-label={`Status for the sign at ${where(s)}`}>
-            {SIGN_STATUSES.map((st) => (
+            {choices.map((st) => (
               <button key={st} type="button" aria-pressed={s.status === st} disabled={busy}
                 onClick={() => { if (s.status !== st) onUpdate({ status: st }); }}>
                 {statusLabel(st)}
               </button>
             ))}
+            {choices !== SIGN_STATUSES && !confirming && (
+              <button type="button" disabled={busy} onClick={() => setConfirming(true)}>Cancel request</button>
+            )}
           </div>
+          {confirming && (
+            <p className="ops-confirm" role="group" aria-label="Cancel this request">
+              <span>Cancel this request?</span>
+              <button type="button" className="btn ops-tap" disabled={busy}
+                onClick={async () => { if (await onCancel()) setConfirming(false); }}>Yes, cancel</button>
+              <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={() => setConfirming(false)}>No</button>
+            </p>
+          )}
           <NoteField sign={s} onSave={(note) => onUpdate({ note })} />
         </div>
       )}
@@ -378,6 +392,26 @@ export default function Signs() {
     if (ok) showToast({ sign, prev, text: `✓ ${DONE_WORD[status] ?? statusLabel(status)} · ${where(sign)}` });
   };
   const putUp = (sign) => changeStatus(sign, 'installed');
+  // Taking back a request that never went up: it leaves every list and count.
+  const cancelRequest = async (sign) => {
+    setError(null);
+    setBusyId(sign.id);
+    try {
+      await action('sign.cancel', { id: sign.id });
+      queryClient.setQueryData(['signs'], (cur) => cur && ({ ...cur, signs: cur.signs.filter((x) => x.id !== sign.id) }));
+      showToast({ text: `✓ Request cancelled · ${where(sign)}` });
+      setOpenId(null);
+      return true;
+    } catch (e) {
+      setError(e.message);
+      return false;
+    } finally {
+      setBusyId(null);
+      invalidateSigns(queryClient, sign.person_id);
+    }
+  };
+  const actionsQ = useQuery({ queryKey: ['actions'], queryFn: () => apiGet('/actions'), staleTime: Infinity });
+  const canCancel = Array.isArray(actionsQ.data?.actions) && actionsQ.data.actions.includes('sign.cancel');
   const undo = async () => {
     const { sign, prev } = toast;
     clearTimeout(toastTimer.current);
@@ -510,6 +544,7 @@ export default function Signs() {
               onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
               busy={busyId === s.id}
               onUpdate={(patch) => (patch.status ? changeStatus(s, patch.status) : update(s, patch))}
+              onCancel={canCancel ? () => cancelRequest(s) : undefined}
             />
           ))}
         </ul>

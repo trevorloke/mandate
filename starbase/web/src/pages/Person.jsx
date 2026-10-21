@@ -6,7 +6,7 @@
 // and History (open by default). Volunteers see only what a door needs: Details
 // (open), the rating card, one "Last contact" line and Signs. Their back link
 // returns to wherever they came from (walk list, map, Calls).
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useParams, useOutletContext, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,6 +15,8 @@ import {
 } from '@starbase/shared/canvass';
 import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText } from '../components/RatingButtons.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
+import { queuedText } from '../components/queued.js';
+import { useOutbox } from '../offline.js';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
   canDesk, invalidatePersonData, isDnc, tagWord, RatingTag,
@@ -61,6 +63,10 @@ const STATUS_CHIP = {
   assigned: 'chip', confirmed: 'chip chip-ok', declined: 'chip chip-danger', no_show: 'chip chip-danger', completed: 'chip',
   requested: 'chip chip-warn', installed: 'chip chip-ok', removed: 'chip chip-ghost',
 };
+// The Signs screen's words, for the chip and the switch.
+const SIGN_STATUS_WORD = { requested: 'To put up', installed: 'Up', removed: 'Taken down' };
+// A request that never went up is taken back (sign.cancel), not "taken down".
+const SIGN_CANCEL = 'cancel';
 // Most-asked first, like the door card.
 const SIGN_ORDER = ['lawn', 'large', 'billboard'];
 const SIGN_SHORT = { lawn: 'Lawn', large: 'Large', billboard: 'Billboard' };
@@ -193,12 +199,22 @@ function Header({ person, donor, me, desk, onLog, contacted }) {
 function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
   const [note, setNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
-  const [status, setStatus] = useState('');
+  // { text, what, queued }: the line under the buttons. A knock still in the
+  // outbox says so, and the line turns to "✓ Sent" once the outbox empties.
+  const [said, setSaid] = useState(null);
+  const status = said?.text || '';
   const reachId = useId();
   const act = useAction(refresh);
+  const outbox = useOutbox();
+  useEffect(() => {
+    if (!said?.queued || outbox.pending > 0 || outbox.flushing) return;
+    setSaid(outbox.lastError
+      ? { text: outbox.lastError, what: said.what, queued: false }
+      : { text: `✓ Sent · ${said.what}`, what: said.what, queued: false });
+  }, [said, outbox.pending, outbox.flushing, outbox.lastError]);
   // Contacts are kept as they were logged: "Change" (as on the field toasts)
   // brings you back to the rating row, and the next tap logs the fix.
-  const change = () => { setStatus(''); focusRating(cardRef.current); };
+  const change = () => { setSaid(null); focusRating(cardRef.current); };
 
   const log = async (outcome, rating) => {
     const res = await act.run('contact.log', {
@@ -207,7 +223,9 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
     if (res) {
       setNote('');
       setNoteOpen(false);
-      setStatus(`${res.queued ? 'Saved offline · ' : '✓ '}${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}`);
+      // Not reached yet: the door card's words ("Saved on this phone — sends soon").
+      const what = `${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}`;
+      setSaid({ text: res.queued ? `${queuedText(res)} · ${what}` : `✓ ${what}`, what, queued: Boolean(res.queued) });
     }
   };
 
@@ -573,37 +591,56 @@ function Roles({ person, roles, refresh, desk }) {
   );
 }
 
-function Signs({ person, signs, refresh }) {
+function Signs({ person, signs, refresh, desk }) {
   const act = useAction(refresh);
+  // sign.cancel (GET /api/actions, same key as the door card): only then can a
+  // request that never went up be taken back from here.
+  const actions = useQuery({ queryKey: ['actions'], queryFn: () => apiGet('/actions'), staleTime: 5 * 60_000 });
+  const canCancel = Array.isArray(actions.data?.actions) && actions.data.actions.includes('sign.cancel');
   const kindLabel = (k) => SIGN_KINDS.find((s) => s.code === k)?.label || k;
+  // A sign goes to an address: with none on file there's nowhere to put it.
+  const noAddress = !String(person.address || '').trim();
+  const setStatus = (s, v) => (v === SIGN_CANCEL
+    ? act.run('sign.cancel', { id: s.id })
+    : act.run('sign.update', { id: s.id, status: v }));
   return (
     <>
       {signs.length === 0 && <p className="pf-empty">No signs yet.</p>}
-      {signs.map((s) => (
-        <div key={s.id} className="sign-row">
-          <span>
-            <strong>{kindLabel(s.kind)}</strong>
-            {s.note ? <span className="muted"> · {s.note}</span> : null}
-          </span>
-          <span className="head-actions">
-            <span className={STATUS_CHIP[s.status] || 'chip'}>{s.status}</span>
-            <select className="input" aria-label="Sign status" value={s.status} disabled={act.busy}
-              onChange={(e) => act.run('sign.update', { id: s.id, status: e.target.value })}>
-              {SIGN_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
-            </select>
-          </span>
-        </div>
-      ))}
+      {signs.map((s) => {
+        const cancelable = canCancel && s.status === 'requested';
+        const options = cancelable ? ['requested', 'installed', SIGN_CANCEL] : SIGN_STATUSES;
+        return (
+          <div key={s.id} className="sign-row">
+            <span>
+              <strong>{kindLabel(s.kind)}</strong>
+              {s.note ? <span className="muted"> · {s.note}</span> : null}
+            </span>
+            <span className="head-actions">
+              <span className={STATUS_CHIP[s.status] || 'chip'}>{SIGN_STATUS_WORD[s.status] || s.status}</span>
+              <select className="input" aria-label="Sign status" value={s.status} disabled={act.busy}
+                onChange={(e) => setStatus(s, e.target.value)}>
+                {options.map((st) => (
+                  <option key={st} value={st}>{st === SIGN_CANCEL ? 'Cancel request' : SIGN_STATUS_WORD[st] || st}</option>
+                ))}
+              </select>
+            </span>
+          </div>
+        );
+      })}
       <div className="card-head pf-sub"><span className="eyebrow">Request a sign</span></div>
       <div className="pf-row-acts" style={{ marginTop: 0 }}>
         {SIGN_BUTTONS.map((k) => (
-          <button key={k.code} type="button" className="btn pp-btn" disabled={act.busy} title={k.label}
+          <button key={k.code} type="button" className="btn pp-btn" disabled={act.busy || noAddress} title={k.label}
             onClick={() => act.run('sign.place', { kind: k.code, person_id: person.id })}>
             {SIGN_SHORT[k.code] || k.label}
           </button>
         ))}
       </div>
-      {!person.address && <p className="hint" style={{ marginTop: 'var(--s-2)' }}>Add an address first.</p>}
+      {noAddress && (
+        <p className="hint" style={{ marginTop: 'var(--s-2)' }}>
+          {desk ? 'No address — add one under Details first.' : 'No address on file — ask your organizer.'}
+        </p>
+      )}
       {act.error && <p className="error">{act.error}</p>}
     </>
   );
@@ -768,7 +805,7 @@ export default function Person() {
           </Section>
         )}
         <Section title="Signs" count={signs.length || ''} open={!!open.signs} onToggle={toggle('signs')}>
-          <Signs person={person} signs={signs} refresh={refresh} />
+          <Signs person={person} signs={signs} refresh={refresh} desk={desk} />
         </Section>
         {/* Shifts and the full history are desk views; volunteers have Shifts and the line above. */}
         {desk && (

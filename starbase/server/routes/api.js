@@ -33,12 +33,34 @@ app.use('*', async (c, next) => {
 });
 
 // Volunteers canvass, phone, and place signs; they never see money, the
-// subscriber/signature lists, the raw event log, or bulk exports.
+// subscriber/signature lists, the raw event log, the campaign-wide contact
+// feed (who knocked whom, with notes), or bulk exports.
 const DESK_ONLY_READS = [
   /^\/api\/records\//, /^\/api\/export$/, /^\/api\/events$/, /^\/api\/audit\/verify$/,
   /^\/api\/subscriptions$/, /^\/api\/blasts$/, /^\/api\/petitions\/[^/]+\/signatures$/,
   /^\/api\/pledges$/, /^\/api\/campaign-events\/[^/]+\/rsvps$/, /^\/api\/members$/,
+  /^\/api\/contacts$/,
 ];
+
+// What a volunteer's browser may receive about a person: phone and address
+// (they call and knock), never anyone else's email, and never a tag that
+// gives money away ('donor-prospect', 'lapsed', …). Their own record keeps
+// its email — it is theirs. Applied to every person row a volunteer reads:
+// /persons, /persons/:id, /map/doors and /turfs/:id/walk.
+const isMoneyTag = (t) => {
+  const s = String(t ?? '').trim().toLowerCase();
+  return s.includes('donor') || s === 'lapsed';
+};
+const loginEmail = (ctx) => String(ctx.user.email || '').trim().toLowerCase();
+const forViewer = (ctx) => {
+  if (ctx.role !== 'volunteer') return (p) => p;
+  const mine = loginEmail(ctx);
+  return (p) => ({
+    ...p,
+    email: mine && String(p.email || '').trim().toLowerCase() === mine ? p.email : null,
+    tags: (Array.isArray(p.tags) ? p.tags : []).filter((t) => !isMoneyTag(t)),
+  });
+};
 app.use('*', async (c, next) => {
   if (c.get('ctx').role === 'volunteer' && c.req.method === 'GET'
       && DESK_ONLY_READS.some((re) => re.test(c.req.path))) {
@@ -96,6 +118,7 @@ const personRow = (r) => ({
 
 app.get('/persons', async (c) => {
   const ctx = c.get('ctx');
+  const vol = ctx.role === 'volunteer';
   const q = (c.req.query('q') || '').trim();
   const tag = (c.req.query('tag') || '').trim();
   const rating = (c.req.query('rating') || '').trim();
@@ -104,9 +127,17 @@ app.get('/persons', async (c) => {
   const limit = Math.min(Number(c.req.query('limit')) || 25, 2000);
   const like = `%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
   const params = [ctx.workspaceId, q, like, limit];
+  // A volunteer's search, tag and has=email filters never match on what they
+  // may not see — otherwise the result set itself would tell them who has
+  // which email, or who is a donor. Their own email still finds their own
+  // record (Shifts and Today look themselves up that way).
+  if (vol) params.push(loginEmail(ctx));
+  const ownEmail = `($5::text <> '' and lower(p.email) = $5::text)`;
   let where = `p.workspace_id = $1 and p.deleted_at is null
-       and ($2 = '' or p.name ilike $3 or p.email ilike $3 or p.address ilike $3 or p.phone ilike $3)`;
-  if (tag) { params.push(JSON.stringify(tag)); where += ` and p.tags @> $${params.length}::jsonb`; }
+       and ($2 = '' or p.name ilike $3 or p.address ilike $3 or p.phone ilike $3
+            or (p.email ilike $3${vol ? ` and ${ownEmail}` : ''}))`;
+  if (tag && vol && isMoneyTag(tag)) where += ' and false';
+  else if (tag) { params.push(JSON.stringify(tag)); where += ` and p.tags @> $${params.length}::jsonb`; }
   // rating: one code (4B), a comma list for a band (1,2 · 4,4D,4B,4F,4N,4C),
   // and/or "unrated" (no rating yet).
   if (rating) {
@@ -124,7 +155,7 @@ app.get('/persons', async (c) => {
     where += ` and exists (select 1 from volunteer_roles v where v.person_id = p.id and v.role = $${params.length})`;
   }
   if (has === 'phone') where += ' and p.phone is not null';
-  if (has === 'email') where += ' and p.email is not null';
+  if (has === 'email') where += vol ? ` and ${ownEmail}` : ' and p.email is not null';
   if (has === 'location') where += ' and p.lat is not null and p.lng is not null';
   // note: their own words from the volunteer form (attrs.note), so the call
   // card needs no per-person fetch. Nothing else from attrs is exposed.
@@ -135,7 +166,7 @@ app.get('/persons', async (c) => {
      order by lower(p.name) limit $4`,
     params,
   );
-  return c.json({ persons: rows.map(personRow) });
+  return c.json({ persons: rows.map(personRow).map(forViewer(ctx)) });
 });
 
 // Everything a door card needs, keyed by address: persons at that address,
@@ -148,7 +179,7 @@ app.get('/map/doors', async (c) => {
      from persons where workspace_id = $1 and deleted_at is null and lat is not null and lng is not null
      order by lower(address), lower(name) limit 5000`,
     [ctx.workspaceId],
-  )).rows.map(personRow);
+  )).rows.map(personRow).map(forViewer(ctx));
   const signs = (await db.query(
     `select id, person_id, address, lat, lng, kind, status from signs
      where workspace_id = $1 and status <> 'removed'`,
@@ -211,7 +242,9 @@ app.get('/persons/:id', async (c) => {
     [ctx.workspaceId, person.id, person.address || '', person.unit || null],
   )).rows;
   if (ctx.role === 'volunteer') {
-    return c.json({ person: personRow(person), gifts: [], totals: [], contacts, roles, signs, shifts, donor: null, household });
+    return c.json({
+      person: forViewer(ctx)(personRow(person)), gifts: [], totals: [], contacts, roles, signs, shifts, donor: null, household,
+    });
   }
   return c.json({ person: personRow(person), gifts, totals, contacts, roles, signs, shifts, donor, household });
 });
@@ -223,7 +256,7 @@ const parseJ = (v, d) => (typeof v === 'string' ? JSON.parse(v) : (v ?? d));
 // door_knocked: anyone ever knocked on this person's door (a 'door' contact),
 // so a walk list can tell a door reached only by phone or text from a knock.
 const loadLocated = async (db, ws) => (await db.query(
-  `select p.id, p.name, p.phone, p.address, p.unit, p.lat, p.lng, p.rating, p.tags,
+  `select p.id, p.name, p.email, p.phone, p.address, p.unit, p.lat, p.lng, p.rating, p.tags,
           (select max(c.created_at) from contacts c where c.person_id = p.id) as last_contact_at,
           (select c.outcome from contacts c where c.person_id = p.id order by c.created_at desc limit 1) as last_outcome,
           exists (select 1 from contacts c where c.person_id = p.id and c.channel = 'door') as door_knocked
@@ -231,10 +264,14 @@ const loadLocated = async (db, ws) => (await db.query(
   [ws],
 )).rows.map((p) => ({ ...p, tags: parseJ(p.tags, []), door_knocked: !!p.door_knocked }));
 
+// A door is done once someone there has been knocked (a 'door' contact, any
+// outcome). A call or a text alone never finishes a door: the walk list still
+// sends a canvasser there; the phone mark beside it is information only.
+const doneDoor = (d) => d.persons.some((p) => p.door_knocked);
+
 const turfStats = (polygon, located) => {
   const inside = located.filter((p) => pointInPolygon(p.lat, p.lng, polygon));
   const doors = groupDoors(inside);
-  const doneDoor = (d) => d.persons.some((p) => p.last_contact_at);
   return {
     doors: doors.length,
     people: inside.length,
@@ -285,9 +322,10 @@ app.get('/turfs/:id/walk', async (c) => {
   const polygon = parseJ(t.polygon, []);
   const located = await loadLocated(db, ctx.workspaceId);
   const doors = walkOrder(groupDoors(located.filter((p) => pointInPolygon(p.lat, p.lng, polygon))));
+  const view = forViewer(ctx);
   return c.json({
     turf: { id: t.id, name: t.name, color: t.color, notes: t.notes, polygon },
-    doors: doors.map((d) => ({ ...d, done: d.persons.some((p) => p.last_contact_at) })),
+    doors: doors.map((d) => ({ ...d, persons: d.persons.map(view), done: doneDoor(d) })),
     stats: turfStats(polygon, located),
   });
 });
@@ -327,10 +365,13 @@ app.get('/campaign-events/:id/rsvps', async (c) => {
 });
 
 // ── Pledges (money roles) ──
+// last_received_on (YYYY-MM-DD or null): the date of the latest gift received
+// for a monthly pledge — it stays open between months.
 app.get('/pledges', async (c) => {
   const ctx = c.get('ctx');
   const { rows } = await c.get('db').query(
-    `select id, person_id, name, email, phone, address, amount_cents, cadence, status, gift_id, stripe_session_id, created_at
+    `select id, person_id, name, email, phone, address, amount_cents, cadence, status, gift_id, stripe_session_id, created_at,
+            to_char(last_received_on, 'YYYY-MM-DD') as last_received_on
      from pledges where workspace_id = $1 order by created_at desc limit 500`,
     [ctx.workspaceId],
   );
@@ -378,16 +419,25 @@ app.get('/contacts', async (c) => {
   return c.json({ contacts: rows });
 });
 
+// mine: the caller's own supporter record — the person whose email is their
+// login email — is actively on shift s (assigned or confirmed). $2 is that
+// email, lower-cased; '' (no email) is never anyone.
+const MINE_ON_SHIFT = `exists (
+  select 1 from shift_assignments a join persons p on p.id = a.person_id
+  where a.shift_id = s.id and a.workspace_id = s.workspace_id and a.status in ('assigned', 'confirmed')
+    and p.deleted_at is null and $2::text <> '' and lower(p.email) = $2::text)`;
+
 app.get('/shifts', async (c) => {
   const ctx = c.get('ctx');
   const { rows } = await c.get('db').query(
     `select s.*,
-            (select count(*)::int from shift_assignments a where a.shift_id = s.id and a.status in ('assigned', 'confirmed')) as filled
+            (select count(*)::int from shift_assignments a where a.shift_id = s.id and a.status in ('assigned', 'confirmed')) as filled,
+            ${MINE_ON_SHIFT} as mine
      from shifts s where s.workspace_id = $1 and s.deleted_at is null
      order by s.starts_at limit 500`,
-    [ctx.workspaceId],
+    [ctx.workspaceId, loginEmail(ctx)],
   );
-  return c.json({ shifts: rows });
+  return c.json({ shifts: rows.map((s) => ({ ...s, mine: !!s.mine })) });
 });
 
 app.get('/shifts/:id', async (c) => {
@@ -452,11 +502,32 @@ app.get('/subscriptions', async (c) => {
   });
 });
 
+// Each send carries its recipients by status, so the screen can say exactly
+// how many were sent, failed, and are still waiting. queued_count for a
+// newsletter counts only addresses still subscribed — the ones Send now
+// would actually email (blast.resend drops the rest); retry_count is the
+// same for Try again (failed + queued, still subscribed). failed_count stays
+// the plain record of what happened.
 app.get('/blasts', async (c) => {
   const ctx = c.get('ctx');
   const { rows } = await c.get('db').query(
-    `select id, kind, subject, status, provider_note, audience_count, sent_at, created_at from blasts
-     where workspace_id = $1 order by created_at desc limit 200`,
+    `select b.id, b.kind, b.subject, b.status, b.provider_note, b.audience_count, b.sent_at, b.created_at,
+            k.sent_count, k.failed_count, k.queued_count, k.retry_count
+     from blasts b
+     cross join lateral (
+       select (count(*) filter (where r.status = 'sent'))::int as sent_count,
+              (count(*) filter (where r.status = 'failed'))::int as failed_count,
+              (count(*) filter (where r.status = 'queued' and l.live))::int as queued_count,
+              (count(*) filter (where r.status in ('queued', 'failed') and l.live))::int as retry_count
+       from blast_recipients r
+       cross join lateral (
+         select (b.kind <> 'newsletter' or exists (
+           select 1 from subscriptions s
+           where s.workspace_id = b.workspace_id and lower(s.email) = lower(r.email) and s.status = 'subscribed')) as live
+       ) l
+       where r.workspace_id = b.workspace_id and r.blast_id = b.id
+     ) k
+     where b.workspace_id = $1 order by b.created_at desc limit 200`,
     [ctx.workspaceId],
   );
   const media = (await c.get('db').query(
@@ -551,17 +622,26 @@ app.get('/brief', async (c) => {
   const people = (await db.query(
     `select count(*)::int as total from persons where workspace_id = $1 and deleted_at is null`, [ws],
   )).rows[0];
-  // Field: touches this week by channel (the whole campaign), the caller's
-  // own share of them (contacts they logged), and the support picture.
+  // Field, over the last 7 days (rolling): doors are DISTINCT doors knocked —
+  // a household rated twice, or a rating changed, is still one door; the key
+  // is the address + unit (the walk list's grouping), or the person when they
+  // have no address. Calls and texts count contacts. mine: the same counts
+  // over the contacts the caller logged; week: every contact.
   const field = (await db.query(
-    `select count(*) filter (where created_at >= current_date - 7)::int as week,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'door')::int as doors,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'phone')::int as calls,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'text')::int as texts,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'door' and created_by = $2)::int as my_doors,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'phone' and created_by = $2)::int as my_calls,
-            count(*) filter (where created_at >= current_date - 7 and channel = 'text' and created_by = $2)::int as my_texts
-     from contacts where workspace_id = $1`, [ws, ctx.user.id],
+    `select count(*)::int as week,
+            count(distinct w.door) filter (where w.channel = 'door')::int as doors,
+            count(*) filter (where w.channel = 'phone')::int as calls,
+            count(*) filter (where w.channel = 'text')::int as texts,
+            count(distinct w.door) filter (where w.channel = 'door' and w.created_by = $2)::int as my_doors,
+            count(*) filter (where w.channel = 'phone' and w.created_by = $2)::int as my_calls,
+            count(*) filter (where w.channel = 'text' and w.created_by = $2)::int as my_texts
+     from (
+       select c.channel, c.created_by,
+              case when nullif(trim(p.address), '') is null then p.id::text
+                   else lower(trim(p.address)) || '|' || lower(trim(coalesce(p.unit, ''))) end as door
+       from contacts c join persons p on p.id = c.person_id
+       where c.workspace_id = $1 and c.created_at >= now() - interval '7 days'
+     ) w`, [ws, ctx.user.id],
   )).rows[0];
   const ratings = (await db.query(
     `select rating, count(*)::int as n from persons
@@ -569,10 +649,11 @@ app.get('/brief', async (c) => {
   )).rows;
   const shifts = (await db.query(
     `select s.id, s.title, s.starts_at, s.location, s.capacity,
-            (select count(*)::int from shift_assignments a where a.shift_id = s.id and a.status in ('assigned', 'confirmed')) as filled
+            (select count(*)::int from shift_assignments a where a.shift_id = s.id and a.status in ('assigned', 'confirmed')) as filled,
+            ${MINE_ON_SHIFT} as mine
      from shifts s where s.workspace_id = $1 and s.deleted_at is null and s.starts_at >= now()
-     order by s.starts_at limit 5`, [ws],
-  )).rows;
+     order by s.starts_at limit 5`, [ws, loginEmail(ctx)],
+  )).rows.map((s) => ({ ...s, mine: !!s.mine }));
   const signs = (await db.query(
     `select status, count(*)::int as n from signs where workspace_id = $1 group by status`, [ws],
   )).rows;
@@ -586,9 +667,15 @@ app.get('/brief', async (c) => {
     `select t.id, t.name from turfs t join turf_members m on m.turf_id = t.id and m.user_id = $2
      where t.workspace_id = $1 and t.deleted_at is null order by t.created_at`, [ws, ctx.user.id],
   )).rows;
+  // Open pledges: one-time pledges not yet received, plus monthly pledges not
+  // yet received this calendar month (campaign time) — a monthly pledge stays
+  // open between months.
   const openPledges = (await db.query(
     `select count(*)::int as n, coalesce(sum(amount_cents), 0)::int as cents from pledges
-     where workspace_id = $1 and status in ('pledged', 'pending')`, [ws],
+     where workspace_id = $1 and status in ('pledged', 'pending')
+       and not (cadence = 'monthly' and last_received_on is not null
+                and last_received_on >= date_trunc('month', now() at time zone $2::text)::date)`,
+    [ws, ctx.workspace.settings?.tz || 'America/Vancouver'],
   )).rows[0];
   const sampleLoaded = !!(ctx.workspace.settings?.sample);
   const activation = {

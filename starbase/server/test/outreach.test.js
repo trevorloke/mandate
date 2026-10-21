@@ -85,6 +85,7 @@ test('blasts: newsletter goes to the subscribed list; press goes to media-tagged
   assert.equal(press.json.blast.audience_count, 1, 'only media-tagged people with email');
   assert.equal(press.json.blast.status, 'queued');
   assert.match(press.json.blast.provider_note, /RESEND_API_KEY/);
+  assert.deepEqual(press.json.counts, { total: 1, sent: 0, failed: 0, queued: 1 }, 'saved, not sent');
 
   const news = await c.action('blast.send', { kind: 'newsletter', subject: 'This week', body: 'Hello friends' });
   assert.equal(news.json.blast.audience_count, 2, 'harjit (via petition) + board member; maya unsubscribed');
@@ -170,6 +171,7 @@ test('with a provider: every newsletter carries the recipient’s own unsubscrib
     assert.equal(news.json.blast.status, 'sent');
     const subs = (await c.get('/api/subscriptions')).json.subscriptions.filter((s) => s.status === 'subscribed');
     assert.equal(sent.length, subs.length);
+    assert.deepEqual(news.json.counts, { total: subs.length, sent: subs.length, failed: 0, queued: 0 });
     for (const s of subs) {
       const msg = sent.find((m) => m.to[0] === s.email);
       assert.ok(msg, `sent to ${s.email}`);
@@ -265,6 +267,7 @@ test('send later is real: a saved newsletter goes out with blast.resend once ema
   assert.equal(saved.status, 200);
   assert.equal(saved.json.blast.status, 'queued', 'no provider: saved, not sent');
   assert.equal(saved.json.blast.audience_count, 3);
+  assert.deepEqual(saved.json.counts, { total: 3, sent: 0, failed: 0, queued: 3 });
   const id = saved.json.blast.id;
 
   const refused = await w.action('blast.resend', { id });
@@ -280,6 +283,7 @@ test('send later is real: a saved newsletter goes out with blast.resend once ema
     const r = await w.action('blast.resend', { id });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.deepEqual(r.json.resent, { sent: 2, failed: 0, skipped: 1 });
+    assert.deepEqual(r.json.counts, { total: 2, sent: 2, failed: 0, queued: 0 }, 'the whole send after this run');
     assert.equal(r.json.blast.status, 'sent');
     assert.equal(r.json.blast.audience_count, 2, 'the unsubscribed address is off the send');
     assert.equal(r.json.blast.provider_note, null);
@@ -296,6 +300,7 @@ test('send later is real: a saved newsletter goes out with blast.resend once ema
     const again = await w.action('blast.resend', { id });
     assert.equal(again.status, 200);
     assert.deepEqual(again.json.resent, { sent: 0, failed: 0, skipped: 0 });
+    assert.deepEqual(again.json.counts, { total: 2, sent: 2, failed: 0, queued: 0 });
     assert.equal(sent.length, 2, 'sent rows are never re-sent');
     assert.equal(again.json.blast.status, 'sent');
   });
@@ -311,7 +316,7 @@ test('send later is real: a saved newsletter goes out with blast.resend once ema
   assert.equal((await w.get('/api/audit/verify')).json.ok, true);
 });
 
-test('blast.resend records each result: a rejected address stays failed and is not retried', async () => {
+test('blast.resend records each result, and Send now retries the failed ones — never a sent one', async () => {
   const w = new Client();
   await w.signup({ workspaceName: 'Resend Press' });
   await w.createPerson('Desk One', { email: 'desk1.resend@news.example', tags: ['media'] });
@@ -321,10 +326,12 @@ test('blast.resend records each result: a rejected address stays failed and is n
   assert.equal(saved.json.blast.status, 'queued');
   const id = saved.json.blast.id;
 
+  let desk2Down = true;
   await withEmailProvider(async (sent) => {
     const r = await w.action('blast.resend', { id });
     assert.equal(r.status, 200);
     assert.deepEqual(r.json.resent, { sent: 1, failed: 1, skipped: 0 });
+    assert.deepEqual(r.json.counts, { total: 2, sent: 1, failed: 1, queued: 0 }, 'exactly who was reached');
     assert.equal(r.json.blast.status, 'queued', 'a mix of sent and failed — the same rule as blast.send');
     assert.match(r.json.blast.provider_note, /email provider 500/);
     assert.equal(r.json.blast.sent_at, null);
@@ -332,10 +339,62 @@ test('blast.resend records each result: a rejected address stays failed and is n
     assert.ok(sent.every((m) => !m.text.includes('/u/')), 'press carries no unsubscribe link');
     assert.match(sent[0].text, /Resend Press$/);
 
-    const again = await w.action('blast.resend', { id });
-    assert.deepEqual(again.json.resent, { sent: 0, failed: 0, skipped: 0 }, 'only still-queued rows are resent');
-    assert.equal(sent.length, 1);
-  }, { fail: (to) => to === 'desk2.resend@news.example' });
+    // The provider still turns desk2 down: tried again, still failed, desk1 untouched.
+    const still = await w.action('blast.resend', { id });
+    assert.deepEqual(still.json.resent, { sent: 0, failed: 1, skipped: 0 }, 'the failed one is tried again');
+    assert.deepEqual(still.json.counts, { total: 2, sent: 1, failed: 1, queued: 0 });
+    assert.equal(sent.length, 1, 'the sent one is never sent twice');
+
+    // The provider takes it now: the send is complete.
+    desk2Down = false;
+    const ok = await w.action('blast.resend', { id });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.json.resent, { sent: 1, failed: 0, skipped: 0 });
+    assert.deepEqual(ok.json.counts, { total: 2, sent: 2, failed: 0, queued: 0 });
+    assert.equal(ok.json.blast.status, 'sent');
+    assert.equal(ok.json.blast.provider_note, null);
+    assert.ok(ok.json.blast.sent_at);
+    assert.deepEqual(sent.map((m) => m.to[0]), ['desk1.resend@news.example', 'desk2.resend@news.example'], 'each reached exactly once');
+
+    const done = await w.action('blast.resend', { id });
+    assert.deepEqual(done.json.resent, { sent: 0, failed: 0, skipped: 0 }, 'nothing left to send');
+    assert.equal(sent.length, 2);
+  }, { fail: (to) => desk2Down && to === 'desk2.resend@news.example' });
+
+  const ev = (await w.get('/api/events?since=0&limit=1000')).json.events.filter((e) => e.action === 'blast.resend');
+  assert.deepEqual(ev.map((e) => [e.payload.sent, e.payload.failed]), [[1, 1], [0, 1], [1, 0]], 'every real attempt is logged; the no-op is not');
+  assert.equal((await w.get('/api/audit/verify')).json.ok, true);
+});
+
+test('blast.send that partly fails answers exact counts; Send now reaches only the failed one', async () => {
+  const w = new Client();
+  await w.signup({ workspaceName: 'Half Sent' });
+  for (const email of ['half.one@example.org', 'half.two@example.org']) {
+    assert.equal((await w.action('subscription.add', { email })).status, 200);
+  }
+  let down = true;
+  await withEmailProvider(async (sent) => {
+    const r = await w.action('blast.send', { kind: 'newsletter', subject: 'Half', body: 'Hello' });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json.counts, { total: 2, sent: 1, failed: 1, queued: 0 });
+    assert.equal(r.json.blast.status, 'queued');
+    assert.deepEqual(sent.map((m) => m.to[0]), ['half.one@example.org']);
+    const listed = (await w.get('/api/blasts')).json.blasts.find((b) => b.id === r.json.blast.id);
+    assert.equal(listed.sent_count, 1, 'the list says the same as the send');
+    assert.equal(listed.failed_count, 1);
+
+    down = false;
+    const again = await w.action('blast.resend', { id: r.json.blast.id });
+    assert.deepEqual(again.json.resent, { sent: 1, failed: 0, skipped: 0 });
+    assert.deepEqual(again.json.counts, { total: 2, sent: 2, failed: 0, queued: 0 });
+    assert.equal(again.json.blast.status, 'sent');
+    assert.deepEqual(sent.map((m) => m.to[0]), ['half.one@example.org', 'half.two@example.org']);
+  }, { fail: (to) => down && to === 'half.two@example.org' });
+
+  // Email disconnected again: refused, and the counts stay what they are.
+  delete process.env.RESEND_API_KEY;
+  const blast = (await w.get('/api/blasts')).json.blasts[0];
+  assert.equal((await w.action('blast.resend', { id: blast.id })).status, 409);
 });
 
 test('blast.resend: desk roles only, own workspace only', async () => {

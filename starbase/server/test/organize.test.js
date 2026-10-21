@@ -243,3 +243,184 @@ test('a knock replayed with the same client_id is recorded once', async () => {
   const n = (await db.query(`select count(*)::int as n from events where workspace_id = $1 and entity_type = 'contact' and payload->>'client_id' = $2`, [ws, client_id])).rows[0].n;
   assert.equal(n, 1, 'one event for one knock');
 });
+
+// ── Pledges and their gifts stay in step ──
+// A pledge workspace of its own, so the brief's counts here are only these.
+const pledgeDesk = async (name) => {
+  const desk = new Client();
+  const r = await desk.signup({ workspaceName: name, jurisdiction: 'bc-municipal' });
+  return { desk, slug: r.json.workspace.slug, ws: r.json.workspace.id };
+};
+const pledgeVia = async (wsSlug, fields) => {
+  const res = await pub('POST', `/d/${wsSlug}`, new URLSearchParams({ ...eligible, ...fields }).toString(),
+    { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': '198.51.100.27' });
+  assert.equal(res.status, 200, res.text.slice(0, 300));
+};
+const pledgeRow = async (desk, email) => (await desk.get('/api/pledges')).json.pledges.find((p) => p.email === email);
+const dbPledge = async (id) => (await (await getDb()).query(
+  'select status, gift_id, last_received_on from pledges where id = $1', [id],
+)).rows[0];
+const day = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : d == null ? null : String(d).slice(0, 10));
+const ym = (offset = 0) => {
+  const d = new Date();
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offset, 15));
+  return t.toISOString().slice(0, 10);
+};
+
+test('a monthly pledge logs each month’s gift and stays open; the same month twice is refused', async () => {
+  const { desk, slug: s2 } = await pledgeDesk('Monthly Pledges');
+  await pledgeVia(s2, { amount: '20', monthly: '1', name: 'Mona Monthly', email: 'mona.monthly@example.org', address: '10 Monthly Way' });
+  const p = await pledgeRow(desk, 'mona.monthly@example.org');
+  assert.equal(p.cadence, 'monthly');
+  assert.equal(p.status, 'pledged');
+
+  const thisMonth = ym(0);
+  const first = await desk.action('pledge.receive', { id: p.id, method: 'etransfer', date: thisMonth });
+  assert.equal(first.status, 200, JSON.stringify(first.json));
+  assert.equal(first.json.pledge.status, 'pledged', 'a monthly pledge stays open after a month is received');
+  assert.equal(first.json.pledge.last_received_on, thisMonth);
+  assert.equal(first.json.gift.amount_cents, 2000);
+  assert.equal(first.json.gift.cadence, 'monthly');
+  let row = await dbPledge(p.id);
+  assert.equal(row.status, 'pledged');
+  assert.equal(day(row.last_received_on), thisMonth);
+  assert.equal(row.gift_id, first.json.gift.id);
+  const listed = await pledgeRow(desk, 'mona.monthly@example.org');
+  assert.equal(listed.status, 'pledged');
+  assert.equal(day(listed.last_received_on), thisMonth, 'GET /api/pledges carries last_received_on');
+
+  const twice = await desk.action('pledge.receive', { id: p.id, method: 'etransfer', date: thisMonth.slice(0, 8) + '01' });
+  assert.equal(twice.status, 409, 'one gift per month');
+  assert.match(twice.json.error, /already received/);
+
+  const next = await desk.action('pledge.receive', { id: p.id, method: 'cheque', date: ym(1) });
+  assert.equal(next.status, 200);
+  assert.equal(next.json.pledge.last_received_on, ym(1));
+  const earlier = await desk.action('pledge.receive', { id: p.id, method: 'cheque', date: ym(-1) });
+  assert.equal(earlier.status, 200, 'a late gift for last month is fine');
+  assert.equal(earlier.json.pledge.last_received_on, ym(1), 'last_received_on is the latest month in, not the last one typed');
+  assert.equal((await dbPledge(p.id)).gift_id, next.json.gift.id, 'gift_id stays the latest month’s gift');
+
+  const gifts = (await desk.get('/api/records/gift?limit=200')).json.records.filter((g) => g.person_name === 'Mona Monthly');
+  assert.equal(gifts.length, 3);
+  assert.ok(gifts.every((g) => g.cadence === 'monthly' && g.amount_cents === 2000));
+
+  // Cancelling ends it; nothing more can be received.
+  assert.equal((await desk.action('pledge.cancel', { id: p.id })).status, 200);
+  assert.equal((await desk.action('pledge.receive', { id: p.id, date: ym(2) })).status, 404);
+  assert.equal((await desk.get('/api/audit/verify')).json.ok, true);
+});
+
+test('the brief counts a monthly pledge as open only until this month’s gift is in', async () => {
+  const { desk, slug: s2 } = await pledgeDesk('Brief Pledges');
+  await pledgeVia(s2, { amount: '15', monthly: '1', name: 'Bri Monthly', email: 'bri.monthly@example.org', address: '11 Monthly Way' });
+  await pledgeVia(s2, { amount: '40', name: 'Bo Once', email: 'bo.once@example.org', address: '12 Once Way' });
+  const before = (await desk.get('/api/brief')).json.pledges;
+  assert.equal(before.n, 2);
+  assert.equal(before.cents, 5500);
+  const m = await pledgeRow(desk, 'bri.monthly@example.org');
+  assert.equal((await desk.action('pledge.receive', { id: m.id, date: new Date().toISOString().slice(0, 10) })).status, 200);
+  // brief.pledges = open one-time pledges + monthly pledges not yet received
+  // this calendar month.
+  const after = (await desk.get('/api/brief')).json.pledges;
+  assert.equal(after.n, 1, 'this month is in: only the one-time pledge is still waiting');
+  assert.equal(after.cents, 4000);
+  assert.equal((await pledgeRow(desk, 'bri.monthly@example.org')).status, 'pledged', 'still open for next month');
+});
+
+test('voiding a pledge’s gift reopens a one-time pledge; restoring closes it again — logged, chain intact', async () => {
+  const { desk, slug: s2, ws: w2 } = await pledgeDesk('Void Pledges');
+  await pledgeVia(s2, { amount: '60', name: 'Vic Void', email: 'vic.void@example.org', address: '13 Void Way' });
+  const p = await pledgeRow(desk, 'vic.void@example.org');
+  const today = new Date().toISOString().slice(0, 10);
+  const rec = await desk.action('pledge.receive', { id: p.id, method: 'etransfer', date: today });
+  assert.equal(rec.status, 200);
+  assert.equal(rec.json.pledge.status, 'received');
+  const g1 = rec.json.gift.id;
+  assert.equal((await desk.get('/api/brief')).json.pledges.n, 0);
+
+  const v = await desk.action('gift.void', { id: g1 });
+  assert.equal(v.status, 200);
+  assert.equal(v.json.pledge.id, p.id);
+  assert.equal(v.json.pledge.status, 'pledged');
+  let row = await pledgeRow(desk, 'vic.void@example.org');
+  assert.equal(row.status, 'pledged', 'the money is out of the books, so the pledge is waiting again');
+  assert.equal(row.gift_id, null);
+  assert.equal((await desk.get('/api/brief')).json.pledges.n, 1);
+  // The void and the reopen are one action in the log.
+  const db = await getDb();
+  const evs = (await db.query(
+    `select seq, entity_type, op, payload from events where workspace_id = $1 and action = 'gift.void' order by seq`, [w2],
+  )).rows;
+  assert.deepEqual(evs.map((e) => [e.entity_type, e.op]), [['gift', 'void'], ['pledge', 'update']]);
+  assert.equal(evs[1].payload.status, 'pledged');
+  assert.equal(evs[1].payload.voided_gift, g1);
+
+  const r = await desk.action('gift.restore', { id: g1 });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.pledge.status, 'received');
+  row = await pledgeRow(desk, 'vic.void@example.org');
+  assert.equal(row.status, 'received');
+  assert.equal(row.gift_id, g1);
+  assert.equal((await desk.get('/api/brief')).json.pledges.n, 0);
+
+  // Void, receive it again with a new gift, then try to restore the old one:
+  // that would count the pledge twice, so it is refused until the new one goes.
+  assert.equal((await desk.action('gift.void', { id: g1 })).status, 200);
+  const again = await desk.action('pledge.receive', { id: p.id, method: 'cheque', date: today });
+  assert.equal(again.status, 200, 'a reopened pledge can be received again');
+  const g2 = again.json.gift.id;
+  const clash = await desk.action('gift.restore', { id: g1 });
+  assert.equal(clash.status, 409);
+  assert.match(clash.json.error, /another gift/);
+  const live = (await desk.get('/api/records/gift?limit=200')).json.records.filter((g) => g.person_name === 'Vic Void');
+  assert.deepEqual(live.map((g) => g.id), [g2], 'the refused restore changed nothing');
+  assert.equal((await desk.action('gift.void', { id: g2 })).status, 200);
+  assert.equal((await desk.action('gift.restore', { id: g1 })).status, 200);
+  row = await pledgeRow(desk, 'vic.void@example.org');
+  assert.equal(row.status, 'received');
+  assert.equal(row.gift_id, g1);
+
+  // A gift with no pledge leaves pledges alone.
+  const person = await desk.createPerson('Desk Giver');
+  const plain = await desk.action('gift.log', { person_id: person.id, amount_cents: 1000, date: today, method: 'cash' });
+  const pv = await desk.action('gift.void', { id: plain.json.gift.id });
+  assert.equal(pv.json.pledge, null);
+  assert.equal((await desk.get('/api/audit/verify')).json.ok, true);
+});
+
+test('voiding a monthly pledge’s gift rolls back last_received_on; the pledge stays open', async () => {
+  const { desk, slug: s2 } = await pledgeDesk('Void Monthly');
+  await pledgeVia(s2, { amount: '25', monthly: '1', name: 'Max Monthly', email: 'max.monthly@example.org', address: '14 Monthly Way' });
+  const p = await pledgeRow(desk, 'max.monthly@example.org');
+  const a = await desk.action('pledge.receive', { id: p.id, date: ym(-1) });
+  const b = await desk.action('pledge.receive', { id: p.id, date: ym(0) });
+  assert.equal(b.json.pledge.last_received_on, ym(0));
+
+  const v = await desk.action('gift.void', { id: b.json.gift.id });
+  assert.equal(v.status, 200);
+  assert.equal(v.json.pledge.last_received_on, ym(-1));
+  let row = await dbPledge(p.id);
+  assert.equal(row.status, 'pledged');
+  assert.equal(day(row.last_received_on), ym(-1));
+  assert.equal(row.gift_id, a.json.gift.id);
+
+  // This month can be received again — once.
+  const redo = await desk.action('pledge.receive', { id: p.id, date: ym(0) });
+  assert.equal(redo.status, 200, 'the voided month is open again');
+  const clash = await desk.action('gift.restore', { id: b.json.gift.id });
+  assert.equal(clash.status, 409, 'restoring would make two gifts for one month');
+  assert.match(clash.json.error, /already has a gift/);
+
+  assert.equal((await desk.action('gift.void', { id: redo.json.gift.id })).status, 200);
+  assert.equal((await desk.action('gift.void', { id: a.json.gift.id })).status, 200);
+  row = await dbPledge(p.id);
+  assert.equal(row.status, 'pledged');
+  assert.equal(row.last_received_on, null, 'nothing received any more');
+  assert.equal(row.gift_id, null);
+  const back = await desk.action('gift.restore', { id: b.json.gift.id });
+  assert.equal(back.status, 200);
+  assert.equal(back.json.pledge.last_received_on, ym(0));
+  assert.equal(day((await dbPledge(p.id)).last_received_on), ym(0));
+  assert.equal((await desk.get('/api/audit/verify')).json.ok, true);
+});

@@ -76,10 +76,11 @@ function useToast() {
   const [msg, setMsg] = useState(null);
   const timer = useRef(null);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // Long enough to read: a long message (the sample clear's) stays longer.
   const show = (text) => {
     clearTimeout(timer.current);
     setMsg(text);
-    timer.current = setTimeout(() => setMsg(null), 6000);
+    timer.current = setTimeout(() => setMsg(null), Math.min(20000, 6000 + 50 * String(text || '').length));
   };
   const clear = () => { clearTimeout(timer.current); setMsg(null); };
   return { msg, show, clear };
@@ -167,7 +168,9 @@ function SampleClear({ onToast, onCleared }) {
       await queryClient.invalidateQueries();
       setConfirming(false);
       onCleared?.();
-      onToast(`Sample data cleared${r.cleared ? ` — ${r.cleared} people removed` : ''}`);
+      // The server says exactly what went and what stayed (and why): verbatim.
+      const said = typeof r?.message === 'string' && r.message.trim() ? r.message.trim() : null;
+      onToast(said || `Sample data cleared${r.cleared ? ` — ${r.cleared} people removed` : ''}`);
     } catch (e) {
       setError(`Couldn’t clear sample data — ${e.message}`);
     } finally {
@@ -440,26 +443,41 @@ function EventRow({ event }) {
 }
 
 // ── Volunteer: which shifts am I on? ──
-// Same lookup (and query keys) as the Shifts screen: a volunteer's login and
-// their supporter record share an email, and that record lists their shifts.
+// GET /api/shifts marks each shift the caller is on (s.mine: their own
+// supporter record, matched by login email, holds an active spot) — the same
+// query (and key) as the Shifts screen. Only an older server leaves it out;
+// then this falls back to finding their own record by email and reading its
+// shifts.
+const byStart = (a, b) => new Date(a.starts_at) - new Date(b.starts_at);
 function useMyNextShift(me) {
+  const shiftsQ = useQuery({ queryKey: ['shifts'], queryFn: () => apiGet('/shifts') });
+  const rows = shiftsQ.data?.shifts;
+  const marked = Array.isArray(rows) && rows.every((s) => typeof s.mine === 'boolean');
+  const legacy = shiftsQ.isError || (shiftsQ.isSuccess && !marked);
+
   const email = String(me?.user?.email || '').trim().toLowerCase();
   const search = useQuery({
     queryKey: ['persons', 'search', email],
     queryFn: () => apiGet(`/persons?q=${encodeURIComponent(email)}&limit=8`),
-    enabled: !!email,
+    enabled: legacy && !!email,
   });
   const self = (search.data?.persons ?? []).find((p) => String(p.email || '').toLowerCase() === email);
   const person = useQuery({
     queryKey: ['person', self?.id],
     queryFn: () => apiGet(`/persons/${self.id}`),
-    enabled: !!self,
+    enabled: legacy && !!self,
   });
-  const ready = !email || search.isError || (search.isSuccess && (!self || !person.isPending));
+
   const now = Date.now();
+  const upcoming = (s) => new Date(s.starts_at).getTime() >= now;
+  if (!legacy) {
+    const next = shiftsQ.isSuccess ? (rows.filter((s) => s.mine && upcoming(s)).sort(byStart)[0] ?? null) : null;
+    return { ready: shiftsQ.isSuccess, next };
+  }
+  const ready = !email || search.isError || (search.isSuccess && (!self || !person.isPending));
   const next = (person.data?.shifts ?? [])
-    .filter((a) => a.status !== 'declined' && new Date(a.starts_at).getTime() >= now)
-    .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0] ?? null;
+    .filter((a) => a.status !== 'declined' && upcoming(a))
+    .sort(byStart)[0] ?? null;
   return { ready, next };
 }
 
@@ -678,7 +696,7 @@ function VolunteerToday({ b, me }) {
               {d && d.doors > 0 && <span className="today-progress" aria-hidden="true"><span style={{ width: `${d.pct}%` }} /></span>}
             </div>
           ) : (
-            <p className="today-go__meta muted">No walk list yet — doors near you on the map.</p>
+            <p className="today-go__meta muted">No walk list yet — pick a door on the map.</p>
           )}
         </section>
       )}

@@ -18,7 +18,12 @@
 //                  (else "Ask your organizer to add you"); the roster is a
 //                  plain list of names — no contact details, nothing to tap.
 //                  While "Notify everyone" asks "Email + text N people?", its
-//                  Send is the one yellow button.
+//                  Send is the one yellow button — "Save — nothing sends"
+//                  when neither email nor text is connected. The result
+//                  counts people, not messages: reached (any message went
+//                  out), not reached (it failed), not sent (not connected),
+//                  no email or phone on file. "Notify again" only once
+//                  someone was actually reached.
 //
 // Also exports two small building blocks:
 //   <PersonPicker onPick={(person) => …} />   type-ahead over /api/persons?q= (Signs uses it)
@@ -141,6 +146,51 @@ const NOTIFY_TITLE = {
   text: { queued: 'Not sent — texting isn’t connected', failed: 'Try again, or reach them another way' },
 };
 
+// One person's outcome across both channels:
+//   reached — at least one message went out
+//   failed  — nothing went out, and a provider turned one down
+//   offline — nothing went out: that channel isn't connected
+//   skipped — no email or phone on file
+const outcomeOf = (email, text) => {
+  if (email === 'sent' || text === 'sent') return 'reached';
+  if (email === 'failed' || text === 'failed') return 'failed';
+  if (email === 'queued' || text === 'queued') return 'offline';
+  return 'skipped';
+};
+const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
+
+// The result of one Notify, counted per person, in one line:
+//   "✓ Sent to 2 people"
+//   "✓ Sent to 1 of 2 · 1 not reached — see Details"
+//   "Not sent · 2 people — connect email and text, then Notify again"
+// Green only when everyone was reached.
+function notifySummary(results) {
+  const total = results.length;
+  const n = { reached: 0, failed: 0, offline: 0, skipped: 0 };
+  let offEmail = false;
+  let offText = false;
+  for (const r of results) {
+    const o = outcomeOf(r.email, r.text);
+    n[o] += 1;
+    if (o === 'offline') {
+      if (r.email === 'queued') offEmail = true;
+      if (r.text === 'queued') offText = true;
+    }
+  }
+  const connect = offEmail && offText ? 'email and text' : offEmail ? 'email' : 'text';
+  const parts = [];
+  if (n.reached) parts.push(n.reached === total ? `✓ Sent to ${people(total)}` : `✓ Sent to ${n.reached} of ${total}`);
+  // The first part leads ("Not sent · 2 people …"); later ones are counts.
+  const say = (lead, count) => parts.push(parts.length === 0 ? lead : count);
+  if (n.failed) say(`Not reached · ${people(n.failed)} — see Details`, `${n.failed} not reached — see Details`);
+  if (n.offline) {
+    const next = `connect ${connect}, then Notify again`;
+    say(`Not sent · ${people(n.offline)} — ${next}`, `${n.offline} not sent — ${next}`);
+  }
+  if (n.skipped) say(`No email or phone on file · ${people(n.skipped)}`, `${n.skipped} with no email or phone`);
+  return { text: parts.join(' · '), ok: total > 0 && n.reached === total };
+}
+
 function NotifyChip({ channel, status }) {
   if (!status) return null;
   return (
@@ -149,6 +199,8 @@ function NotifyChip({ channel, status }) {
     </span>
   );
 }
+
+const NOTIFIED_WORD = { reached: 'Notified', failed: 'Tried', offline: 'Saved', skipped: 'Saved' };
 
 // ── Fill bar: filled / capacity ──
 export function FillBar({ filled = 0, capacity }) {
@@ -437,9 +489,11 @@ function ShiftForm({ onClose }) {
 }
 
 // ── Which shifts am I on? (volunteers) ──
-// A volunteer's login and their supporter record share an email; their
-// person record lists the shifts they're assigned to.
-function useMyShifts(me, enabled) {
+// The server marks each shift the caller is on (s.mine: their own supporter
+// record, matched by login email, holds an active spot). Only an older
+// server leaves it out; then — and only then — this falls back to finding
+// the caller's own record by email and reading its shifts.
+function useLegacyMyShifts(me, enabled) {
   const email = String(me?.user?.email || '').trim().toLowerCase();
   const search = useQuery({
     queryKey: ['persons', 'search', email],
@@ -485,15 +539,16 @@ function ShiftList({ canDesk, me }) {
   const showNew = canDesk && params.get('new') === '1';
   const [showPast, setShowPast] = useState(false);
   const shifts = useQuery({ queryKey: ['shifts'], queryFn: () => apiGet('/shifts') });
-  const mine = useMyShifts(me, !canDesk);
+  const all = shifts.data?.shifts ?? [];
+  // s.mine is the answer; the email lookup runs only for a server without it.
+  const legacy = !canDesk && shifts.isSuccess && all.some((s) => typeof s.mine !== 'boolean');
+  const legacyMine = useLegacyMyShifts(me, legacy);
 
   const now = new Date();
-  const all = shifts.data?.shifts ?? [];
   const isPast = (s) => new Date(s.ends_at || s.starts_at) < now;
   const upcoming = all.filter((s) => !isPast(s));
   const past = all.filter(isPast).reverse(); // most recent first
-  // Newer servers mark the viewer's shifts (s.mine); else look them up.
-  const isMineShift = (s) => s.mine === true || mine.has(s.id);
+  const isMineShift = (s) => (typeof s.mine === 'boolean' ? s.mine : legacyMine.has(s.id));
   const yours = upcoming.filter(isMineShift);
   const others = upcoming.filter((s) => !isMineShift(s));
 
@@ -575,9 +630,11 @@ function AssigneeRow({ a, open, onToggle, canDesk, busy, onStatus, onRemove }) {
           )}
           {a.notified_at && (
             <div className="ops-chips">
-              {/* "Notified" only when a message actually went out. */}
+              {/* "Notified" only when a message actually went out; "Tried"
+                  when a provider turned it down; "Saved" when nothing was
+                  even tried (not connected, or nothing on file). */}
               <span className="ops-meta mono">
-                {a.notify_email === 'sent' || a.notify_text === 'sent' ? 'Notified' : 'Tried'} {fmtStamp(a.notified_at)}
+                {NOTIFIED_WORD[outcomeOf(a.notify_email, a.notify_text)]} {fmtStamp(a.notified_at)}
               </span>
               <NotifyChip channel="email" status={a.notify_email} />
               <NotifyChip channel="text" status={a.notify_text} />
@@ -658,8 +715,8 @@ function ShiftDetail({ id, canDesk, me }) {
     setJoining(true);
     try {
       await action(name, { shift_id: id });
-      // Joining may create the volunteer's supporter record; the "Your
-      // shifts" lookup searches persons by email, so refresh that too.
+      // Joining may create the volunteer's supporter record; an older
+      // server's "Your shifts" lookup searches persons, so refresh that too.
       queryClient.invalidateQueries({ queryKey: ['persons'] });
       setLeaving(false);
       refresh();
@@ -702,10 +759,13 @@ function ShiftDetail({ id, canDesk, me }) {
   const providers = brief.data?.providers;
   const missingEmail = providers && !providers.email;
   const missingText = providers && !providers.text;
+  // Neither connected: pressing it sends nothing, now or later — so its
+  // button says "Save — nothing sends", never "Send".
+  const nothingSends = !!(missingEmail && missingText);
   // Said before Send, and literally true: a channel that isn't connected
   // sends nothing, now or later.
   let providerNote = null;
-  if (missingEmail && missingText) providerNote = 'Not connected — nothing will be sent. Connect email and text, then Notify again.';
+  if (nothingSends) providerNote = 'Email and text aren’t connected.';
   else if (missingEmail) providerNote = 'Email isn’t connected — no emails will be sent.';
   else if (missingText) providerNote = 'Texting isn’t connected — no texts will be sent.';
   // Desk: the yellow button is the job at hand. Open spots → fill them
@@ -772,8 +832,6 @@ function ShiftDetail({ id, canDesk, me }) {
     }
   };
 
-  const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
-
   // ── Desk blocks: whichever is `primary` sits under the spots number in
   // yellow; the other waits, quiet, under the roster. ──
   // While "Email + text N people?" is open, its Send is the job at hand, so
@@ -810,9 +868,13 @@ function ShiftDetail({ id, canDesk, me }) {
 
   // Nobody on it yet → nothing to send, so the quiet Notify stays out of the way.
   const showNotify = active.length > 0 || !!results || !!notifyError;
-  // Once tried, the button says what pressing it again does: it messages
-  // everyone on the shift again (the only way a not-sent message goes out).
-  const notifiedBefore = !!results || active.some((a) => a.notified_at);
+  // "Notify again" only once someone was actually reached; a run that sent
+  // nothing leaves it "Notify everyone" (pressing it is still the only way
+  // a not-sent message goes out).
+  const reachedNow = (results ?? []).some((r) => outcomeOf(r.email, r.text) === 'reached');
+  const notifiedBefore = reachedNow
+    || assignees.some((a) => outcomeOf(a.notify_email, a.notify_text) === 'reached' && !!a.notified_at);
+  const summary = results?.length ? notifySummary(results) : null;
   const notifyBlock = (isPrimary) => showNotify && (
     <section className="ops-notify" aria-label="Notify volunteers">
       {!confirming ? (
@@ -826,7 +888,7 @@ function ShiftDetail({ id, canDesk, me }) {
           <span>Email + text {people(active.length)}?</span>
           <button type="button" className="btn btn-primary ops-tap"
             onClick={notify} disabled={sending}>
-            {sending ? 'Sending…' : 'Send'}
+            {sending ? (nothingSends ? 'Saving…' : 'Sending…') : (nothingSends ? 'Save — nothing sends' : 'Send')}
           </button>
           <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirming(false)} disabled={sending}>
             Cancel
@@ -841,26 +903,10 @@ function ShiftDetail({ id, canDesk, me }) {
         <span className="ops-meta" role="status">Nobody to notify.</span>
       ) : (
         <>
-          {/* Say "Sent" only when something actually went out. Without a
+          {/* Say "Sent" only for people a message actually reached. Without a
               provider nothing is sent and nothing sends later: say which
               channel to connect, then Notify again. */}
-          {(() => {
-            const reached = results.filter((r) => r.email === 'sent' || r.text === 'sent').length;
-            const notSent = results.filter((r) => r.email !== 'sent' && r.text !== 'sent'
-              && (r.email === 'queued' || r.text === 'queued'));
-            const offEmail = notSent.some((r) => r.email === 'queued');
-            const offText = notSent.some((r) => r.text === 'queued');
-            const connect = offEmail && offText ? 'email and text' : offEmail ? 'email' : 'text';
-            // Green only when something actually went out.
-            return (
-              <p className={reached > 0 ? 'ops-done' : 'ops-done ops-done--wait'} role="status">
-                {reached > 0 && <>✓ Sent to {people(reached)}</>}
-                {reached > 0 && notSent.length > 0 && ' · '}
-                {notSent.length > 0 && <>Not sent · {people(notSent.length)} — connect {connect}, then Notify again</>}
-                {reached === 0 && notSent.length === 0 && <>Couldn&apos;t reach anyone — see Details</>}
-              </p>
-            );
-          })()}
+          <p className={summary.ok ? 'ops-done' : 'ops-done ops-done--wait'} role="status">{summary.text}</p>
           <button type="button" className="ops-more disclose" aria-expanded={showResults} aria-controls="notify-results"
             onClick={() => setShowResults((v) => !v)}>
             Details

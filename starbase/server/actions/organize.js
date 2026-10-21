@@ -4,7 +4,9 @@
 import { z } from 'zod';
 import { newId } from '../lib/events.js';
 import { httpError } from './util.js';
-import { logGift } from '../lib/gifts.js';
+import { logGift, monthName } from '../lib/gifts.js';
+
+const isoDay = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
 
 const DESK_ROLES = ['manager', 'treasurer', 'staff'];
 const MONEY_ROLES = ['manager', 'treasurer', 'staff'];
@@ -210,6 +212,10 @@ export const ORGANIZE_ACTIONS = {
   },
 
   // ── Pledges: the treasurer confirms offline donations ──
+  // A one-time pledge closes ('received') with its gift. A monthly pledge
+  // logs that month's gift and stays open ('pledged') for next month, with
+  // last_received_on the latest month in; a second gift for the same month
+  // is refused. Voiding the gift reopens / rolls it back (lib/gifts.js).
   'pledge.receive': {
     roles: MONEY_ROLES,
     input: z.object({
@@ -223,16 +229,41 @@ export const ORGANIZE_ACTIONS = {
         [input.id, ctx.workspaceId],
       )).rows[0];
       if (!p) throw httpError(404, 'open pledge not found');
+      const monthly = p.cadence === 'monthly';
+      if (monthly) {
+        const month = input.date.slice(0, 7);
+        const twin = (await tx.query(
+          `select 1 from gifts where workspace_id = $1 and pledge_id = $2 and deleted_at is null
+             and to_char(date, 'YYYY-MM') = $3 limit 1`,
+          [ctx.workspaceId, p.id, month],
+        )).rows[0];
+        if (twin) throw httpError(409, `${monthName(month)}’s gift for this monthly pledge is already received`);
+      }
       const { gift, compliance } = await logGift(tx, ctx.workspace, {
         person_id: p.person_id, amount_cents: p.amount_cents, date: input.date,
         method: input.method, cadence: p.cadence, note: `Online pledge ${p.id.slice(0, 8)}`,
+        pledge_id: p.id,
       }, emit);
+      if (monthly) {
+        const row = (await tx.query(
+          // gift_id stays the latest month's gift (a late gift for an earlier
+          // month doesn't replace it); both read the row as it was.
+          `update pledges set status = 'pledged',
+             gift_id = case when last_received_on is null or $4::date >= last_received_on then $3 else gift_id end,
+             last_received_on = greatest(coalesce(last_received_on, $4::date), $4::date), updated_at = now()
+           where id = $1 and workspace_id = $2 returning last_received_on`,
+          [p.id, ctx.workspaceId, gift.id, input.date],
+        )).rows[0];
+        const lastOn = isoDay(row.last_received_on);
+        emit('pledge', p.id, 'update', { status: 'pledged', gift_id: gift.id, last_received_on: lastOn, month: input.date.slice(0, 7) });
+        return { pledge: { id: p.id, status: 'pledged', cadence: 'monthly', last_received_on: lastOn }, gift, compliance };
+      }
       await tx.query(
         `update pledges set status = 'received', gift_id = $3, updated_at = now() where id = $1 and workspace_id = $2`,
         [p.id, ctx.workspaceId, gift.id],
       );
       emit('pledge', p.id, 'update', { status: 'received', gift_id: gift.id });
-      return { pledge: { id: p.id, status: 'received' }, gift, compliance };
+      return { pledge: { id: p.id, status: 'received', cadence: p.cadence }, gift, compliance };
     },
   },
 

@@ -54,8 +54,24 @@ test('voiding a gift frees cap room; restoring re-counts it', async () => {
   assert.equal(g3.json.gift.flagged, false);
   const restored = await client.action('gift.restore', { id: g1.json.gift.id });
   assert.equal(restored.status, 200);
+  // 400 + 900 + 1000 = 2300 > cap: the restore is the crossing, so it is flagged.
+  assert.equal(restored.json.flagged, true, 'a restore that crosses the limit is flagged like a new gift');
+  assert.match(restored.json.flag_reason, /Elena Ruiz/);
+  const rows = (await client.get('/api/records/gift?limit=200')).json.records;
+  assert.equal(rows.find((g) => g.id === g1.json.gift.id).flagged, true);
   const g4 = await gift(donor.id, 100); // 1000 + 400 + 900 + 100 = 2400 > cap
   assert.equal(g4.json.gift.flagged, true);
+});
+
+test('restoring a gift that keeps the donor under the limit is not flagged', async () => {
+  const donor = await client.createPerson('Omar Under');
+  const g = await gift(donor.id, 300);
+  assert.equal((await client.action('gift.void', { id: g.json.gift.id })).status, 200);
+  const r = await client.action('gift.restore', { id: g.json.gift.id });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.flagged, false);
+  assert.equal((await client.action('gift.restore', { id: g.json.gift.id })).status, 404, 'only a voided gift can be restored');
+  assert.equal((await client.get('/api/audit/verify')).json.ok, true);
 });
 
 test('workspace settings.capCents overrides the rule table', async () => {

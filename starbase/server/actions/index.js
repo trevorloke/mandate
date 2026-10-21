@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { zodFor } from '@starbase/shared/registry';
 import { newId } from '../lib/events.js';
-import { logGift } from '../lib/gifts.js';
+import { logGift, voidGift, restoreGift } from '../lib/gifts.js';
 import { FIELD_ACTIONS, personFieldExtensions } from './field.js';
 import { ORGANIZE_ACTIONS } from './organize.js';
 import { httpError } from './util.js';
@@ -90,32 +90,21 @@ export const ACTIONS = {
     handler: (tx, ctx, input, emit) => logGift(tx, ctx.workspace, input, emit),
   },
 
+  // A void is an event, never a delete: the gift leaves every total but stays
+  // in the books, and restore brings it back. Both keep the gift's pledge in
+  // step in the same transaction (a voided gift reopens a one-time pledge; a
+  // restored one closes it again) — see lib/gifts.js. Answers { id, pledge }
+  // (pledge: the pledge it changed, or null); restore adds flagged/flag_reason.
   'gift.void': {
     roles: MONEY_ROLES,
     input: z.object({ id: z.uuid() }),
-    handler: async (tx, ctx, input, emit) => {
-      const n = await tx.query(
-        'update gifts set deleted_at = now() where id = $1 and workspace_id = $2 and deleted_at is null',
-        [input.id, ctx.workspaceId],
-      );
-      if (n.affectedRows === 0) throw httpError(404, 'gift not found');
-      emit('gift', input.id, 'void', {});
-      return { id: input.id };
-    },
+    handler: (tx, ctx, input, emit) => voidGift(tx, ctx.workspaceId, input.id, emit),
   },
 
   'gift.restore': {
     roles: MONEY_ROLES,
     input: z.object({ id: z.uuid() }),
-    handler: async (tx, ctx, input, emit) => {
-      const n = await tx.query(
-        'update gifts set deleted_at = null where id = $1 and workspace_id = $2 and deleted_at is not null',
-        [input.id, ctx.workspaceId],
-      );
-      if (n.affectedRows === 0) throw httpError(404, 'gift not found in trash');
-      emit('gift', input.id, 'restore', {});
-      return { id: input.id };
-    },
+    handler: (tx, ctx, input, emit) => restoreGift(tx, ctx.workspace, input.id, emit),
   },
 
   'filing.create': {

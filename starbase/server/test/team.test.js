@@ -168,3 +168,20 @@ test('only managers cancel invites, and only their own campaign\'s', async () =>
   assert.equal((await otherMgr.action('member.cancelInvite', { id: target.json.invite.id })).status, 404, 'another campaign cannot touch it');
   assert.equal((await new Client().get(`/api/auth/invite/${t}`)).status, 200, 'still works');
 });
+
+test('joining and creating a campaign are on the hash chain', async () => {
+  const boss = new Client();
+  const s = await boss.signup({ workspaceName: 'Chain WS', jurisdiction: 'bc-municipal' });
+  assert.equal(s.status, 201);
+  let ev = (await boss.get('/api/events?limit=50')).json.events || [];
+  assert.ok(ev.some((e) => e.action === 'workspace.create' && e.entity_type === 'membership'), 'the founding manager is on the log');
+  const inv = await boss.action('member.invite', { email: 'chain.joiner@example.org', role: 'volunteer' });
+  const joiner = new Client();
+  const j = await joiner.post('/api/auth/join', { token: inv.json.joinUrl.split('/join/')[1], name: 'Chain Joiner', password: 'chain-joiner-2026' });
+  assert.equal(j.status, 200);
+  ev = (await boss.get('/api/events?limit=50')).json.events || [];
+  const join = ev.find((e) => e.action === 'member.join' && e.entity_type === 'membership');
+  assert.ok(join, 'the new member is on the log');
+  assert.equal(join.payload.role, 'volunteer');
+  assert.equal((await boss.get('/api/audit/verify')).json.ok, true);
+});

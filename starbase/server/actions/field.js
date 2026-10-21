@@ -51,9 +51,23 @@ const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
 // One rule for a send's status, shared by blast.send and blast.resend:
 // everyone sent → 'sent'; everyone failed (or no one left on it) → 'failed';
 // anything else — still saved because email wasn't connected, or a mix of
-// sent and failed — → 'queued'.
+// sent and failed — → 'queued'. The status alone can't say "partly sent", so
+// both actions also answer with the exact counts:
+//   counts: { total, sent, failed, queued }   (total = sent + failed + queued)
 const blastStatus = ({ total, sent, failed }) =>
   (total > 0 && sent === total ? 'sent' : failed === total ? 'failed' : 'queued');
+
+const blastCounts = async (tx, workspaceId, blastId) => {
+  const r = (await tx.query(
+    `select count(*)::int as total,
+            (count(*) filter (where status = 'sent'))::int as sent,
+            (count(*) filter (where status = 'failed'))::int as failed,
+            (count(*) filter (where status = 'queued'))::int as queued
+     from blast_recipients where blast_id = $1 and workspace_id = $2`,
+    [blastId, workspaceId],
+  )).rows[0];
+  return { total: r.total, sent: r.sent, failed: r.failed, queued: r.queued };
+};
 
 // Every newsletter identifies the sender and carries the recipient's own
 // one-click unsubscribe link (/u/:subscriptionId); press carries the name.
@@ -143,6 +157,10 @@ export const FIELD_ACTIONS = {
         address = address || p.address;
         if (lat == null && lng == null && p.lat != null && p.lng != null) { lat = p.lat; lng = p.lng; }
       }
+      // A crew needs somewhere to go: an address or a pin.
+      if (!String(address || '').trim() && (lat == null || lng == null)) {
+        throw httpError(400, 'add an address first — the sign crew needs to know where it goes');
+      }
       const id = newId();
       await tx.query(
         `insert into signs (id, workspace_id, person_id, address, lat, lng, kind, status, note)
@@ -175,6 +193,35 @@ export const FIELD_ACTIONS = {
       );
       emit('sign', input.id, 'update', { status: input.status, note: input.note });
       return { id: input.id };
+    },
+  },
+
+  // Take back a request that never went up (a door-card Undo, a mistaken
+  // tap). The request row goes — off every list, map and count — and the log
+  // keeps a 'void' event carrying exactly what was cancelled. A sign that has
+  // gone up is history, not a request: it is marked taken down instead.
+  'sign.cancel': {
+    roles: ALL_ROLES,
+    input: z.object({ id: uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const s = (await tx.query(
+        `select id, person_id, address, lat, lng, kind, status, note, created_at
+         from signs where id = $1 and workspace_id = $2 for update`,
+        [input.id, ctx.workspaceId],
+      )).rows[0];
+      if (!s) throw httpError(404, 'sign not found');
+      if (s.status !== 'requested') {
+        throw httpError(409, s.status === 'installed'
+          ? 'that sign is already up — mark it taken down instead'
+          : 'that sign was already put up and taken down');
+      }
+      await tx.query('delete from signs where id = $1 and workspace_id = $2', [s.id, ctx.workspaceId]);
+      emit('sign', s.id, 'void', {
+        cancelled: true, kind: s.kind, status: s.status, person_id: s.person_id || null,
+        address: s.address || null, lat: s.lat ?? null, lng: s.lng ?? null, note: s.note || null,
+        requested_at: s.created_at instanceof Date ? s.created_at.toISOString() : s.created_at,
+      });
+      return { id: s.id, cancelled: true };
     },
   },
 
@@ -551,15 +598,23 @@ export const FIELD_ACTIONS = {
         );
       }
       emit('blast', id, 'create', { kind: input.kind, subject: input.subject, audience: audience.length, status });
-      return { blast: { id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note } };
+      const counts = { total: audience.length, sent, failed, queued: audience.length - sent - failed };
+      return {
+        blast: { id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note },
+        counts,
+      };
     },
   },
 
-  // Send one saved blast's still-'queued' recipients — the ones saved while
-  // email wasn't connected — through the same path as blast.send. Sent and
-  // failed rows are never touched, so running it twice sends nothing twice.
+  // "Send now": send one saved blast to everyone on it not yet reached — the
+  // 'queued' rows (saved while email wasn't connected) and the 'failed' rows
+  // (the provider turned them down) — through the same path as blast.send.
+  // A 'sent' row is never touched, so no one gets it twice however often it
+  // runs. Refused (409) while email isn't connected: nothing pretends to send.
   // A newsletter subscriber who unsubscribed since is taken off the send
   // (never emailed); its status and sent time follow blast.send's rule.
+  // Answers { blast, counts: { total, sent, failed, queued } } for the whole
+  // send after this run, plus resent: { sent, failed, skipped } for this run.
   'blast.resend': {
     roles: DESK_ROLES,
     input: z.object({ id: uuid() }),
@@ -572,14 +627,16 @@ export const FIELD_ACTIONS = {
       if (!emailConfigured()) throw httpError(409, "email isn't connected yet — connect it, then send");
       const waiting = (await tx.query(
         `select id, email, name from blast_recipients
-         where blast_id = $1 and workspace_id = $2 and status = 'queued' order by created_at, id`,
+         where blast_id = $1 and workspace_id = $2 and status in ('queued', 'failed') order by created_at, id`,
         [blast.id, ctx.workspaceId],
       )).rows;
       const pick = (b) => ({
         id: b.id, kind: b.kind, subject: b.subject, status: b.status,
         audience_count: b.audience_count, provider_note: b.provider_note, sent_at: b.sent_at,
       });
-      if (waiting.length === 0) return { blast: pick(blast), resent: { sent: 0, failed: 0, skipped: 0 } };
+      if (waiting.length === 0) {
+        return { blast: pick(blast), counts: await blastCounts(tx, ctx.workspaceId, blast.id), resent: { sent: 0, failed: 0, skipped: 0 } };
+      }
 
       let sent = 0, failed = 0, skipped = 0, note = null;
       for (const r of waiting) {
@@ -605,13 +662,7 @@ export const FIELD_ACTIONS = {
           [r.id, ctx.workspaceId, res.status],
         );
       }
-      const counts = (await tx.query(
-        `select count(*)::int as total,
-                (count(*) filter (where status = 'sent'))::int as sent,
-                (count(*) filter (where status = 'failed'))::int as failed
-         from blast_recipients where blast_id = $1 and workspace_id = $2`,
-        [blast.id, ctx.workspaceId],
-      )).rows[0];
+      const counts = await blastCounts(tx, ctx.workspaceId, blast.id);
       const status = blastStatus(counts);
       if (counts.total === 0) note = 'everyone on this send has unsubscribed';
       const updated = (await tx.query(
@@ -622,7 +673,7 @@ export const FIELD_ACTIONS = {
         [blast.id, ctx.workspaceId, status, note, counts.total],
       )).rows[0];
       emit('blast', blast.id, 'update', { resent: waiting.length - skipped, sent, failed, unsubscribed: skipped, status });
-      return { blast: pick(updated), resent: { sent, failed, skipped } };
+      return { blast: pick(updated), counts, resent: { sent, failed, skipped } };
     },
   },
 

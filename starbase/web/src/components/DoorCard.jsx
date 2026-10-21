@@ -9,8 +9,13 @@
 //
 // Offline: every contact.log goes through the outbox (logContact), so a knock
 // tapped with no signal is saved on the phone and sent later — the card still
-// shows the rating straight away. Sign requests and new people need the
+// shows the rating straight away (queued.js has the words, shared with the
+// walk list, Calls and the profile). Sign requests and new people need the
 // server, so those say so.
+//
+// A sign request's toast offers Undo only when the server has sign.cancel
+// (GET /api/actions): it takes the request back — off every list and count —
+// so "Lawn sign cancelled" is true. Never "taken down": it never went up.
 //
 // Contacts are append-only: after a tap the toast offers "Change", which
 // puts focus back on the rating row — the next tap logs the correction.
@@ -22,8 +27,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { action, ApiError } from '../api.js';
+import { action, apiGet, ApiError } from '../api.js';
 import { logContact } from '../offline.js';
+import { isOffline, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
 import '../pages/map.css';
@@ -36,9 +42,10 @@ const SIGN_BUTTONS = [
   { code: 'billboard', label: 'Billboard' },
 ];
 export const SIGN_LABEL = Object.fromEntries(SIGN_KINDS.map((s) => [s.code, s.label]));
-// "Requested" is a neutral ochre chip (fk-wait), never the brand yellow.
+// "To put up" is a neutral ochre chip (fk-wait), never the brand yellow.
 const SIGN_CHIP = { installed: 'chip-ok', requested: 'fk-wait' };
-const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: 'Removed' };
+// The Signs screen's words, everywhere a sign shows.
+const SIGN_STATUS = { requested: 'To put up', installed: 'Up', removed: 'Taken down' };
 // Channel for the rating + outcome taps. Door by default on the map; tapping
 // Call / Text switches it so the rating that follows is logged as that call.
 // "How you reached them: At the door · Phone call · Text" at the bottom of
@@ -50,14 +57,8 @@ const CHANNEL_BUTTONS = [
 ];
 const CHANNEL_CHIP = { phone: 'By phone', text: 'By text' };
 
-export const QUEUED_MSG = 'Saved offline';
-// Queued with signal showing: the server didn't answer (dead zone, outage).
-const QUEUED_NO_SERVER_MSG = 'Saved on this phone — sends soon';
-// Queued because the sign-in lapsed: the outbox holds it until they sign in.
-const QUEUED_SIGNED_OUT_MSG = 'Saved on this phone — sign in to send';
 export const OFFLINE_MSG = 'Needs signal — try again';
 const SIGNED_OUT_MSG = 'Signed out — sign in, then try again';
-const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 // fetch() rejects with a TypeError (not an ApiError) when there's no network.
 const offlineError = (err) => isOffline() || !(err instanceof ApiError);
 // What to tell the canvasser when the server says no.
@@ -68,6 +69,9 @@ const refusalMsg = (err, fallback) => {
 };
 
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
+// GET /api/actions lists what this sign-in may do (same key as Shifts/Team).
+const ACTIONS_QUERY = { queryKey: ['actions'], queryFn: () => apiGet('/actions'), staleTime: 5 * 60_000 };
+const hasAction = (data, name) => Array.isArray(data?.actions) && data.actions.includes(name);
 // Drop any extension ("604-555-0101 ext 2", "x2", "#2") before stripping to
 // digits, or it gets glued onto the number and dials the wrong line.
 const dialable = (phone) => String(phone || '').replace(/\s*(?:ext\.?|x|#).*$/i, '').replace(/[^\d+]/g, '');
@@ -286,6 +290,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [more, setMore] = useState(false);
+  // Whether Undo on a sign request can really cancel it (sign.cancel).
+  useEffect(() => { queryClient.prefetchQuery(ACTIONS_QUERY); }, [queryClient]);
 
   const persons = door.persons;
   const sel = persons.find((p) => p.id === selectedId) || persons[0];
@@ -303,9 +309,9 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const sendNote = async (person, via, text, { toast: say, refresh: reload, multi: many }) => {
     const who = many ? `${firstName(person.name)} · ` : '';
     try {
-      const { queued } = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text });
-      say(queued ? `${who}Note saved offline` : `${who}Note saved`);
-      if (!queued) reload();
+      const r = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text });
+      say(r.queued ? `${who}${queuedText(r, 'Note')}` : `${who}Note saved`);
+      if (!r.queued) reload();
     } catch (err) {
       say(refusalMsg(err, 'Note not saved — try again'));
     }
@@ -356,7 +362,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     try {
       // The outbox: sends now when there's signal, saves on the phone when
       // there isn't (and replays exactly once — the server dedupes on its id).
-      const { queued, signedOut } = await logContact({
+      const r = await logContact({
         person_id: person.id,
         channel: via,
         outcome,
@@ -366,10 +372,10 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       if (pending) backToDoor(); // the call/text is logged — the next tap is back at the door
       // Append-only: "Change" brings the rating row back; the next tap logs the fix.
       const change = { label: 'Change', onClick: () => focusRating(rateRef.current) };
-      if (queued) {
+      if (r.queued) {
         // Keep the optimistic rating; Shell refreshes everything once the
         // outbox sends. Refetching now would only pause (offline) or fail.
-        toast(isOffline() ? QUEUED_MSG : signedOut ? QUEUED_SIGNED_OUT_MSG : QUEUED_NO_SERVER_MSG, change);
+        toast(queuedText(r), change);
         return;
       }
       const who = multi ? `${firstName(person.name)} · ` : '';
@@ -404,7 +410,10 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         address: door.address || undefined,
       });
       const sign = res?.sign;
-      toast(`${SIGN_LABEL[kind]} requested`, sign?.id ? { label: 'Undo', onClick: () => undoSign(sign) } : null);
+      // Undo only where the server can truly take it back; never by filing
+      // the request as "taken down".
+      const canCancel = hasAction(await queryClient.fetchQuery(ACTIONS_QUERY).catch(() => null), 'sign.cancel');
+      toast(`${SIGN_LABEL[kind]} requested`, sign?.id && canCancel ? { label: 'Undo', onClick: () => undoSign(sign) } : null);
       if (sign?.id) {
         patchDoors(queryClient, (d) => ({
           ...d,
@@ -419,16 +428,26 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     }
   };
 
-  // The toast's Undo: take the request back (status "removed", which drops
-  // it from the map and the sign crew's list). Runs after the card closed too.
+  // The toast's Undo: sign.cancel takes the request back — gone from the map,
+  // the sign crew's list, Today and every count. A sign already put up is
+  // refused (409) and the toast says so. Runs after the card closed too.
   const undoSign = async (sign) => {
     if (isOffline()) { toast(OFFLINE_MSG); return; }
+    const label = SIGN_LABEL[sign.kind] || 'Sign';
+    const drop = () => patchDoors(queryClient, (d) => ({ ...d, signs: (d.signs || []).filter((s) => s.id !== sign.id) }));
     try {
-      await action('sign.update', { id: sign.id, status: 'removed' });
-      patchDoors(queryClient, (d) => ({ ...d, signs: (d.signs || []).filter((s) => s.id !== sign.id) }));
-      toast(`${SIGN_LABEL[sign.kind] || 'Sign'} cancelled`);
+      await action('sign.cancel', { id: sign.id });
+      drop();
+      toast(`${label} cancelled`);
       refresh();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        // Already gone (a second Undo, or cancelled elsewhere).
+        drop();
+        toast(`${label} already cancelled`);
+        refresh();
+        return;
+      }
       toast(refusalMsg(err, 'Not undone — try again'));
     }
   };

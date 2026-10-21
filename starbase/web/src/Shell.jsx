@@ -238,7 +238,12 @@ function SignedInShell({ me }) {
   const cancelSignOut = useCallback(() => setConfirmLeft(0), []);
   const onFlushed = useCallback(() => {
     for (const queryKey of FLUSHED_KEYS) queryClient.invalidateQueries({ queryKey });
+    // Knocks just went out, so the signal is back: an old "needs signal" note is stale.
+    setNotice(null);
   }, [queryClient]);
+  // "Sign out needs signal" / "Couldn't sign out — check your signal" are
+  // about the signal: they go by themselves once the phone is back online.
+  useEffect(() => { if (online) setNotice(null); }, [online]);
   useOutboxAutoFlush(onFlushed);
   const sendNow = async () => {
     const r = await outbox.flush();

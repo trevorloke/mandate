@@ -2,8 +2,10 @@
 // match its columns to Starbase fields and check it (a dry run: nothing is
 // saved), then import it in chunks of 1,000 and place everyone on the map.
 // The CSV is parsed here in the browser; the server validates, dedupes against
-// people already on file (email → name+phone → name+address) and merges by
-// filling blanks only. Desk roles only — volunteers are sent back to People.
+// people already on file (email → name+phone → name+address; a row with none
+// of those matches a person of the same name who has none either) and merges
+// by filling blanks only — so importing the same file again adds no one twice.
+// Desk roles only — volunteers are sent back to People.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -929,7 +931,9 @@ function ImportFlow() {
                   <>
                     <p className="error" role="alert">
                       Stopped at row {fmtN(source.records[imp.resumeAt]?.row ?? imp.resumeAt + 1)}. {imp.error}
-                      {imp.sent > 0 ? ' Rows before it are saved.' : ''}
+                      {imp.sent > 0 ? (imp.invalid.length
+                        ? ` Rows before it are saved, except ${plural(imp.invalid.length, 'bad row', 'bad rows')}.`
+                        : ' Rows before it are saved.') : ''}
                     </p>
                     <div className="imp-actions">
                       <button type="button" className="btn btn-primary imp-tap" onClick={() => runImport(imp.resumeAt)}>
@@ -949,7 +953,7 @@ function ImportFlow() {
                     />
                     <InvalidList
                       invalid={imp.invalid}
-                      intro={`${plural(imp.invalid.length, 'row', 'rows')} skipped. Fix and import the file again — no one is doubled.`}
+                      intro={`${plural(imp.invalid.length, 'row', 'rows')} skipped. Fix ${imp.invalid.length === 1 ? 'it' : 'them'} and import the file again — no one is added twice.`}
                     />
                   </>
                 )}

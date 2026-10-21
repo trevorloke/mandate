@@ -1,7 +1,9 @@
 // Money — what came in, and what needs the desk.
 //   Top: one big "Raised this year" number, then "Needs you": pledges from the
 //   donate page ("Pledge" chip) to "Mark paid" (→ a gift, cap-checked) or
-//   "Cancel pledge", and gifts over the contribution limit ("Over limit":
+//   "Cancel pledge" — a monthly one says "Mark this month paid" (it logs that
+//   month's gift and stays open; once in for the month it waits under More
+//   until next month) — and gifts over the contribution limit ("Over limit":
 //   "$150 over the $1,250 limit", the legal wording under "Why?", Donor ·
 //   Void right there).
 //   One yellow "Log a gift" (?new=1; ?person=<id> preselects the donor):
@@ -11,7 +13,10 @@
 //   The ledger: rows of donor, amount, date (+ monthly / over limit chips). Tap
 //   a row for how it was paid, note, the donor's profile and Void ("Void this
 //   gift? Yes · No", then a 7s Undo).
-//   Under "More": the donate page (Copy link · Open · Set up) and paid & closed pledges.
+//   Under "More": the donate page (Copy link · Open · Set up), monthly pledges
+//   already in this month, and paid & closed pledges. Voiding the gift a
+//   pledge was paid with opens that pledge again (the server does it, in the
+//   same step); Undo closes it again.
 //   Dollars on screen, integer cents on the wire; cursor-paginated load more.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
@@ -307,6 +312,17 @@ const PledgeStatus = ({ status }) => {
 };
 // A plain fact, so a quiet outline chip — yellow is kept for problems.
 const MonthlyChip = () => <span className="chip">monthly</span>;
+// Monthly pledges stay open; last_received_on (YYYY-MM-DD) is the latest
+// month a gift came in for. Months are this device's calendar.
+const ym = (d) => String(d || '').slice(0, 7);
+const monthWord = (month) => {
+  const [y, m] = String(month).split('-').map(Number);
+  if (!y || !m) return String(month);
+  const name = new Date(y, m - 1, 1).toLocaleDateString('en-CA', { month: 'long' });
+  return y === new Date().getFullYear() ? name : `${name} ${y}`;
+};
+const isMonthly = (p) => p.cadence === 'monthly';
+const paidThisMonth = (p) => isMonthly(p) && OPEN_PLEDGE.has(p.status) && ym(p.last_received_on) === ym(todayISO());
 // The sample dataset tags every gift note "sample"; Today already says so.
 const shownNote = (n) => (n && n.trim().toLowerCase() !== 'sample' ? n : null);
 
@@ -317,6 +333,11 @@ function PledgeRow({ p, onReceived, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const open = OPEN_PLEDGE.has(p.status);
+  const monthly = isMonthly(p);
+  const inThisMonth = paidThisMonth(p);
+  const last = monthly && p.last_received_on ? ym(p.last_received_on) : null;
+  // What "Mark paid" records, for the month of the date chosen.
+  const forMonth = !date || ym(date) === ym(todayISO()) ? 'this month' : monthWord(ym(date));
 
   const receive = async (e) => {
     e.preventDefault();
@@ -352,8 +373,13 @@ function PledgeRow({ p, onReceived, onChanged }) {
           <span className="ops-row__name">{p.person_id ? <Link to={`/people/${p.person_id}`}>{p.name}</Link> : p.name}</span>
           <span className="ops-row__sub">
             {localDay(p.created_at)}
-            {open && <span className="chip ops-chip-amber" title="Promised on the donate page — not paid yet">Pledge</span>}
-            {p.cadence === 'monthly' && <MonthlyChip />}
+            {open && !inThisMonth && <span className="chip ops-chip-amber" title="Promised on the donate page — not paid yet">Pledge</span>}
+            {monthly && <MonthlyChip />}
+            {last && (
+              <span className={`chip${inThisMonth ? ' chip-ok' : ''}`} title="The latest month marked paid">
+                {monthWord(last)} paid
+              </span>
+            )}
             {p.status !== 'pledged' && <PledgeStatus status={p.status} />}
           </span>
         </span>
@@ -362,7 +388,12 @@ function PledgeRow({ p, onReceived, onChanged }) {
 
       {open && mode === null && (
         <div className="ops-pledge-acts">
-          <button type="button" className="btn ops-tap" onClick={() => setMode('receive')}>Mark paid</button>
+          {/* A monthly pledge already in for this month waits for next month. */}
+          {!inThisMonth && (
+            <button type="button" className="btn ops-tap" onClick={() => setMode('receive')}>
+              {monthly ? 'Mark this month paid' : 'Mark paid'}
+            </button>
+          )}
           <button type="button" className="btn btn-quiet ops-tap" onClick={() => setMode('cancel')}>Cancel pledge</button>
         </div>
       )}
@@ -370,7 +401,7 @@ function PledgeRow({ p, onReceived, onChanged }) {
       {open && mode === 'receive' && (
         <form className="ops-body" onSubmit={receive} aria-label={`Mark ${p.name}’s pledge paid`}>
           {p.status === 'pending' && <p className="ops-meta">Card checkout started — only if paid another way.</p>}
-          {p.cadence === 'monthly' && <p className="ops-meta">Records this month’s gift only.</p>}
+          {monthly && <p className="ops-meta">Records {forMonth} · stays open</p>}
           <div className="form-row">
             <div className="field">
               <label htmlFor={`${idp}-method`}>Paid by</label>
@@ -563,7 +594,10 @@ export default function Money() {
   const rows = (gifts.data?.pages ?? []).flatMap((p) => p?.records ?? []).filter((g) => !voided.has(g.id))
     .sort((a, b) => fmtDate(b.date).localeCompare(fmtDate(a.date)));
   const allPledges = pledges.data?.pledges ?? [];
-  const openPledges = allPledges.filter((p) => OPEN_PLEDGE.has(p.status));
+  // Needs you: open pledges, except a monthly one already in for this month
+  // (the same rule as Today's count).
+  const openPledges = allPledges.filter((p) => OPEN_PLEDGE.has(p.status) && !paidThisMonth(p));
+  const monthlyIn = allPledges.filter(paidThisMonth);
   const closedPledges = allPledges.filter((p) => !OPEN_PLEDGE.has(p.status));
   const flagged = (brief.data?.flagged ?? []).filter((f) => !voided.has(f.id));
   // The latest few skip gifts already listed under "Needs you"; "All gifts" shows every one.
@@ -587,15 +621,15 @@ export default function Money() {
   }
   const weekCents = brief.data?.money?.weekCents ?? 0;
 
+  // A gift can carry a pledge with it (voiding one reopens its pledge), so
+  // every gift write refreshes the pledges too.
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['records', 'gift'] });
     queryClient.invalidateQueries({ queryKey: ['brief'] });
     queryClient.invalidateQueries({ queryKey: ['person'] });
-  };
-  const refreshPledges = () => {
     queryClient.invalidateQueries({ queryKey: ['pledges'] });
-    invalidate();
   };
+  const refreshPledges = invalidate;
 
   // toast({ text, undo? }) — one at a time, 7s.
   const showToast = (t) => {
@@ -623,38 +657,52 @@ export default function Money() {
     const g = res.gift || {};
     setBanner(overBanner(res, p.name));
     refreshPledges();
-    showToast({ text: `✓ ${fmtBig(g.amount_cents ?? p.amount_cents)} from ${p.name}` });
+    // A monthly pledge stays open: say which month came in. Undo voids the
+    // gift, which opens the pledge (or that month) again.
+    const month = isMonthly(p) && g.date ? ` for ${monthWord(ym(g.date))}` : '';
+    showToast({
+      text: `✓ ${fmtBig(g.amount_cents ?? p.amount_cents)} from ${p.name}${month}`,
+      undo: g.id ? () => voidGift(g.id) : null,
+    });
   };
   const onPledgeChanged = (text) => {
     refreshPledges();
     showToast({ text });
   };
 
+  // The row leaves at once; the toast waits for the server, so it only ever
+  // says what happened ("Gift voided · pledge open again").
   const voidGift = async (id) => {
     setError(null);
     setOpenId(null);
     setVoided((s) => new Set(s).add(id)); // optimistic remove
     setBanner((b) => (b?.giftId === id ? null : b)); // that gift no longer counts
-    showToast({ text: 'Gift voided', undo: () => undoVoid(id) });
     try {
-      await action('gift.void', { id });
-      // The donor's profile shows gifts, yearly totals and the donor tier.
-      queryClient.invalidateQueries({ queryKey: ['brief'] });
-      queryClient.invalidateQueries({ queryKey: ['person'] });
+      const res = await action('gift.void', { id });
+      // A one-time pledge paid with this gift is open again (a monthly one
+      // never closed).
+      const reopened = !!res?.pledge?.reopened;
+      showToast({ text: reopened ? 'Gift voided · pledge open again' : 'Gift voided', undo: () => undoVoid(id) });
     } catch (e) {
       setVoided((s) => { const n = new Set(s); n.delete(id); return n; });
-      setToast(null);
       setError(e.message);
+    } finally {
+      // The donor's profile shows gifts, yearly totals and the donor tier.
+      invalidate();
     }
   };
 
   const undoVoid = async (id) => {
+    setError(null);
     try {
-      await action('gift.restore', { id });
+      const res = await action('gift.restore', { id });
       setVoided((s) => { const n = new Set(s); n.delete(id); return n; });
-      invalidate();
+      const closedAgain = ['received', 'paid'].includes(res?.pledge?.status);
+      showToast({ text: closedAgain ? '✓ Gift restored · pledge paid' : '✓ Gift restored' });
     } catch (e) {
       setError(e.message);
+    } finally {
+      invalidate();
     }
   };
 
@@ -759,6 +807,16 @@ export default function Money() {
         {more && (
           <div id="money-more" className="ops-more-body">
             <DonateLink slug={slug} />
+            {monthlyIn.length > 0 && (
+              <>
+                <span className="eyebrow ops-label">Monthly · in for {monthWord(ym(todayISO()))} · {monthlyIn.length}</span>
+                <ul className="ops-rows">
+                  {monthlyIn.map((p) => (
+                    <PledgeRow key={p.id} p={p} onReceived={onReceived} onChanged={onPledgeChanged} />
+                  ))}
+                </ul>
+              </>
+            )}
             {closedPledges.length > 0 && (
               <>
                 <span className="eyebrow ops-label">Paid &amp; closed pledges · {closedPledges.length}</span>
