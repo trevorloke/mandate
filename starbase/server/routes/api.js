@@ -378,13 +378,21 @@ app.get('/shifts/:id', async (c) => {
     [c.req.param('id'), ctx.workspaceId],
   )).rows[0];
   if (!shift) return c.json({ error: 'not found' }, 404);
+  const myEmail = String(ctx.user.email || '').toLowerCase();
   const assignees = (await db.query(
     `select a.id as assignment_id, a.status, a.notified_at, a.notify_email, a.notify_text,
-            p.id, p.name, p.email, p.phone
+            p.id, p.name, p.email, p.phone, (lower(p.email) = $3) as is_me
      from shift_assignments a join persons p on p.id = a.person_id
      where a.shift_id = $1 and a.workspace_id = $2 order by p.name`,
-    [shift.id, ctx.workspaceId],
-  )).rows;
+    [shift.id, ctx.workspaceId, myEmail],
+  )).rows.map((a) => ({ ...a, is_me: !!a.is_me }));
+  // Volunteers see who else is on the shift, not how to reach them.
+  if (ctx.role === 'volunteer') {
+    return c.json({
+      shift,
+      assignees: assignees.map((a) => (a.is_me ? a : { ...a, email: null, phone: null, notify_email: null, notify_text: null })),
+    });
+  }
   return c.json({ shift, assignees });
 });
 

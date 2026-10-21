@@ -86,3 +86,50 @@ test('bad timestamps and unknown shifts are rejected', async () => {
   const nope = await c.action('shift.notify', { shift_id: '99999999-9999-4999-8999-999999999999' });
   assert.equal(nope.status, 404);
 });
+
+test('a volunteer books and leaves a shift themselves, and sees no one else\'s contact details', async () => {
+  // Its own address: under test:pg every file shares one Postgres, and users are global.
+  const inv = await c.action('member.invite', { email: 'Jas.Shifts@Example.org', role: 'volunteer' });
+  const vol = new Client();
+  const joined = await vol.post('/api/auth/join', { token: inv.json.joinUrl.split('/join/')[1], name: 'Jas Volunteer', password: 'knock-knock-2026' });
+  assert.equal(joined.status, 200);
+  assert.ok((await vol.get('/api/actions')).json.actions.includes('shift.join'));
+
+  const s = (await c.action('shift.create', {
+    title: 'Hi-rise lobby — Whalley', role: 'highrise_captain',
+    starts_at: '2030-05-04T10:00:00-07:00', ends_at: '2030-05-04T12:00:00-07:00', capacity: 2,
+  })).json.shift;
+  const other = await c.createPerson('Other Vol', { email: 'other@example.org', phone: '604-555-0110' });
+  await c.action('shift.assign', { shift_id: s.id, person_id: other.id });
+
+  const join = await vol.action('shift.join', { shift_id: s.id });
+  assert.equal(join.status, 200, JSON.stringify(join.json));
+  assert.equal(join.json.assignment.status, 'confirmed');
+  const me = await vol.get(`/api/persons/${join.json.assignment.person_id}`);
+  assert.equal(me.json.person.email, 'jas.shifts@example.org', 'a newcomer is added to the list by login email');
+  assert.equal((await vol.action('shift.join', { shift_id: s.id })).status, 409, 'no double booking');
+
+  const roster = (await vol.get(`/api/shifts/${s.id}`)).json.assignees;
+  const mine = roster.find((a) => a.is_me);
+  const theirs = roster.find((a) => !a.is_me);
+  assert.equal(mine.name, 'Jas Volunteer');
+  assert.equal(theirs.name, 'Other Vol');
+  assert.equal(theirs.phone, null, 'volunteers do not get other volunteers\' phones');
+  assert.equal(theirs.email, null);
+  assert.equal((await c.get(`/api/shifts/${s.id}`)).json.assignees.find((a) => a.name === 'Other Vol').phone, '604-555-0110', 'the desk still does');
+
+  const third = await c.createPerson('Third Vol');
+  assert.equal((await c.action('shift.assign', { shift_id: s.id, person_id: third.id })).status, 409, 'self-booking counts toward capacity');
+
+  const leave = await vol.action('shift.leave', { shift_id: s.id });
+  assert.equal(leave.status, 200);
+  assert.equal((await vol.action('shift.leave', { shift_id: s.id })).status, 404, 'already off it');
+  assert.equal((await c.action('shift.assign', { shift_id: s.id, person_id: third.id })).status, 200, 'leaving frees the spot');
+  assert.equal((await vol.action('shift.join', { shift_id: s.id })).status, 409, 'full again');
+  const dropped = (await c.get(`/api/shifts/${s.id}`)).json.assignees.find((a) => a.name === 'Jas Volunteer');
+  assert.equal(dropped.status, 'declined', 'the organizer sees who dropped out');
+
+  const past = (await c.action('shift.create', { title: 'Last spring', starts_at: '2020-05-04T10:00:00-07:00' })).json.shift;
+  assert.equal((await vol.action('shift.join', { shift_id: past.id })).status, 409, 'past shifts cannot be joined');
+  assert.equal((await vol.action('shift.assign', { shift_id: s.id, person_id: third.id })).status, 403, 'volunteers still cannot book other people');
+});

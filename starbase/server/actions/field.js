@@ -28,6 +28,33 @@ const requirePerson = async (tx, workspaceId, id) => {
   return p;
 };
 
+// The signed-in user's own supporter record, matched by login email (oldest
+// first). With create, a volunteer who isn't on the list yet is added.
+const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
+  const email = String(ctx.user.email || '').trim().toLowerCase();
+  const found = (await tx.query(
+    `select id, name from persons where workspace_id = $1 and lower(email) = $2 and deleted_at is null
+     order by created_at limit 1`,
+    [ctx.workspaceId, email],
+  )).rows[0];
+  if (found || !create) return found || null;
+  const id = newId();
+  const person = { kind: 'person', name: ctx.user.name || email, email, tags: ['volunteer'] };
+  await tx.query(
+    `insert into persons (id, workspace_id, kind, name, email, tags) values ($1, $2, $3, $4, $5, $6)`,
+    [id, ctx.workspaceId, person.kind, person.name, email, JSON.stringify(person.tags)],
+  );
+  emit('person', id, 'create', { id, ...person });
+  return { id, name: person.name };
+};
+
+const ACTIVE_SHIFT_STATUSES = ['assigned', 'confirmed'];
+const activeOnShift = async (tx, workspaceId, shiftId) => (await tx.query(
+  `select count(*)::int as n from shift_assignments
+   where shift_id = $1 and workspace_id = $2 and status in ('assigned', 'confirmed')`,
+  [shiftId, workspaceId],
+)).rows[0].n;
+
 export const FIELD_ACTIONS = {
   // ── Canvassing ──
   'contact.log': {
@@ -212,13 +239,8 @@ export const FIELD_ACTIONS = {
       )).rows[0];
       if (!shift) throw httpError(404, 'shift not found');
       await requirePerson(tx, ctx.workspaceId, input.person_id);
-      if (shift.capacity) {
-        const n = (await tx.query(
-          `select count(*)::int as n from shift_assignments
-           where shift_id = $1 and workspace_id = $2 and status in ('assigned', 'confirmed')`,
-          [input.shift_id, ctx.workspaceId],
-        )).rows[0].n;
-        if (n >= shift.capacity) throw httpError(409, 'shift is at capacity');
+      if (shift.capacity && await activeOnShift(tx, ctx.workspaceId, input.shift_id) >= shift.capacity) {
+        throw httpError(409, 'shift is at capacity');
       }
       const id = newId();
       try {
@@ -253,6 +275,64 @@ export const FIELD_ACTIONS = {
     },
   },
 
+  // A volunteer books themselves ("Count me in") or drops out ("Can't make
+  // it"). They act only on their own record, matched by login email; a
+  // newcomer who isn't on the list yet is added as a supporter.
+  'shift.join': {
+    roles: ALL_ROLES,
+    input: z.object({ shift_id: uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const shift = (await tx.query(
+        `select id, capacity, coalesce(ends_at, starts_at) < now() as over
+         from shifts where id = $1 and workspace_id = $2 and deleted_at is null for update`,
+        [input.shift_id, ctx.workspaceId],
+      )).rows[0];
+      if (!shift) throw httpError(404, 'shift not found');
+      if (shift.over) throw httpError(409, 'that shift is over');
+      const me = await selfPerson(tx, ctx, emit, { create: true });
+      const cur = (await tx.query(
+        'select id, status from shift_assignments where shift_id = $1 and person_id = $2 and workspace_id = $3',
+        [shift.id, me.id, ctx.workspaceId],
+      )).rows[0];
+      if (cur && ACTIVE_SHIFT_STATUSES.includes(cur.status)) throw httpError(409, "you're already on this shift");
+      if (shift.capacity && await activeOnShift(tx, ctx.workspaceId, shift.id) >= shift.capacity) {
+        throw httpError(409, 'shift is full');
+      }
+      if (cur) {
+        await tx.query("update shift_assignments set status = 'confirmed' where id = $1", [cur.id]);
+        emit('shift_assignment', cur.id, 'update', { status: 'confirmed', self: true });
+        return { assignment: { id: cur.id, shift_id: shift.id, person_id: me.id, status: 'confirmed' } };
+      }
+      const id = newId();
+      await tx.query(
+        `insert into shift_assignments (id, workspace_id, shift_id, person_id, status)
+         values ($1, $2, $3, $4, 'confirmed')`,
+        [id, ctx.workspaceId, shift.id, me.id],
+      );
+      const payload = { id, shift_id: shift.id, person_id: me.id, status: 'confirmed', self: true };
+      emit('shift_assignment', id, 'create', payload);
+      return { assignment: payload };
+    },
+  },
+
+  'shift.leave': {
+    roles: ALL_ROLES,
+    input: z.object({ shift_id: uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const me = await selfPerson(tx, ctx, emit);
+      const cur = me && (await tx.query(
+        `select id from shift_assignments where shift_id = $1 and person_id = $2 and workspace_id = $3
+           and status in ('assigned', 'confirmed')`,
+        [input.shift_id, me.id, ctx.workspaceId],
+      )).rows[0];
+      if (!cur) throw httpError(404, "you're not on this shift");
+      // Declined, not deleted: the organizer still sees who dropped out.
+      await tx.query("update shift_assignments set status = 'declined' where id = $1", [cur.id]);
+      emit('shift_assignment', cur.id, 'update', { status: 'declined', self: true });
+      return { id: cur.id, status: 'declined' };
+    },
+  },
+
   'shift.setStatus': {
     roles: DESK_ROLES,
     input: z.object({ id: uuid(), status: z.enum(SHIFT_STATUSES) }),
@@ -263,14 +343,10 @@ export const FIELD_ACTIONS = {
         [input.id, ctx.workspaceId],
       )).rows[0];
       if (!cur) throw httpError(404, 'assignment not found');
-      const ACTIVE = ['assigned', 'confirmed'];
-      if (cur.capacity && ACTIVE.includes(input.status) && !ACTIVE.includes(cur.status)) {
-        const n = (await tx.query(
-          `select count(*)::int as n from shift_assignments
-           where shift_id = $1 and workspace_id = $2 and status in ('assigned', 'confirmed')`,
-          [cur.shift_id, ctx.workspaceId],
-        )).rows[0].n;
-        if (n >= cur.capacity) throw httpError(409, 'shift is at capacity');
+      const ACTIVE = ACTIVE_SHIFT_STATUSES;
+      if (cur.capacity && ACTIVE.includes(input.status) && !ACTIVE.includes(cur.status)
+          && await activeOnShift(tx, ctx.workspaceId, cur.shift_id) >= cur.capacity) {
+        throw httpError(409, 'shift is at capacity');
       }
       await tx.query(
         'update shift_assignments set status = $3 where id = $1 and workspace_id = $2',
