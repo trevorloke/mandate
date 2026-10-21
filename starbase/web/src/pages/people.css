@@ -1,77 +1,10 @@
 /* People · Person · Money additions — page-specific styles.
    Ink on paper: mono micro-labels, hairline rules, quiet surfaces.
-   Rating colour is one rule everywhere: support = --ok, undecided = --mark,
-   opposed = --danger. Field controls are real buttons with ≥48px taps.
+   Ratings render with the shared RatingChip / RatingButtons (rb-*, styled in
+   map.css): support = green, undecided = ochre, opposed = red. The brand
+   yellow is only ever the screen's one primary button. Field controls are
+   real buttons with ≥48px taps.
    pp-* = People list + shared bits, cl-* = Calls, pf-* = profile. */
-
-/* ── Rating chip (filled, band-coloured, mono short code) ── */
-.rating-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 20px;
-  padding: 0 7px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  line-height: 1;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  white-space: nowrap;
-  vertical-align: middle;
-}
-.rating-chip[data-band='support']   { background: var(--ok);     color: var(--paper);    border-color: var(--ok); }
-.rating-chip[data-band='undecided'] { background: var(--mark);   color: var(--mark-ink); border-color: var(--mark-deep); }
-.rating-chip[data-band='opposed']   { background: var(--danger); color: var(--paper);    border-color: var(--danger); }
-.rating-chip[data-band='none']      { background: transparent;   color: var(--text-4);   border-color: var(--rule-2); font-weight: 500; }
-.rating-chip.sm { height: 18px; min-width: 22px; font-size: 10px; padding: 0 6px; }
-
-/* Clickable rating chip (filter bar) */
-button.rating-chip { cursor: pointer; }
-button.rating-chip:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 1px; }
-.filter-group.has-pick button.rating-chip:not(.on) { opacity: 0.4; }
-button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--ink); }
-
-/* ── Rating row: 1 2 3 4 | 4D 4B 4F 4N 4C ── */
-.rating-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-1);
-}
-.rating-row .rating-sep { width: 1px; height: 28px; background: var(--rule-2); margin: 0 var(--s-1); }
-.rating-btn {
-  min-width: 48px;
-  min-height: 48px;
-  padding: 0 10px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  color: var(--text-1);
-  background: var(--paper-0);
-  border: 1px solid var(--rule-2);
-  border-bottom-width: 3px;
-  border-radius: var(--r-ctrl);
-  cursor: pointer;
-}
-.rating-btn[data-band='support']   { border-bottom-color: var(--ok); }
-.rating-btn[data-band='undecided'] { border-bottom-color: var(--mark); }
-.rating-btn[data-band='opposed']   { border-bottom-color: var(--danger); }
-.rating-btn:hover { background: var(--paper-1); border-color: var(--ink); }
-.rating-btn[data-band='support']:hover   { border-bottom-color: var(--ok); }
-.rating-btn[data-band='undecided']:hover { border-bottom-color: var(--mark); }
-.rating-btn[data-band='opposed']:hover   { border-bottom-color: var(--danger); }
-.rating-btn[aria-pressed='true'][data-band='support']   { background: var(--ok);     color: var(--paper);    border-color: var(--ok); }
-.rating-btn[aria-pressed='true'][data-band='undecided'] { background: var(--mark);   color: var(--mark-ink); border-color: var(--mark-deep); }
-.rating-btn[aria-pressed='true'][data-band='opposed']   { background: var(--danger); color: var(--paper);    border-color: var(--danger); }
-.rating-btn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 1px; }
-.rating-btn:disabled { opacity: 0.5; cursor: default; }
-.rating-row.compact .rating-btn { min-width: 44px; min-height: 48px; padding: 0 7px; font-size: 12px; }
-.rating-row.compact .rating-sep { height: 24px; }
 
 /* ── Tap-sized buttons for field screens ── */
 .btn-tap {
@@ -204,6 +137,9 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .sign-row select.input { width: auto; padding: 5px 8px; font-size: 13px; }
 .chip-row { display: flex; gap: var(--s-1); flex-wrap: wrap; margin-top: var(--s-2); }
 .chip-mark { background: var(--mark-soft); border-color: var(--mark-deep); color: var(--text-1); }
+/* Donor tier on a profile: Star = ink outline, Superstar = ink fill. */
+.chip.pf-tier { border-color: var(--ink); color: var(--text-1); font-weight: 700; }
+.chip.pf-tier--super { background: var(--ink); color: var(--paper-0); }
 .chip-ghost { color: var(--text-4); border-color: var(--rule); }
 
 /* Contact history timeline */
@@ -276,7 +212,7 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .pp-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
-  background: var(--ink); color: var(--paper-0); font-size: 11px; letter-spacing: 0;
+  background: var(--ink); color: var(--paper-0); font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0;
 }
 
 /* Active filter chips */
@@ -288,7 +224,14 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
   color: var(--paper-0); background: var(--ink);
   border: 1px solid var(--ink); border-radius: 999px; cursor: pointer;
 }
-.pp-fchip .rating-chip { margin-left: 2px; box-shadow: 0 0 0 1px var(--paper-0); }
+/* A band dot on the rating filter chips (same colours as the rating chip). */
+.pp-dot { flex: none; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; border: 1px solid transparent; vertical-align: -1px; }
+.pp-dot[data-band='support']   { background: var(--ok);     border-color: var(--ok); }
+.pp-dot[data-band='undecided'] { background: #e0990b;       border-color: #a87000; }
+.pp-dot[data-band='opposed']   { background: var(--danger); border-color: var(--danger); }
+.pp-dot[data-band='none']      { background: transparent;   border: 1px dashed currentColor; }
+.pp-fchip .pp-dot { box-shadow: 0 0 0 1.5px var(--paper-0); margin-right: 2px; }
+.chip-btn.pp-pick { display: inline-flex; align-items: center; }
 .pp-fchip:hover { background: var(--text-2); }
 .pp-fchip:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 
@@ -305,11 +248,7 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .pp-group > legend { padding: 0; margin-bottom: var(--s-2); }
 .pp-group__opts { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .chip-btn.pp-pick { min-height: 48px; padding: 0 14px; font-size: 11px; }
-.rating-chip.pp-rate { min-width: 48px; height: 48px; font-size: 13px; cursor: pointer; }
-.pp-group__opts.has-pick .rating-chip.pp-rate:not(.on) { opacity: 0.4; }
-.rating-chip.pp-rate.on { box-shadow: 0 0 0 2px var(--paper-0), 0 0 0 4px var(--ink); }
-.rating-chip.pp-rate:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 3px; }
-.btn.pp-morefilters { align-self: flex-start; margin-left: calc(-1 * var(--s-3)); }
+.pp-morefilters { align-self: flex-start; }
 .pp-sheet__more { display: flex; flex-direction: column; gap: var(--s-3); }
 .pp-scrim { position: fixed; inset: 0; z-index: 945; background: rgba(12, 12, 12, 0.35); }
 .pp-sheet.is-phone {
@@ -336,7 +275,7 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .pp-row__main { display: flex; flex-direction: column; min-width: 0; }
 .pp-row__name { font-size: 17px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .pp-row__fact { font-family: var(--font-mono); font-size: 13px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pp-row .rating-chip { min-width: 32px; height: 26px; font-size: 12px; }
+.pp-row .rb-chip { flex: none; min-width: 32px; height: 26px; font-size: 12px; }
 
 .pp-table td { vertical-align: middle; padding-top: 10px; padding-bottom: 10px; }
 .pp-table__name a { text-decoration: none; font-weight: 600; }
@@ -346,11 +285,10 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .pp-more { display: flex; justify-content: center; margin: var(--s-4) 0; }
 .pp-empty { padding: var(--s-6) var(--s-4); text-align: center; border: 1px dashed var(--rule-2); border-radius: var(--r-card); }
 .pp-empty p { margin: 0 0 var(--s-3); font-size: 17px; }
-.pp-scale { margin: var(--s-2) 0 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--text-3); text-align: center; }
 
 /* Add person */
 .pp-add h2 { margin-bottom: var(--s-3); }
-.btn.pp-moredetails { margin: 0 0 var(--s-3) calc(-1 * var(--s-4)); }
+.pp-moredetails { margin-bottom: var(--s-2); }
 
 /* ── Calls ── */
 .cl-page { max-width: 560px; }
@@ -381,7 +319,9 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .cl-name:hover { text-decoration: underline; }
 .cl-phone { font-size: 16px; margin-top: 2px; }
 .cl-addr { color: var(--text-3); font-size: 14px; }
-.cl-who .rating-chip { min-width: 36px; height: 28px; font-size: 13px; }
+/* Their rating before this call: one quiet line, never a chip. */
+.cl-last { margin-top: var(--s-1); color: var(--text-3); font-size: 14px; }
+.cl-next__list .rb-chip { flex: none; }
 
 .btn.cl-call {
   display: flex; align-items: center; justify-content: center; gap: var(--s-2);
@@ -406,14 +346,8 @@ button.rating-chip.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--in
 .cl-out:disabled { opacity: 0.5; cursor: default; }
 .cl-skip { border-color: transparent; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
 
-.cl-next { margin-top: var(--s-2); border-top: 1px solid var(--rule); }
-.cl-next__btn {
-  display: flex; width: 100%; align-items: center; justify-content: space-between;
-  min-height: 48px; padding: 0 var(--s-1);
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--text-2); background: transparent; border: 0; cursor: pointer;
-}
-.cl-next__btn span { font-size: 16px; }
+/* "Up next" is the shared .disclose row (app.css); its label lines up with the names. */
+.cl-next { margin-top: var(--s-2); --disclose-x: var(--s-1); }
 .cl-next__list { list-style: none; margin: 0; padding: 0; }
 .cl-next__list li + li { border-top: 1px solid var(--rule); }
 .cl-next__list button {
@@ -440,8 +374,9 @@ button.pf-back:hover { color: var(--text-1); }
 button.pf-back:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .pf-head h1 { margin: 0 0 var(--s-2); overflow-wrap: anywhere; }
 .pf-meta { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
-.pf-meta .rating-chip { height: 24px; min-width: 32px; font-size: 12px; }
+.pf-meta .rb-chip { height: 24px; min-width: 32px; font-size: 12px; }
 .pf-meta .pf-word { font-size: 15px; color: var(--text-2); }
+.pf-meta .pf-when { color: var(--text-3); }
 .pf-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
 .btn.pf-act {
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
@@ -463,21 +398,17 @@ button.pf-back:focus-visible { outline: 2px solid var(--mark-deep); outline-offs
 .pf-page { max-width: 680px; }
 .pf-status { font-family: var(--font-mono); font-size: 12px; color: var(--ok); min-height: 1.4em; margin: var(--s-2) 0 0; }
 .pf-status:empty { min-height: 0; margin: 0; }
+.pf-last { margin: calc(-1 * var(--s-2)) 0 var(--s-4); color: var(--text-3); font-size: 14px; }
+/* The supporter's own words from the volunteer form. */
+.pf-their-note { margin: var(--s-3) 0 0; padding: var(--s-2) var(--s-3); border-left: 3px solid var(--rule-2); background: var(--paper-0); }
+.pf-their-note .eyebrow { display: block; margin-bottom: var(--s-1); }
+.pf-their-note p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; color: var(--text-2); }
 .role-chips .chip { white-space: normal; overflow-wrap: anywhere; }
 
-.pf-sections { border-top: 1px solid var(--rule-2); }
-.pf-sec { border-bottom: 1px solid var(--rule); }
-.pf-sec__btn {
-  display: flex; width: 100%; align-items: center; gap: var(--s-3);
-  min-height: 56px; padding: 0 var(--s-1);
-  font: inherit; font-size: 17px; font-weight: 600; text-align: left; color: var(--text-1);
-  background: transparent; border: 0; cursor: pointer;
-}
-.pf-sec__btn:hover { background: var(--paper-1); }
-.pf-sec__btn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
+/* Each section opens from the shared .disclose row (app.css). */
+.pf-sections { --disclose-x: var(--s-1); }
 .pf-sec__title { flex: 1; }
 .pf-sec__count { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--text-3); }
-.pf-sec__caret { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rule-2); border-radius: 50%; font-size: 15px; font-weight: 400; color: var(--text-2); }
 .pf-sec__body { padding: 0 var(--s-1) var(--s-4); }
 .pf-sec__body > :first-child { margin-top: 0; }
 .pf-empty { margin: 0 0 var(--s-2); color: var(--text-3); }

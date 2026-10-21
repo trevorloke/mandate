@@ -1,9 +1,11 @@
 // Person profile. Top: name, rating, donor tier (desk), and Call · Text ·
 // Email (desk) · Map. Then the rating card (one tap logs a contact; Call/Text
-// set how it is logged). Everything else sits in sections that open on a
-// tap — Details (edit lives here), Tags (desk), Roles (desk), Signs, Shifts,
-// Gifts (desk) and History (open by default). Volunteers' back link returns
-// to wherever they came from (walk list, map, Calls).
+// set how it is logged, remembered per person for this tab so it survives a
+// trip to the dialer). Everything else sits in sections that open on a tap —
+// Details (their own note + edit live here), Tags, Roles, Signs, Shifts, Gifts
+// and History (open by default). Volunteers see only what a door needs: Details
+// (open), the rating card, one "Last contact" line and Signs. Their back link
+// returns to wherever they came from (walk list, map, Calls).
 import { useId, useRef, useState } from 'react';
 import { Link, useParams, useOutletContext, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,11 +13,11 @@ import {
   ratingByCode, VOLUNTEER_ROLES, SOCIAL_PLATFORMS, SUGGESTED_TAGS,
   SIGN_KINDS, SIGN_STATUSES, DONOR_TIERS,
 } from '@starbase/shared/canvass';
-import RatingButtons, { OutcomeButtons, ratingWord } from '../components/RatingButtons.jsx';
+import RatingButtons, { OutcomeButtons, RatingChip, ratingSay } from '../components/RatingButtons.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import {
-  RatingChip, TagEditor, ScaleKey, Icon, useAction, fmtWhen, fmtDay, telHref, smsHref, textBody,
-  canDesk, invalidatePersonData, isDnc,
+  TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
+  canDesk, invalidatePersonData, isDnc, tagWord, ratingLine,
 } from './People.jsx';
 import './people.css';
 
@@ -25,12 +27,33 @@ const TIER_LABEL = {
   monthly: 'Monthly donor',
   'one-time': 'Donor',
 };
-const TIER_CLASS = { superstar: 'chip chip-mark', star: 'chip chip-mark', monthly: 'chip chip-ok', 'one-time': 'chip' };
+// Ink, not yellow: the brand yellow is only ever the screen's one primary button.
+const TIER_CLASS = { superstar: 'chip pf-tier pf-tier--super', star: 'chip pf-tier', monthly: 'chip chip-ok', 'one-time': 'chip' };
 
 const OUTCOME_LABEL = {
   contacted: 'Talked', no_answer: 'No answer', refused: 'Refused', moved: 'Moved', inaccessible: 'No access',
 };
 const CHANNEL_LABEL = { door: 'Door', phone: 'Phone', text: 'Text' };
+// "Rated 2 · Lean yes" or "No answer" — the field's own words.
+const contactWord = (c) => (c.rating ? `Rated ${c.rating} · ${ratingSay(c.rating)}` : OUTCOME_LABEL[c.outcome] || c.outcome);
+
+// How this person is being reached (Door · Phone · Text), per person, kept for
+// this tab: a phone may reload the page after the dialer or messages app.
+const CHANNEL_KEY = 'starbase.person.channel';
+const readChannels = () => {
+  try { return JSON.parse(sessionStorage.getItem(CHANNEL_KEY) || '{}') || {}; } catch { return {}; }
+};
+function useChannel(personId) {
+  const [chans, setChans] = useState(readChannels);
+  const saved = chans[personId];
+  const channel = CHANNEL_LABEL[saved] ? saved : 'door';
+  const setChannel = (c) => setChans((m) => {
+    const next = { ...m, [personId]: c };
+    try { sessionStorage.setItem(CHANNEL_KEY, JSON.stringify(next)); } catch { /* private mode: memory only */ }
+    return next;
+  });
+  return [channel, setChannel];
+}
 const STATUS_CHIP = {
   assigned: 'chip', confirmed: 'chip chip-ok', declined: 'chip chip-danger', no_show: 'chip chip-danger', completed: 'chip',
   requested: 'chip chip-warn', installed: 'chip chip-ok', removed: 'chip chip-ghost',
@@ -64,10 +87,9 @@ function Section({ title, count, open, onToggle, children }) {
   return (
     <section className="pf-sec">
       <h2 style={{ margin: 0, fontSize: 'inherit' }}>
-        <button type="button" className="pf-sec__btn" aria-expanded={open} aria-controls={id} onClick={onToggle}>
+        <button type="button" className="pf-sec__btn disclose" aria-expanded={open} aria-controls={id} onClick={onToggle}>
           <span className="pf-sec__title">{title}</span>
           {count != null && count !== '' && <span className="pf-sec__count">{count}</span>}
-          <span className="pf-sec__caret" aria-hidden="true">{open ? '−' : '+'}</span>
         </button>
       </h2>
       {open && <div className="pf-sec__body" id={id}>{children}</div>}
@@ -101,6 +123,7 @@ function BackLink({ desk, className = 'eyebrow pf-back' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function Header({ person, donor, me, desk, onLog }) {
   const r = ratingByCode(person.rating);
+  const when = fmtShort(person.rated_at);
   const email = desk && person.email; // volunteers phone and knock; email is desk work
   return (
     <header className="pf-head">
@@ -110,9 +133,9 @@ function Header({ person, donor, me, desk, onLog }) {
         {person.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
       </h1>
       <div className="pf-meta">
-        <RatingChip code={person.rating} />
+        {r && <RatingChip code={person.rating} />}
         <span className="pf-word">
-          {r ? `${ratingWord(person.rating)}${person.rated_at ? ` · ${fmtDay(person.rated_at)}` : ''}` : 'Not rated'}
+          {r ? <>{ratingSay(person.rating)}{when && <span className="pf-when"> · {when}</span>}</> : 'Not rated'}
         </span>
         {isDnc(person) && <span className="chip chip-danger">Do not contact</span>}
         {/* donor is null for volunteers (the server hides money from them) */}
@@ -170,15 +193,13 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
     if (res) {
       setNote('');
       setNoteOpen(false);
-      const what = rating ? `${rating} ${ratingWord(rating)}` : OUTCOME_LABEL[outcome];
-      setStatus(`${res.queued ? 'Saved offline · ' : '✓ '}${CHANNEL_LABEL[channel]} · ${what}`);
+      setStatus(`${res.queued ? 'Saved offline · ' : '✓ '}${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}`);
     }
   };
 
   return (
     <section className="card pf-rate" ref={cardRef} aria-label="Rate">
       <RatingButtons value={person.rating} onPick={(code) => log('contacted', code)} disabled={act.busy} />
-      <ScaleKey />
       <OutcomeButtons onPick={(o) => log(o)} disabled={act.busy} />
       <div className="pf-rate__foot">
         {noteOpen ? (
@@ -396,9 +417,16 @@ function Details({ person, household, refresh, desk }) {
         </li>
       </ul>
 
-      <Socials person={person} refresh={refresh} desk={desk} />
+      {person.note && (
+        <div className="pf-their-note">
+          <span className="eyebrow">Their note</span>
+          <p>{person.note}</p>
+        </div>
+      )}
 
-      {person.address && (
+      {desk && <Socials person={person} refresh={refresh} desk={desk} />}
+
+      {person.address && (desk || household.length > 0) && (
         <>
           <div className="card-head pf-sub"><span className="eyebrow">Same address</span></div>
           {household.length === 0
@@ -408,7 +436,7 @@ function Details({ person, household, refresh, desk }) {
                 {household.map((h) => (
                   <li key={h.id}>
                     <Link to={`/people/${h.id}`}>{h.name}</Link>
-                    <RatingChip code={h.rating} />
+                    {h.rating && <RatingChip code={h.rating} who />}
                   </li>
                 ))}
               </ul>
@@ -456,7 +484,7 @@ function Tags({ person, refresh, desk }) {
         : (
           <div className="tag-chips">
             {tags.map((t) => (
-              <Link key={t} to={`/people?tag=${encodeURIComponent(t)}`} className="chip pf-chip-link">{t}</Link>
+              <Link key={t} to={`/people?tag=${encodeURIComponent(t)}`} className="chip pf-chip-link">{tagWord(t)}</Link>
             ))}
           </div>
         )}
@@ -602,7 +630,7 @@ function Gifts({ person, gifts, totals }) {
                 <span className="when">{fmtDate(g.date)}</span>
                 {g.method && <span className="chip">{g.method}</span>}
                 {g.cadence === 'monthly'
-                  ? <span className="chip chip-mark">monthly</span>
+                  ? <span className="chip chip-ok">monthly</span>
                   : <span className="chip chip-ghost">one-time</span>}
                 {g.flagged && <span className="chip chip-warn" title={g.flag_reason || ''}>flagged</span>}
                 {g.note && <span className="note">{g.note}</span>}
@@ -626,7 +654,7 @@ function History({ contacts }) {
           <span className="when">{fmtWhen(c.created_at)}</span>
           <span className="what">
             <span className="chip">{CHANNEL_LABEL[c.channel] || c.channel}</span>
-            {c.rating ? <RatingChip code={c.rating} size="sm" /> : <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>}
+            {c.rating ? <RatingChip code={c.rating} who /> : <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>}
             {c.by_name && <span className="by">{c.by_name}</span>}
             {c.note && <span className="note">{c.note}</span>}
           </span>
@@ -644,8 +672,9 @@ export default function Person() {
   const { me } = useOutletContext() ?? {};
   const desk = canDesk(me);
   const queryClient = useQueryClient();
-  const [channel, setChannel] = useState('door');
-  const [open, setOpen] = useState({ history: true });
+  const [channel, setChannel] = useChannel(id);
+  // Desks open on the history; volunteers on phone + address.
+  const [open, setOpen] = useState(() => (desk ? { history: true } : { details: true }));
   const ratingRef = useRef(null);
   const toggle = (key) => () => setOpen((o) => ({ ...o, [key]: !o[key] }));
 
@@ -681,12 +710,20 @@ export default function Person() {
   } = profile.data;
   const tags = Array.isArray(person.tags) ? person.tags : [];
   const thisYear = totals.find((t) => String(t.year) === String(new Date().getFullYear()));
+  const last = contacts[0];
 
   return (
     <div className="pf-page">
       <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} />
 
       <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
+
+      {/* Volunteers get one line instead of the full history. */}
+      {!desk && last && (
+        <p className="pf-last">
+          Last contact: {fmtShort(last.created_at)} · {CHANNEL_LABEL[last.channel] || last.channel} · {last.rating ? ratingLine(last.rating) : OUTCOME_LABEL[last.outcome] || last.outcome}
+        </p>
+      )}
 
       <div className="pf-sections">
         <Section title="Details" open={!!open.details} onToggle={toggle('details')}>
@@ -706,18 +743,23 @@ export default function Person() {
         <Section title="Signs" count={signs.length || ''} open={!!open.signs} onToggle={toggle('signs')}>
           <Signs person={person} signs={signs} refresh={refresh} />
         </Section>
-        <Section title="Shifts" count={shifts.length || ''} open={!!open.shifts} onToggle={toggle('shifts')}>
-          <Shifts shifts={shifts} />
-        </Section>
+        {/* Shifts and the full history are desk views; volunteers have Shifts and the line above. */}
+        {desk && (
+          <Section title="Shifts" count={shifts.length || ''} open={!!open.shifts} onToggle={toggle('shifts')}>
+            <Shifts shifts={shifts} />
+          </Section>
+        )}
         {desk && (
           <Section title="Gifts" count={thisYear ? fmtMoney(Number(thisYear.total_cents)) : gifts.length || ''}
             open={!!open.gifts} onToggle={toggle('gifts')}>
             <Gifts person={person} gifts={gifts} totals={totals} />
           </Section>
         )}
-        <Section title="History" count={contacts.length || ''} open={!!open.history} onToggle={toggle('history')}>
-          <History contacts={contacts} />
-        </Section>
+        {desk && (
+          <Section title="History" count={contacts.length || ''} open={!!open.history} onToggle={toggle('history')}>
+            <History contacts={contacts} />
+          </Section>
+        )}
       </div>
     </div>
   );

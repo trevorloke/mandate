@@ -114,9 +114,8 @@ export function PersonTabs({ persons, value, onPick, ratingOf = (p) => p.rating,
 export function More({ open, onToggle, id, label = 'More', children }) {
   return (
     <div className={`fk-more${open ? ' is-open' : ''}`}>
-      <button type="button" className="fk-more__btn" aria-expanded={open} aria-controls={id} onClick={onToggle}>
+      <button type="button" className="fk-more__btn disclose" aria-expanded={open} aria-controls={id} onClick={onToggle}>
         {label}
-        <span className="fk-more__caret" aria-hidden="true">{open ? '−' : '+'}</span>
       </button>
       {open && <div className="fk-more__body" id={id}>{children}</div>}
     </div>

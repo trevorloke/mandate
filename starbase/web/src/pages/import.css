@@ -1,7 +1,8 @@
 /* Import people + GeocodeButton — page styles.
-   Ink on paper: numbered steps on hairline rules, mono micro-labels, the
-   yellow mark for "you are here" and progress. Phones first: ≥44px taps,
-   the preview table scrolls inside its own box, never the page. */
+   Ink on paper: numbered steps on hairline rules, mono micro-labels; "you
+   are here" is an ink step marker and progress is green — the brand yellow
+   is only the screen's one primary button. Phones first: ≥48px taps, the
+   preview table scrolls inside its own box, never the page. */
 
 .imp-page { max-width: 760px; }
 .imp-head { margin-bottom: var(--s-2); }
@@ -54,7 +55,7 @@
   color: var(--text-4);
   background: var(--paper-0);
 }
-.imp-step.is-now .imp-step__num { background: var(--mark); border-color: var(--mark-deep); color: var(--mark-ink); }
+.imp-step.is-now .imp-step__num { background: var(--ink); border-color: var(--ink); color: var(--paper-0); }
 .imp-step.is-done .imp-step__num { color: var(--ok); border-color: var(--ok); }
 .imp-step__body h2 { margin: 3px 0 var(--s-2); }
 .imp-step.is-todo .imp-step__body h2 { color: var(--text-2); }
@@ -76,7 +77,7 @@
   margin-bottom: var(--s-2);
 }
 .imp-drop:hover { border-color: var(--ink); }
-.imp-drop.is-over { border-style: solid; border-color: var(--mark-deep); background: var(--mark-soft); }
+.imp-drop.is-over { border-style: solid; border-color: var(--ink); background: var(--paper-1); }
 .imp-drop.is-busy { cursor: progress; opacity: 0.8; }
 .imp-drop:focus-within { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .imp-file-input {
@@ -88,6 +89,9 @@
 }
 .imp-drop__btn { pointer-events: none; }
 .imp-drop__or { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+/* Phones and tablets can't drag a file in: just the button. (Phone width
+   too, for browsers that don't report a coarse pointer.) */
+@media (pointer: coarse), (max-width: 560px) { .imp-drop__or { display: none; } }
 .imp-paste { margin-top: var(--s-2); }
 .imp-paste__text { font-family: var(--font-mono); font-size: 13px; line-height: 1.45; resize: vertical; min-height: 140px; }
 
@@ -122,11 +126,11 @@
   text-overflow: ellipsis;
 }
 .imp-map__arrow { color: var(--text-4); font-family: var(--font-mono); }
-.imp-map__row.is-used .imp-map__arrow { color: var(--mark-deep); }
+.imp-map__row.is-used .imp-map__arrow { color: var(--text-1); }
 .imp-map__select { min-height: 48px; }
 .imp-map__row:not(.is-used) .imp-map__select { color: var(--text-3); }
 .imp-map__note { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--text-2); }
-.imp-map__note.is-warn { color: var(--text-1); border-left: 3px solid var(--mark-deep); padding-left: var(--s-2); }
+.imp-map__note.is-warn { color: var(--text-1); border-left: 3px solid var(--warn); padding-left: var(--s-2); }
 
 .imp-need {
   border-left: 3px solid var(--danger);
@@ -164,9 +168,9 @@
   overflow: hidden;
   margin: var(--s-2) 0;
 }
-.imp-bar__fill { height: 100%; background: var(--mark); transition: width 0.3s ease; }
+.imp-bar__fill { height: 100%; background: var(--ok); transition: width 0.3s ease; }
 .imp-bar__fill.is-waiting {
-  background: repeating-linear-gradient(-45deg, var(--mark) 0 8px, var(--mark-soft) 8px 16px);
+  background: repeating-linear-gradient(-45deg, var(--ok) 0 8px, var(--paper-1) 8px 16px);
   background-size: 200% 100%;
   animation: imp-wait 1.2s linear infinite;
 }
@@ -244,7 +248,7 @@
   max-width: 62ch;
 }
 .geo-summary.is-error { border-left-color: var(--danger); }
-.geo-summary.is-paused { border-left-color: var(--mark-deep); }
+.geo-summary.is-paused { border-left-color: var(--warn); }
 .geo-summary__lead { margin: 0; font-weight: 600; }
 .geo-summary__note { margin: var(--s-2) 0 0; color: var(--text-2); }
 .geo-actions:empty { display: none; }
@@ -280,7 +284,6 @@
 .imp-step.is-todo .imp-step__body h2 { margin-bottom: 0; }
 .imp-step.is-done .imp-step__body h2 { color: var(--text-2); }
 .imp-reveal { margin: 0 0 var(--s-2); }
-.btn.imp-reveal__btn { margin-left: calc(-1 * var(--s-4)); gap: var(--s-2); }
 .imp-reveal__body { padding: var(--s-1) 0 var(--s-3); }
 .imp-reveal__body .imp-tagfield { margin-bottom: 0; }
 .imp-matches__list { list-style: none; margin: var(--s-2) 0 0; padding: 0; }

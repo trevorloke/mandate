@@ -178,7 +178,7 @@ function More({ label = 'More', children }) {
   const id = useId();
   return (
     <div className="ot-more-wrap">
-      <button type="button" className="ot-more" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="ot-more disclose" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
         {label}
       </button>
       {open && <div id={id} className="ot-more-body">{children}</div>}
@@ -648,7 +648,7 @@ function NewPetitionForm({ wsSlug, onCreated, onCancel }) {
         <label htmlFor="pet-body">What are you asking for?</label>
         <textarea id="pet-body" className="input" rows={4} maxLength={8000} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Surrey deserves rapid transit south of 72nd." />
       </div>
-      <button type="button" className="ot-more" aria-expanded={Boolean(showLink)} aria-controls="pet-link" onClick={() => setLinkOpen((o) => !o)}>
+      <button type="button" className="ot-more disclose disclose--inline" aria-expanded={Boolean(showLink)} aria-controls="pet-link" onClick={() => setLinkOpen((o) => !o)}>
         Link
       </button>
       {showLink && (
@@ -952,7 +952,7 @@ function EventForm({ ev, wsSlug, onDone, onCancel }) {
           onChange={(e) => setLocation(e.target.value)} placeholder="Newton Recreation Centre, 13730 72 Ave" />
       </div>
 
-      <button type="button" className="ot-more" aria-expanded={Boolean(showMore)} aria-controls={`${idp}-more`}
+      <button type="button" className="ot-more disclose disclose--inline" aria-expanded={Boolean(showMore)} aria-controls={`${idp}-more`}
         onClick={() => setMore((v) => !v)}>
         More details
       </button>

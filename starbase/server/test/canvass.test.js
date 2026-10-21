@@ -70,6 +70,35 @@ test('tags, socials, and address fields round-trip; tag filter works', async () 
   assert.equal(bogus.status, 400, 'unknown platform rejected');
 });
 
+test('rating filter: one code, a band (comma list), and unrated', async () => {
+  const rate = async (name, code) => {
+    const p = await c.createPerson(name);
+    if (code) await c.action('contact.log', { person_id: p.id, channel: 'door', outcome: 'contacted', rating: code });
+    return p;
+  };
+  const strong = await rate('Bandfilter Strong', '1');
+  const lean = await rate('Bandfilter Lean', '2');
+  const undecided = await rate('Bandfilter Undecided', '3');
+  const locke = await rate('Bandfilter Locke', '4B');
+  const plain4 = await rate('Bandfilter Opposed', '4');
+  const none = await rate('Bandfilter Unrated', null);
+  const ids = async (rating) => {
+    const r = await c.get(`/api/persons?q=Bandfilter&rating=${encodeURIComponent(rating)}`);
+    assert.equal(r.status, 200, rating);
+    return r.json.persons.map((x) => x.id).sort();
+  };
+  const sorted = (...ps) => ps.map((p) => p.id).sort();
+  assert.deepEqual(await ids('2'), sorted(lean), 'single code still works');
+  assert.deepEqual(await ids('4B'), sorted(locke), 'who they vote for');
+  assert.deepEqual(await ids('1,2'), sorted(strong, lean), 'support band');
+  assert.deepEqual(await ids('4,4D,4B,4F,4N,4C'), sorted(locke, plain4), 'opposed band');
+  assert.deepEqual(await ids('unrated'), sorted(none), 'no rating yet');
+  assert.deepEqual(await ids('3,unrated'), sorted(undecided, none), 'a band and unrated together');
+  assert.deepEqual(await ids(' 1 , ,2 '), sorted(strong, lean), 'spaces and empty pieces are ignored');
+  assert.deepEqual(await ids('5'), [], 'off-scale code matches no one');
+  assert.deepEqual(await ids(','), [], 'nothing but commas matches no one');
+});
+
 test('locating a person puts them on the map; map doors groups household + signs', async () => {
   const a = await c.createPerson('Door A', { address: '12345 72 Ave', unit: null });
   const b = await c.createPerson('Door A Partner', { address: '12345 72 Ave' });

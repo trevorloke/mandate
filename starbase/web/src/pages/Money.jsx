@@ -224,7 +224,7 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
         </div>
       </div>
 
-      <button type="button" className="ops-more" aria-expanded={more} aria-controls="gift-more"
+      <button type="button" className="ops-more disclose disclose--inline" aria-expanded={more} aria-controls="gift-more"
         onClick={() => setMore((v) => !v)}>
         More details
       </button>
@@ -634,7 +634,7 @@ export default function Money() {
         </ul>
       )}
       {(rows.length > latest.length || gifts.hasNextPage) && (
-        <button type="button" className="ops-more" aria-expanded={allGifts} aria-controls="gift-list"
+        <button type="button" className="ops-more disclose" aria-expanded={allGifts} aria-controls="gift-list"
           onClick={() => setAllGifts((v) => !v)}>
           All gifts · {gifts.hasNextPage ? `${rows.length}+` : rows.length}
         </button>
@@ -649,7 +649,7 @@ export default function Money() {
       )}
 
       <div className="ops-foot">
-        <button type="button" className="ops-more" aria-expanded={more} aria-controls="money-more"
+        <button type="button" className="ops-more disclose" aria-expanded={more} aria-controls="money-more"
           onClick={() => setMore((v) => !v)}>
           More
         </button>

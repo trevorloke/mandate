@@ -379,7 +379,7 @@ function ShiftForm({ onClose }) {
           placeholder="No limit" value={f.capacity} onChange={set('capacity')} />
       </div>
 
-      <button type="button" className="ops-more" aria-expanded={more} aria-controls="shift-more"
+      <button type="button" className="ops-more disclose disclose--inline" aria-expanded={more} aria-controls="shift-more"
         onClick={() => setMore((v) => !v)}>
         More details
       </button>
@@ -513,7 +513,7 @@ function ShiftList({ canDesk, me }) {
 
       {past.length > 0 && (
         <div className="ops-foot">
-          <button type="button" className="ops-more" aria-expanded={showPast} aria-controls="ops-past"
+          <button type="button" className="ops-more disclose" aria-expanded={showPast} aria-controls="ops-past"
             onClick={() => setShowPast((v) => !v)}>
             Past shifts · {past.length}
           </button>
@@ -833,7 +833,7 @@ function ShiftDetail({ id, canDesk, me }) {
               </p>
             );
           })()}
-          <button type="button" className="ops-more" aria-expanded={showResults} aria-controls="notify-results"
+          <button type="button" className="ops-more disclose" aria-expanded={showResults} aria-controls="notify-results"
             onClick={() => setShowResults((v) => !v)}>
             Details
           </button>

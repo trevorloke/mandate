@@ -57,8 +57,7 @@
 .walk-progress { display: flex; flex-direction: column; gap: 6px; }
 .walk-progress__text { font-size: 14px; }
 .walk-progress__text strong { font-size: 22px; }
-.walk-head .fk-more { margin-top: 0; }
-.walk-head .fk-more__btn { padding: 0; }
+.walk-head .fk-more { margin-top: 0; --disclose-x: 0; }
 .walk-head .fk-more__body { padding: 0 0 var(--s-2); }
 .walk-notes { margin: 0; font-size: 15px; color: var(--text-2); white-space: pre-line; }
 .walk-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-2); margin: 0; }

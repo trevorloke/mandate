@@ -11,7 +11,7 @@ import { RATING_CODES } from '@starbase/shared/canvass';
 import { apiPost } from '../api.js';
 import GeocodeButton from '../components/GeocodeButton.jsx';
 import { RatingChip } from '../components/RatingButtons.jsx';
-import { invalidatePersonData } from './People.jsx';
+import { invalidatePersonData, tagWord } from './People.jsx';
 import './import.css';
 
 const DESK = ['manager', 'treasurer', 'staff'];
@@ -358,13 +358,13 @@ function Counts({ items }) {
   );
 }
 
-// A quiet "+ Label" toggle; the body is only rendered when open.
+// A quiet "Label +" toggle (the shared .disclose look); the body is only rendered when open.
 function Reveal({ label, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="imp-reveal">
-      <button type="button" className="btn btn-quiet imp-tap imp-reveal__btn" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span aria-hidden="true">{open ? '−' : '+'}</span> {label}
+      <button type="button" className="imp-reveal__btn disclose disclose--inline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {label}
       </button>
       {open && <div className="imp-reveal__body">{children}</div>}
     </div>
@@ -692,7 +692,7 @@ function ImportFlow() {
           <div className="imp-source">
             <p className="imp-summary">
               {usedFields.join(' · ')}
-              {tagClean ? <> · <span className="chip imp-chip">{tagClean}</span></> : null}
+              {tagClean ? <> · <span className="chip imp-chip">{tagWord(tagClean)}</span></> : null}
             </p>
             {!imp && (
               <button type="button" className="btn btn-quiet imp-tap" onClick={() => setCheck(null)}>Change</button>
@@ -741,7 +741,7 @@ function ImportFlow() {
               </p>
             )}
 
-            <Reveal label={tagClean ? `Tag: ${tagClean}` : 'Tag everyone'} defaultOpen={Boolean(tagClean)}>
+            <Reveal label={tagClean ? `Tag: ${tagWord(tagClean)}` : 'Tag everyone'} defaultOpen={Boolean(tagClean)}>
               <div className="field imp-tagfield">
                 <label htmlFor="imp-tag">Tag (optional)</label>
                 <div className="imp-tagrow">
@@ -785,10 +785,10 @@ function ImportFlow() {
                                 {k === 'name' ? (displayName(data) || <span className="danger-text">no name</span>)
                                   : k === 'address' ? (displayAddress(data) || <span className="muted">—</span>)
                                   : k === 'tags' ? (tags.length
-                                    ? <span className="imp-tags">{tags.map((t) => <span key={t} className="chip">{t}</span>)}</span>
+                                    ? <span className="imp-tags">{tags.map((t) => <span key={t} className="chip">{tagWord(t)}</span>)}</span>
                                     : <span className="muted">—</span>)
                                   : k === 'rating' ? (data.rating
-                                    ? <RatingChip code={data.rating} />
+                                    ? <RatingChip code={data.rating} who />
                                     : rawRating
                                       ? <span className="muted" title="Not on the scale — comes in without a rating"><s>{rawRating}</s> unrated</span>
                                       : <span className="muted">—</span>)
@@ -918,7 +918,7 @@ function ImportFlow() {
             {(imported || imp?.phase === 'error' || (nothingToDo && !imp)) && (
               <div className="imp-actions imp-next">
                 {(imp?.created || 0) + (imp?.merged || 0) > 0 && (
-                  <Link className="btn imp-tap" to={peopleLink}>{tagClean ? `See “${tagClean}”` : 'See them'}</Link>
+                  <Link className="btn imp-tap" to={peopleLink}>{tagClean ? `See “${tagWord(tagClean)}”` : 'See them'}</Link>
                 )}
                 <Link className="btn btn-quiet imp-tap" to="/map">Map</Link>
                 <Link className="btn btn-quiet imp-tap" to="/turfs">Turfs</Link>

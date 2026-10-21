@@ -103,7 +103,18 @@ app.get('/persons', async (c) => {
   let where = `p.workspace_id = $1 and p.deleted_at is null
        and ($2 = '' or p.name ilike $3 or p.email ilike $3 or p.address ilike $3 or p.phone ilike $3)`;
   if (tag) { params.push(JSON.stringify(tag)); where += ` and p.tags @> $${params.length}::jsonb`; }
-  if (rating) { params.push(rating); where += ` and p.rating = $${params.length}`; }
+  // rating: one code (4B), a comma list for a band (1,2 · 4,4D,4B,4F,4N,4C),
+  // and/or "unrated" (no rating yet).
+  if (rating) {
+    const codes = [...new Set(rating.split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 20);
+    const ors = [];
+    for (const code of codes) {
+      if (code === 'unrated') { ors.push('p.rating is null'); continue; }
+      params.push(code);
+      ors.push(`p.rating = $${params.length}`);
+    }
+    where += ors.length ? ` and (${ors.join(' or ')})` : ' and false';
+  }
   if (role) {
     params.push(role);
     where += ` and exists (select 1 from volunteer_roles v where v.person_id = p.id and v.role = $${params.length})`;

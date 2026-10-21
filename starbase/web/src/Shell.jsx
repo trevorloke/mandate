@@ -1,7 +1,8 @@
 // App chrome. The nav is the handful of things each role actually does:
 //   desk (staff, treasurer, manager): Today · Map · People · Shifts · Money · Signs · Outreach
 //   volunteer:                        Today · Map · Calls · Shifts
-// Top bar on desktop, a big-label tab bar on phones (field mode lives on /map).
+// Top bar on desktop, a big-label tab bar on phones (field mode lives on /map):
+// every label whole at 390px, never cut off ("OUTREACH", not "OUTRE…").
 // One account menu (the avatar) holds the name, the campaign, Team (managers)
 // and Sign out. Keyboard: 'n' anywhere → log a gift (desk roles).
 // Under the nav, a slim strip says when the phone is offline or knocks are
@@ -94,8 +95,9 @@ function OfflineBanner({ online, outbox, onSend, notice, onDismissNotice }) {
         <span className="offline-strip__dot" aria-hidden="true" />
         {text && <span className="offline-strip__text">{text}</span>}
         {!online && pending > 0 && <span className="offline-strip__hint">Sends when you're back online</span>}
+        {/* Not yellow: the screen under the strip keeps its one primary button. */}
         {online && pending > 0 && (
-          <button type="button" className="btn btn-primary offline-strip__btn" onClick={onSend} disabled={flushing}>
+          <button type="button" className="btn offline-strip__btn" onClick={onSend} disabled={flushing}>
             {flushing ? 'Sending…' : 'Send now'}
           </button>
         )}
@@ -322,7 +324,7 @@ function SignedInShell({ me }) {
         </Suspense>
       </main>
       <nav className="tabbar" aria-label="Main (mobile)" data-count={nav.length}
-        style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
+        style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(min-content, 1fr))` }}>
         {nav.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end}>
             <Icon name={n.icon} />

@@ -3,13 +3,16 @@
 // time — Call or Text, then one tap logs the answer and the next person comes
 // up. Filters live in the URL (?q=&tag=&rating=&role=&has=) so any list is
 // shareable; People's "More" opens the same filters as a call or text list.
+// Rating filters are bands (?rating=1,2 · 3 · 4,4D,… · unrated) or one code
+// (?rating=4B, "Voting for…"); the server takes the same value.
 // People is a desk screen: volunteers' /people opens Calls.
 // Shared widgets + helpers are exported from here for Person.jsx.
+// Ratings always render with the shared RatingChip / ratingSay words.
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useSearchParams, useLocation, Link, Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
-import RatingButtons, { ratingWord } from '../components/RatingButtons.jsx';
+import RatingButtons, { RatingChip, ratingSay, ratingWho } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
 import { apiGet, action } from '../api.js';
 import './people.css';
@@ -55,6 +58,31 @@ export const fmtDay = (ts) => {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return String(ts);
   return d.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+// One-line facts: "Oct 19" this year, "Oct 19, 2025" before.
+export const fmtShort = (ts) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-CA', thisYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Tags read as words: "donor-prospect" → "Donor prospect", "media" → "Media";
+// all-caps tags ("VIP") stay. Display only — the stored tag never changes.
+export const tagWord = (t) => {
+  const s = String(t ?? '').trim();
+  if (!s || s === s.toUpperCase()) return s;
+  const w = s.replace(/[-_]+/g, ' ').replace(/\s*:\s*/g, ': ').replace(/\s+/g, ' ').trim();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+};
+
+// A past rating in words, the same words as the buttons: "Lean yes",
+// "Undecided", "Opposed", "Opposed · Locke".
+export const ratingLine = (code) => {
+  const r = ratingByCode(code);
+  if (!r) return '';
+  return r.band === 'opposed' && r.code !== '4' ? `Opposed · ${ratingWho(code)}` : ratingSay(code);
 };
 
 export const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
@@ -119,55 +147,6 @@ export function useAction(onDone) {
   return { run, busy, error, clearError: () => setError(null) };
 }
 
-// Filled, band-coloured chip. `code` null → quiet "—" chip.
-export function RatingChip({ code, size, title }) {
-  const r = ratingByCode(code);
-  return (
-    <span
-      className={`rating-chip${size === 'sm' ? ' sm' : ''}`}
-      data-band={r ? r.band : 'none'}
-      title={title ?? (r ? r.label : 'Not yet rated')}
-      aria-label={r ? r.label : 'Not yet rated'}
-    >
-      {r ? r.short : '—'}
-    </span>
-  );
-}
-
-// 1 2 3 4 | 4D 4B 4F 4N 4C — real buttons, ≥48px. (Profiles and Calls use
-// the field's RatingButtons; this stays for anything that wants one row.)
-export function RatingRow({ value, onPick, compact, disabled }) {
-  const base = RATINGS.filter((r) => r.code.length === 1);
-  const sub = RATINGS.filter((r) => r.code.length > 1);
-  const btn = (r) => (
-    <button
-      key={r.code}
-      type="button"
-      className="rating-btn"
-      data-band={r.band}
-      aria-pressed={value === r.code}
-      aria-label={r.label}
-      title={r.label}
-      disabled={disabled}
-      onClick={() => onPick(r.code)}
-    >
-      {r.short}
-    </button>
-  );
-  return (
-    <div className={`rating-row${compact ? ' compact' : ''}`} role="group" aria-label="Rating">
-      {base.map(btn)}
-      <span className="rating-sep" aria-hidden="true" />
-      {sub.map(btn)}
-    </div>
-  );
-}
-
-// One line that makes the scale readable to a first-timer.
-export function ScaleKey() {
-  return <p className="pp-scale" aria-hidden="true">1–2 support · 3 undecided · 4 opposed</p>;
-}
-
 // Tag chips with × remove, a type-to-add input (Enter / comma), and suggested chips.
 // One onChange per commit (a pasted "a, b" is one save, not two racing ones),
 // enforcing the server's 40-char / 50-tag limits client-side.
@@ -219,9 +198,9 @@ export function TagEditor({ tags = [], onChange, suggestions = SUGGESTED_TAGS, a
         <div className="row">
           <span className="tag-chips">
             {tags.map((t) => (
-              <span key={t} className="chip removable">
-                {t}
-                <button type="button" className="chip-x" aria-label={`Remove tag ${t}`} disabled={disabled} onClick={() => remove(t)}>×</button>
+              <span key={t} className="chip removable" title={t}>
+                {tagWord(t)}
+                <button type="button" className="chip-x" aria-label={`Remove tag ${tagWord(t)}`} disabled={disabled} onClick={() => remove(t)}>×</button>
               </span>
             ))}
           </span>
@@ -247,7 +226,7 @@ export function TagEditor({ tags = [], onChange, suggestions = SUGGESTED_TAGS, a
       {left.length > 0 && (
         <div className="row">
           {left.map((s) => (
-            <button key={s} type="button" className="chip-btn" disabled={disabled} onClick={() => add(s)}>+ {s}</button>
+            <button key={s} type="button" className="chip-btn" disabled={disabled} onClick={() => add(s)}>+ {tagWord(s)}</button>
           ))}
         </div>
       )}
@@ -259,7 +238,7 @@ export function TagChips({ tags }) {
   if (!tags || tags.length === 0) return <span className="muted">—</span>;
   return (
     <span className="tag-chips">
-      {tags.map((t) => <span key={t} className="chip">{t}</span>)}
+      {tags.map((t) => <span key={t} className="chip">{tagWord(t)}</span>)}
     </span>
   );
 }
@@ -318,6 +297,25 @@ export function MoreMenu({ items, label = 'More' }) {
 const HAS_LABEL = { phone: 'Has phone', email: 'Has email', location: 'On map' };
 const FILTER_KEYS = ['q', 'tag', 'rating', 'role'];
 
+// Rating filter: three bands + Unrated on the first look; who an opposed
+// voter backs ("Voting for…") under More. The value goes to the server as is.
+const OPPOSED_CODES = RATINGS.filter((r) => r.band === 'opposed').map((r) => r.code);
+const RATING_BANDS = [
+  { value: RATINGS.filter((r) => r.band === 'support').map((r) => r.code).join(','), label: 'Support', band: 'support' },
+  { value: RATINGS.filter((r) => r.band === 'undecided').map((r) => r.code).join(','), label: 'Undecided', band: 'undecided' },
+  { value: OPPOSED_CODES.join(','), label: 'Opposed', band: 'opposed' },
+  { value: 'unrated', label: 'Unrated', band: 'none' },
+];
+const WHO_CODES = OPPOSED_CODES.filter((c) => c !== '4'); // 4D 4B 4F 4N 4C
+// "Support", "Voting for Locke", "Rated 2 · Lean yes" (an old one-code link).
+const ratingFilterLabel = (v) => {
+  const band = RATING_BANDS.find((b) => b.value === v);
+  if (band) return band.label;
+  if (WHO_CODES.includes(v)) return `Voting for ${ratingWho(v)}`;
+  return ratingByCode(v) ? `Rated ${v} · ${ratingSay(v)}` : v;
+};
+const ratingFilterBand = (v) => RATING_BANDS.find((b) => b.value === v)?.band || ratingByCode(v)?.band || 'none';
+
 function useFilters() {
   const [params, setParams] = useSearchParams();
   const f = {
@@ -352,8 +350,12 @@ const carry = (f, extra = {}) => {
 function FilterChips({ f, update, keys = ['rating', 'tag', 'role', 'has'], extra = null }) {
   const roleLabel = VOLUNTEER_ROLES.find((r) => r.code === f.role)?.label || f.role;
   const chips = [
-    keys.includes('rating') && f.rating && { key: 'rating', label: <>Rated <RatingChip code={f.rating} size="sm" /></>, name: `rating ${f.rating}` },
-    keys.includes('tag') && f.tag && { key: 'tag', label: f.tag, name: `tag ${f.tag}` },
+    keys.includes('rating') && f.rating && {
+      key: 'rating',
+      label: <><span className="pp-dot" data-band={ratingFilterBand(f.rating)} aria-hidden="true" />{ratingFilterLabel(f.rating)}</>,
+      name: ratingFilterLabel(f.rating),
+    },
+    keys.includes('tag') && f.tag && { key: 'tag', label: tagWord(f.tag), name: `tag ${tagWord(f.tag)}` },
     keys.includes('role') && f.role && { key: 'role', label: roleLabel, name: roleLabel },
     keys.includes('has') && f.has && HAS_LABEL[f.has] && { key: 'has', label: HAS_LABEL[f.has], name: HAS_LABEL[f.has] },
     keys.includes('q') && f.q && { key: 'q', label: `“${f.q}”`, name: `search ${f.q}` },
@@ -394,12 +396,15 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
   }, [onClose, phone]);
   const pick = (key, value) => update({ [key]: f[key] === value ? null : value });
   const anyPicked = Boolean(f.rating || f.tag || f.role || f.has);
-  // Tags and roles are the long lists: one tap away, open if one is picked.
-  const [moreOpen, setMoreOpen] = useState(Boolean(f.tag || f.role));
+  // Who they vote for, tags and roles are the long lists: one tap away, open if one is picked.
+  const whoPicked = WHO_CODES.includes(f.rating);
+  const [moreOpen, setMoreOpen] = useState(Boolean(f.tag || f.role || whoPicked));
+  const morePicked = [whoPicked, f.tag, f.role].filter(Boolean).length;
   const moreId = useId();
-  const chip = (key, value, label) => (
+  const chip = (key, value, label, band) => (
     <button key={value} type="button" className={`chip-btn pp-pick${f[key] === value ? ' on' : ''}`}
       aria-pressed={f[key] === value} onClick={() => pick(key, value)}>
+      {band && <span className="pp-dot" data-band={band} aria-hidden="true" />}
       {label}
     </button>
   );
@@ -420,14 +425,8 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
         <div className="pp-sheet__body">
           <fieldset className="pp-group">
             <legend className="eyebrow">Rating</legend>
-            <div className={`pp-group__opts${f.rating ? ' has-pick' : ''}`}>
-              {RATINGS.map((r) => (
-                <button key={r.code} type="button" className={`rating-chip pp-rate${f.rating === r.code ? ' on' : ''}`}
-                  data-band={r.band} title={r.label} aria-label={r.label} aria-pressed={f.rating === r.code}
-                  onClick={() => pick('rating', r.code)}>
-                  {r.short}
-                </button>
-              ))}
+            <div className="pp-group__opts">
+              {RATING_BANDS.map((b) => chip('rating', b.value, b.label, b.band))}
             </div>
           </fieldset>
           <fieldset className="pp-group">
@@ -438,16 +437,20 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
               {chip('has', 'location', 'Map pin')}
             </div>
           </fieldset>
-          <button type="button" className="btn btn-quiet pp-btn pp-morefilters" aria-expanded={moreOpen} aria-controls={moreId}
+          <button type="button" className="pp-morefilters disclose disclose--inline" aria-expanded={moreOpen} aria-controls={moreId}
             onClick={() => setMoreOpen((v) => !v)}>
-            {moreOpen ? '− Fewer filters' : '+ More filters'}
-            {!moreOpen && (f.tag || f.role) ? <span className="pp-badge">{[f.tag, f.role].filter(Boolean).length}</span> : null}
+            More filters
+            {!moreOpen && morePicked ? <span className="pp-badge">{morePicked}</span> : null}
           </button>
           {moreOpen && (
             <div className="pp-sheet__more" id={moreId}>
               <fieldset className="pp-group">
+                <legend className="eyebrow">Voting for…</legend>
+                <div className="pp-group__opts">{WHO_CODES.map((c) => chip('rating', c, ratingWho(c), 'opposed'))}</div>
+              </fieldset>
+              <fieldset className="pp-group">
                 <legend className="eyebrow">Tag</legend>
-                <div className="pp-group__opts">{tagOptions.map((t) => chip('tag', t, t))}</div>
+                <div className="pp-group__opts">{tagOptions.map((t) => chip('tag', t, tagWord(t)))}</div>
               </fieldset>
               <fieldset className="pp-group">
                 <legend className="eyebrow">Volunteer role</legend>
@@ -518,8 +521,8 @@ function AddPersonForm({ onClose }) {
         <label htmlFor="np-address">Street address</label>
         <input id="np-address" className="input" maxLength={1000} value={form.address} onChange={set('address')} placeholder="13450 104 Ave" />
       </div>
-      <button type="button" className="btn btn-quiet pp-btn pp-moredetails" aria-expanded={more} onClick={() => setMore((v) => !v)}>
-        {more ? '− Fewer details' : '+ More details'}
+      <button type="button" className="pp-moredetails disclose disclose--inline" aria-expanded={more} onClick={() => setMore((v) => !v)}>
+        More details
       </button>
       {more && (
         <>
@@ -568,7 +571,7 @@ const LIMIT = 300;
 // Tags worth a glance in a row: never 'sample' (Today already says so), at most two.
 const HIDDEN_TAGS = new Set(['sample']);
 const rowTags = (tags) => {
-  const shown = (tags || []).filter((t) => !HIDDEN_TAGS.has(t));
+  const shown = (tags || []).filter((t) => !HIDDEN_TAGS.has(t)).map(tagWord);
   return shown.length > 2 ? `${shown.slice(0, 2).join(' · ')} +${shown.length - 2}` : shown.join(' · ');
 };
 
@@ -694,7 +697,7 @@ function PeopleList() {
                   <span className="pp-row__name">{p.name}</span>
                   <span className="pp-row__fact">{p.phone || streetLine(p) || p.email || ''}</span>
                 </span>
-                <RatingChip code={p.rating} />
+                {p.rating && <RatingChip code={p.rating} who />}
               </Link>
             </li>
           ))}
@@ -719,7 +722,7 @@ function PeopleList() {
                     {p.kind === 'org' && <> <span className="chip chip-ghost">org</span></>}
                     {second && <span className="pp-table__second">{second}</span>}
                   </td>
-                  <td><RatingChip code={p.rating} /></td>
+                  <td>{p.rating && <RatingChip code={p.rating} who />}</td>
                   <td>
                     {p.phone
                       ? <a className="tel" href={telHref(p.phone)} onClick={(e) => e.stopPropagation()}>{p.phone}</a>
@@ -784,6 +787,12 @@ function CallsScreen() {
   const [currentId, setCurrentId] = useState(null);
   const [listOpen, setListOpen] = useState(false);
   const [toast, setToast] = useState(null); // { text, person }
+  // The rating tapped for each person in this sitting: the buttons start blank
+  // and only show a check for what you picked (e.g. after "Change").
+  const [picked, setPicked] = useState({});
+  // "Change" brings a person back even when their new rating took them out
+  // of a filtered list (Calls for Undecided, then they said Lean yes).
+  const [held, setHeld] = useState(null);
   const toastTimer = useRef(null);
   const cardRef = useRef(null);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -795,10 +804,12 @@ function CallsScreen() {
   const act = useAction(() => { invalidatePersonData(queryClient); });
 
   const queue = rows.filter((p) => !done[p.id]);
-  const current = queue.find((p) => p.id === currentId) || queue[0] || null;
-  const at = current ? queue.indexOf(current) : -1;
+  const current = queue.find((p) => p.id === currentId) || (held?.id === currentId ? held : null) || queue[0] || null;
+  const at = current ? queue.indexOf(current) : -1; // -1: a held person outside the list
   const calledHere = rows.length - queue.length;
-  const after = (i) => (queue.length > 1 ? queue[(i + 1) % queue.length] : null);
+  const mine = (current && picked[current.id]) || null;
+  const after = (i) => (i < 0 ? queue[0] || null : queue.length > 1 ? queue[(i + 1) % queue.length] : null);
+  const upNext = at < 0 ? queue : queue.slice(at + 1).concat(queue.slice(0, at));
 
   const showToast = (text, person) => {
     setToast({ text, person });
@@ -813,8 +824,10 @@ function CallsScreen() {
     if (!res) return;
     const next = after(at);
     markDone(p.id, { rating: rating || null, outcome, queued: !!res.queued });
+    if (rating) setPicked((m) => ({ ...m, [p.id]: rating }));
+    setHeld(null);
     setCurrentId(next?.id ?? null);
-    const what = rating ? `${rating} ${ratingWord(rating)}` : outcomeWord(outcome, channel);
+    const what = rating ? `Rated ${rating} · ${ratingSay(rating)}` : outcomeWord(outcome, channel);
     showToast(`${firstName(p.name)} · ${what}${res.queued ? ' · saved offline' : ''}`, p);
   };
   const skip = () => { const next = after(at); if (next) setCurrentId(next.id); };
@@ -824,6 +837,7 @@ function CallsScreen() {
     clearTimeout(toastTimer.current);
     if (!p) return;
     markDone(p.id, null);
+    setHeld(p);
     setCurrentId(p.id);
     cardRef.current?.scrollIntoView?.({ block: 'start' });
   };
@@ -858,7 +872,7 @@ function CallsScreen() {
 
       {persons.isLoading ? (
         <p className="muted">Loading…</p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !current ? (
         <div className="pp-empty">
           <p>No one to {noun} yet.</p>
           {desk && <Link className="btn pp-btn" to="/people">Go to People</Link>}
@@ -874,7 +888,7 @@ function CallsScreen() {
             <span><strong className="mono">{queue.length}</strong> to {noun}</span>
             <div className="cl-bar" role="progressbar" aria-label={`${calledHere} of ${rows.length} done`}
               aria-valuemin={0} aria-valuemax={rows.length} aria-valuenow={calledHere}>
-              <div className="cl-bar__fill" style={{ width: `${Math.round((calledHere / rows.length) * 100)}%` }} />
+              <div className="cl-bar__fill" style={{ width: `${rows.length ? Math.round((calledHere / rows.length) * 100) : 0}%` }} />
             </div>
           </div>
 
@@ -887,8 +901,12 @@ function CallsScreen() {
                 </Link>
                 <span className="cl-phone mono">{current.phone}</span>
                 {streetLine(current) && <span className="cl-addr">{streetLine(current)}</span>}
+                {current.rating && !mine && (
+                  <span className="cl-last">
+                    Last time: {ratingLine(current.rating)}{current.rated_at ? ` · ${fmtShort(current.rated_at)}` : ''}
+                  </span>
+                )}
               </div>
-              <RatingChip code={current.rating} />
             </div>
 
             {channel === 'text' ? (
@@ -902,8 +920,7 @@ function CallsScreen() {
             )}
 
             <div className="cl-rate">
-              <RatingButtons value={current.rating} onPick={(code) => log('contacted', code)} disabled={act.busy} />
-              <ScaleKey />
+              <RatingButtons value={mine} onPick={(code) => log('contacted', code)} disabled={act.busy} />
             </div>
 
             <div className="cl-outcomes">
@@ -911,25 +928,25 @@ function CallsScreen() {
                 {channel === 'text' ? 'No reply' : 'No answer'}
               </button>
               <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('refused')}>Refused</button>
-              <button type="button" className="cl-out cl-skip" disabled={act.busy || queue.length < 2} onClick={skip}>
+              <button type="button" className="cl-out cl-skip" disabled={act.busy || !after(at)} onClick={skip}>
                 Skip <Icon name="next" size={18} />
               </button>
             </div>
             {act.error && <p className="error" role="alert">{act.error}</p>}
           </section>
 
-          {queue.length > 1 && (
+          {upNext.length > 0 && (
             <div className="cl-next">
-              <button type="button" className="cl-next__btn" aria-expanded={listOpen} onClick={() => setListOpen((v) => !v)}>
-                Up next <span aria-hidden="true">{listOpen ? '−' : '+'}</span>
+              <button type="button" className="cl-next__btn disclose" aria-expanded={listOpen} onClick={() => setListOpen((v) => !v)}>
+                Up next
               </button>
               {listOpen && (
                 <ul className="cl-next__list">
-                  {queue.slice(at + 1).concat(queue.slice(0, at)).map((p) => (
+                  {upNext.map((p) => (
                     <li key={p.id}>
                       <button type="button" onClick={() => { setCurrentId(p.id); setListOpen(false); cardRef.current?.scrollIntoView?.({ block: 'start' }); }}>
                         <span>{p.name}</span>
-                        <RatingChip code={p.rating} />
+                        {p.rating && <RatingChip code={p.rating} who />}
                       </button>
                     </li>
                   ))}

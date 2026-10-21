@@ -145,7 +145,7 @@ function PersonFields({ idPrefix, form, set, withAddress }) {
           <input id={`${idPrefix}-phone`} className="input" type="tel" inputMode="tel" maxLength={40} autoComplete="off" autoFocus={more && !form.phone} value={form.phone} onChange={set('phone')} />
         </div>
       ) : (
-        <button type="button" className="fk-link door-form__more" onClick={() => setMore(true)}>+ Phone</button>
+        <button type="button" className="door-form__more disclose disclose--inline" aria-expanded={false} onClick={() => setMore(true)}>Phone</button>
       )}
     </>
   );

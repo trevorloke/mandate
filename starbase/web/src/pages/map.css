@@ -224,28 +224,8 @@
 .fk-out:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .fk-out:disabled { opacity: 0.55; cursor: default; }
 
-/* "More" disclosure */
-.fk-more { border-top: 1px solid var(--rule); margin-top: var(--s-3); }
-.fk-more__btn {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
-  min-height: 48px;
-  padding: 0 var(--s-4);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-@media (hover: hover) { .fk-more__btn:hover { color: var(--text-1); background: var(--paper-1); } }
-.fk-more__btn:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: -2px; }
-.fk-more__caret { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rule-2); border-radius: 50%; font-size: 15px; }
+/* "More" disclosure — the shared .disclose row (app.css), edge to edge in the card */
+.fk-more { margin-top: var(--s-3); --disclose-x: var(--s-4); }
 .fk-more__body { display: flex; flex-direction: column; gap: var(--s-3); padding: 0 var(--s-4) var(--s-4); }
 
 /* ── Overlays ── */

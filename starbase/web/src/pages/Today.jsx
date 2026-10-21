@@ -1,24 +1,28 @@
 // Today — the first screen, one job per role.
-//   Volunteer: one big "Start canvassing" (their walk list, or the map), then
-//     ONE shift line: "Your next shift" only when they're on it, otherwise the
-//     next open shift with "5 spots open" (→ /shifts). One small line of field
-//     numbers. Other turfs and the upcoming events (with their RSVP pages) sit
-//     under "More".
+//   Volunteer: one big yellow button — "Start canvassing" (their walk list, or
+//     the map), or "Make calls" once every walk list is done — then ONE shift
+//     line: "Your next shift" only when they're on it, otherwise the next open
+//     shift with "5 spots open" (→ that shift, where they join it). Signs
+//     waiting to go up get one row (→ Signs to put up). One small line of
+//     field numbers. Turfs and the upcoming events (with their RSVP pages)
+//     sit under "More".
 //   Desk: three big numbers (doors this week · support · total raised), each a
-//     tap to its screen — support opens its 1/2/3/4D/4B… breakdown in place;
-//     then "Needs you" (gifts over the limit, open pledges, filings due, short
-//     shifts, signs to put up) — every row a tap to where it's fixed — then
-//     the next shift and event.
+//     tap to its screen — support opens its breakdown in place, opposed by
+//     candidate ("McCallum 3 · Locke 2"); then "Needs you" (gifts over the
+//     limit, open pledges, filings due, short shifts, signs to put up) —
+//     every row a tap to where it's fixed — then the next shift and event.
 //     Getting started shows only the steps not done, and only while the
-//     campaign is new. Walk lists, filings, providers, "Verify my books" and
-//     the export sit under a quiet "More" at the bottom.
-// A nearly empty campaign gets a one-click sample dataset (managers), cleared
-// again from the same screen. Volunteers never see money.
+//     campaign is new. Walk lists, filings, providers, "Verify my books", the
+//     export and "Clear sample data" sit under a quiet "More" at the bottom.
+// A nearly empty campaign gets a one-click sample dataset (managers); a quiet
+// "Sample data is loaded" line stays at the top while it's there. Volunteers
+// never see money.
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RATINGS } from '@starbase/shared/canvass';
 import { ApiError, apiGet, apiPost, fmtMoney } from '../api.js';
+import { ratingWho } from '../components/RatingButtons.jsx';
 import './today.css';
 
 const greeting = () => {
@@ -118,14 +122,21 @@ function SampleCard({ onToast }) {
       {already && (
         <>
           <p className="error" role="alert">Sample people are already here. Clear them first.</p>
-          <SampleLoadedLine canClear onToast={onToast} onCleared={() => setAlready(false)} />
+          <SampleClear onToast={onToast} onCleared={() => setAlready(false)} />
         </>
       )}
     </section>
   );
 }
 
-function SampleLoadedLine({ canClear, onToast, onCleared }) {
+// The quiet line at the top while the sample is in. Clearing it lives under
+// "More" (managers).
+function SampleLine({ desk }) {
+  return <p className="today-sample-line">{desk ? 'Sample data is loaded' : 'Sample data · made-up voters'}</p>;
+}
+
+// "Clear sample data" → "Remove all sample data? · Clear it · Keep it", in place.
+function SampleClear({ onToast, onCleared }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -157,15 +168,13 @@ function SampleLoadedLine({ canClear, onToast, onCleared }) {
     }
   };
 
-  if (!canClear) {
-    return <p className="today-sample-line">Sample data · made-up voters</p>;
-  }
   if (!confirming) {
     return (
-      <p className="today-sample-line">
-        Sample data is loaded<span className="today-dot" aria-hidden="true">·</span>
-        <button type="button" ref={openRef} className="today-linkbtn" onClick={() => setConfirming(true)}>Clear</button>
-      </p>
+      <div className="today-actions today-sample-clear">
+        <button type="button" ref={openRef} className="btn today-tap" onClick={() => setConfirming(true)}>
+          Clear sample data
+        </button>
+      </div>
     );
   }
   return (
@@ -198,8 +207,10 @@ function supportPicture(ratings) {
   for (const r of RATINGS) {
     const n = Number(ratings?.[r.code]) || 0;
     counts[r.band] += n;
-    if (r.band === 'opposed' && n > 0) variants.push({ code: r.short, label: r.label, n });
+    if (r.band === 'opposed' && n > 0) variants.push({ code: r.code, label: r.label, n });
   }
+  // Opposed, by who they back: biggest first, "Not sure" (plain 4) last.
+  variants.sort((a, b) => (a.code === '4') - (b.code === '4') || b.n - a.n);
   const total = counts.support + counts.undecided + counts.opposed;
   const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
   return { counts, variants, total, pct };
@@ -238,9 +249,9 @@ function SupportDetail({ pic, id }) {
             ))}
           </ul>
           {showVariants && (
-            <ul className="today-variants" aria-label="Opposed, by who they back">
+            <ul className="today-variants" aria-label="Opposed, by who they vote for">
               {variants.map((v) => (
-                <li key={v.code} title={v.label}><span className="mono">{v.code}</span> {num(v.n)}</li>
+                <li key={v.code} title={v.label}>{ratingWho(v.code)} <span className="mono">{num(v.n)}</span></li>
               ))}
             </ul>
           )}
@@ -426,8 +437,8 @@ function useMyNextShift(me) {
 }
 
 // One line: the shift they're booked on — or, if none, the next shift that
-// still needs people ("5 spots open" → the Shifts list). Never someone else's
-// shift dressed up as theirs.
+// still needs people ("5 spots open" → that shift, where "Join" is). Never
+// someone else's shift dressed up as theirs.
 function VolunteerShiftRow({ shifts, me }) {
   const { ready, next } = useMyNextShift(me);
   if (!ready) return <li className="today-need today-row--wait" aria-hidden="true" />;
@@ -438,7 +449,7 @@ function VolunteerShiftRow({ shifts, me }) {
   if (!open) return <LinkRow to="/shifts" main={<span className="muted">No open shifts</span>} />;
   const left = open.capacity ? open.capacity - (Number(open.filled) || 0) : 0;
   return (
-    <WhenRow to="/shifts" kicker="Open shift" title={open.title} when={open.starts_at}
+    <WhenRow to={`/shifts/${open.id}`} kicker="Open shift" title={open.title} when={open.starts_at}
       extra={left ? `${spots(left)} open` : null} />
   );
 }
@@ -470,6 +481,12 @@ function useTurfStats(enabled) {
   const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs'), enabled });
   return Object.fromEntries((turfsQ.data?.turfs ?? []).map((t) => [t.id, t]));
 }
+// Every walk list knocked: each has 0 doors left (and there were doors).
+const allTurfsDone = (turfs, statsById) => {
+  if (!turfs.length) return false;
+  const ds = turfs.map((t) => doorsLeft(statsById[t.id]));
+  return ds.every((d) => d && d.left === 0) && ds.some((d) => d.doors > 0);
+};
 const doorsLeft = (stats) => {
   if (!stats) return null;
   const doors = Number(stats.doors) || 0;
@@ -521,9 +538,9 @@ function More({ children }) {
   const id = useId();
   return (
     <section className="today-morebox">
-      <button type="button" className="today-morebox__toggle" aria-expanded={open} aria-controls={id}
+      <button type="button" className="today-morebox__toggle disclose" aria-expanded={open} aria-controls={id}
         onClick={() => setOpen((v) => !v)}>
-        More <span className="today-chev is-toggle" aria-hidden="true">›</span>
+        More
       </button>
       {open && <div className="today-morebox__body" id={id}>{children}</div>}
     </section>
@@ -531,39 +548,57 @@ function More({ children }) {
 }
 
 // ── Volunteer Today ──
-function VolunteerToday({ b, me, toast }) {
+function VolunteerToday({ b, me }) {
   const myTurfs = b.myTurfs ?? [];
   const statsById = useTurfStats(myTurfs.length > 0);
   // Start where there are doors left; otherwise the first turf; else the map.
+  // Every walk list done: the one button turns to the phones.
+  const done = allTurfsDone(myTurfs, statsById);
   const firstOpen = myTurfs.find((t) => (doorsLeft(statsById[t.id])?.left ?? 1) > 0) ?? myTurfs[0];
   const d = firstOpen ? doorsLeft(statsById[firstOpen.id]) : null;
-  const others = myTurfs.filter((t) => t !== firstOpen);
+  const others = done ? myTurfs : myTurfs.filter((t) => t !== firstOpen);
   const events = b.events ?? [];
   const f = b.field ?? {};
+  const signs = Number(b.signs?.requested) || 0;
 
   return (
     <div className="today today--field">
       <span className="eyebrow">{greeting()}</span>
       <h1>{me.workspace.name}</h1>
-      {b.sampleLoaded && <SampleLoadedLine canClear={false} onToast={toast.show} />}
+      {b.sampleLoaded && <SampleLine />}
 
-      <section className="today-go" aria-label="Canvass">
-        <Link to={firstOpen ? `/turfs/${firstOpen.id}` : '/map'} className="btn btn-primary today-start">
-          Start canvassing <span aria-hidden="true">→</span>
-        </Link>
-        {firstOpen ? (
-          <div className="today-go__meta">
-            <span className="today-go__turf">{firstOpen.name}</span>
-            {d && <span className="mono">{leftLabel(d)}</span>}
-            {d && d.doors > 0 && <span className="today-progress" aria-hidden="true"><span style={{ width: `${d.pct}%` }} /></span>}
-          </div>
-        ) : (
-          <p className="today-go__meta muted">No walk list yet — doors near you on the map.</p>
-        )}
-      </section>
+      {done ? (
+        <section className="today-go" aria-label="Calls">
+          <Link to="/calls" className="btn btn-primary today-start">
+            Make calls <span aria-hidden="true">→</span>
+          </Link>
+          <p className="today-go__meta">
+            <span className="today-go__turf">{myTurfs.length === 1 ? myTurfs[0].name : `${myTurfs.length} turfs`}</span>
+            <span className="today-go__done">— All done <span aria-hidden="true">✓</span></span>
+          </p>
+        </section>
+      ) : (
+        <section className="today-go" aria-label="Canvass">
+          <Link to={firstOpen ? `/turfs/${firstOpen.id}` : '/map'} className="btn btn-primary today-start">
+            Start canvassing <span aria-hidden="true">→</span>
+          </Link>
+          {firstOpen ? (
+            <div className="today-go__meta">
+              <span className="today-go__turf">{firstOpen.name}</span>
+              {d && <span className="mono">{leftLabel(d)}</span>}
+              {d && d.doors > 0 && <span className="today-progress" aria-hidden="true"><span style={{ width: `${d.pct}%` }} /></span>}
+            </div>
+          ) : (
+            <p className="today-go__meta muted">No walk list yet — doors near you on the map.</p>
+          )}
+        </section>
+      )}
 
       <ul className="today-rows today-next">
         <VolunteerShiftRow shifts={b.shifts ?? []} me={me} />
+        {signs > 0 && (
+          <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
+        )}
       </ul>
 
       <p className="today-fieldline mono">
@@ -574,7 +609,7 @@ function VolunteerToday({ b, me, toast }) {
         <p className="today-fieldline mono">{num(f.texts)} {plural(Number(f.texts) || 0, 'text')} this week</p>
         {others.length > 0 && (
           <>
-            <h3 className="today-subh">Your other turfs</h3>
+            <h3 className="today-subh">{done ? 'Your turfs' : 'Your other turfs'}</h3>
             <TurfRows turfs={others} statsById={statsById} />
           </>
         )}
@@ -622,7 +657,7 @@ function DeskToday({ b, me, toast }) {
       <h1>{me.workspace.name}</h1>
 
       {offerSample && <SampleCard onToast={toast.show} />}
-      {b.sampleLoaded && <SampleLoadedLine canClear={isManager} onToast={toast.show} />}
+      {b.sampleLoaded && <SampleLine desk />}
       {showSteps && <GettingStarted steps={stepsLeft} role={me?.role} navigate={navigate} />}
 
       <Numbers b={b} pic={pic} />
@@ -665,6 +700,7 @@ function DeskToday({ b, me, toast }) {
         {verify?.ok && <p className="mono ok-text" role="status">✓ {verify.checked} entries check out</p>}
         {verify?.ok === false && <p className="error" role="alert">The books don’t check out</p>}
         {verify?.error && <p className="error" role="alert">{verify.error}</p>}
+        {b.sampleLoaded && isManager && <SampleClear onToast={toast.show} />}
       </More>
     </div>
   );
@@ -710,7 +746,7 @@ export default function Today() {
 
   return (
     <>
-      {desk ? <DeskToday b={b} me={me} toast={toast} /> : <VolunteerToday b={b} me={me} toast={toast} />}
+      {desk ? <DeskToday b={b} me={me} toast={toast} /> : <VolunteerToday b={b} me={me} />}
       {toast.msg && (
         <div className="toast today-toast" role="status">
           <span>{toast.msg}</span>

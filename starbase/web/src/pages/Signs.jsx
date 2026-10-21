@@ -231,7 +231,7 @@ function PlaceSignForm({ presetPersonId, canCreatePerson, onSaved, onClose }) {
         </div>
       )}
 
-      <button type="button" className="ops-more" aria-expanded={more} aria-controls="sign-more"
+      <button type="button" className="ops-more disclose disclose--inline" aria-expanded={more} aria-controls="sign-more"
         onClick={() => setMore((v) => !v)}>
         More details
       </button>
@@ -388,7 +388,7 @@ export default function Signs() {
         )}
 
         <div className="ops-foot">
-          <button type="button" className="ops-more" aria-expanded={more} aria-controls="signs-more"
+          <button type="button" className="ops-more disclose" aria-expanded={more} aria-controls="signs-more"
             onClick={() => setMore((v) => !v)}>
             More
           </button>
@@ -445,7 +445,7 @@ export default function Signs() {
         ))}
       </div>
 
-      <button type="button" className="ops-more ops-more--tight" aria-expanded={kindsOpen} aria-controls="signs-kinds"
+      <button type="button" className="ops-more ops-more--tight disclose" aria-expanded={kindsOpen} aria-controls="signs-kinds"
         onClick={() => setKindsOpen((v) => !v)}>
         More{kindFilter ? ` · ${kindShort(kindFilter)}` : ''}
       </button>

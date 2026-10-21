@@ -36,7 +36,7 @@ function RolesHelp() {
   const id = useId();
   return (
     <div className="ot-more-wrap">
-      <button type="button" className="ot-more" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="ot-more disclose" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
         Roles
       </button>
       {open && (

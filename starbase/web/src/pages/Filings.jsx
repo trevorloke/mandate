@@ -60,7 +60,7 @@ function AddFilingForm({ onDone, onClose }) {
         <input id="nf-due" className="input mono" type="date" required
           value={form.due_date} onChange={set('due_date')} />
       </div>
-      <button type="button" className="ops-more" aria-expanded={more} aria-controls="nf-more"
+      <button type="button" className="ops-more disclose disclose--inline" aria-expanded={more} aria-controls="nf-more"
         onClick={() => setMore((v) => !v)}>
         More details
       </button>
@@ -193,7 +193,7 @@ export default function Filings() {
 
       {filed.length > 0 && (
         <div className="ops-foot">
-          <button type="button" className="ops-more" aria-expanded={showFiled} aria-controls="filed-list"
+          <button type="button" className="ops-more disclose" aria-expanded={showFiled} aria-controls="filed-list"
             onClick={() => setShowFiled((v) => !v)}>
             Filed · {filed.length}
           </button>

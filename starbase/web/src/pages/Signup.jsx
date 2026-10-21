@@ -14,11 +14,8 @@ const JURISDICTIONS = [
 // Big, thumb-sized controls (auth pages load before any page stylesheet).
 const AUTH_INPUT = { minHeight: 48, fontSize: 16 };
 const AUTH_BUTTON = { width: '100%', minHeight: 52, fontSize: 13, marginTop: 'var(--s-2)' };
-const MORE = {
-  display: 'inline-flex', alignItems: 'center', gap: 'var(--s-2)', minHeight: 48, padding: 0, margin: '0 0 var(--s-2)',
-  background: 'none', border: 0, cursor: 'pointer', color: 'var(--text-3)',
-  fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase',
-};
+// "More" is the shared .disclose--inline look (app.css, loaded before any page).
+const MORE = { marginBottom: 'var(--s-2)' };
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -73,8 +70,7 @@ export default function Signup() {
             value={form.workspaceName} onChange={set('workspaceName')} />
         </div>
 
-        <button type="button" style={MORE} aria-expanded={more} aria-controls="su-more" onClick={() => setMore((v) => !v)}>
-          <span aria-hidden="true" style={{ fontSize: 16, width: 12, textAlign: 'center' }}>{more ? '−' : '+'}</span>
+        <button type="button" className="disclose disclose--inline" style={MORE} aria-expanded={more} aria-controls="su-more" onClick={() => setMore((v) => !v)}>
           More
         </button>
         {more ? (

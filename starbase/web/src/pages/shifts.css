@@ -60,29 +60,11 @@
 .ops-done { color: var(--ok); font-family: var(--font-mono); font-size: 13px; margin: 0 0 var(--s-3); }
 .ops-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-/* "More details" / "More" — a quiet toggle; what it reveals is only rendered when open */
-.ops-more {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  min-height: 48px;
-  padding: 0;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-.ops-more::before { content: '+'; font-size: 16px; line-height: 1; width: 12px; text-align: center; }
-.ops-more[aria-expanded='true']::before { content: '−'; }
-.ops-more:hover { color: var(--text-1); }
-.ops-more:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
+/* "More details" / "More": the shared .disclose row (app.css); what it reveals is only rendered when open */
 .ops-more-body { padding-top: var(--s-2); }
-.ops-more--tight { margin: 0 0 var(--s-1); }
-.ops-foot { margin-top: var(--s-5); border-top: 1px solid var(--rule); }
+.ops-more--tight { margin: var(--s-3) 0 var(--s-1); }
+.ops-rows + .disclose { margin-top: var(--s-3); }
+.ops-foot { margin-top: var(--s-5); }
 
 /* In-place confirm: "Remove Sam? Yes · No" */
 .ops-confirm { display: flex; align-items: center; gap: var(--s-2) var(--s-3); flex-wrap: wrap; }
