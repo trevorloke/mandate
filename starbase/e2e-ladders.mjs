@@ -12,9 +12,12 @@
 // email, so the ladder's email skips her ("didn't ask for email"). The
 // unsubscribe link asks before it acts; once Ana is off the list the desk
 // can't add her back; Dora (never on it) is flagged do-not-email with no list
-// row. The builder's email card says who it reaches, "+ First name" fills in
-// and a {first_name} is flagged. The books still verify. New screens are
-// measured (visible words, yellow buttons, sideways scroll, 48px targets).
+// row. The builder's email card says who it reaches ("· N people said yes"),
+// "+ First name" fills in as "[first name]" (the server keeps {{first_name}}),
+// no code shows on the builder, and a {first_name} is flagged. Back links
+// say where they go ("← Today" from Today, "← Ladders", "← Ana Souza" from her
+// profile). The books still verify. New screens are measured (visible words,
+// yellow buttons, sideways scroll, 48px targets).
 //
 //   STARBASE_DATA=memory PORT=4103 STARBASE_JOBS_EVERY_MS=1000 node server/index.js &
 //   BASE=http://127.0.0.1:4103 SHOTS=/tmp/ladders node e2e-ladders.mjs
@@ -180,11 +183,16 @@ await page.getByLabel('Message').click();
 await page.getByLabel('Message').press('End');
 await page.getByRole('button', { name: '+ Campaign' }).click();
 const filled = [await page.getByLabel('Subject').inputValue(), await page.getByLabel('Message').inputValue()];
-check('+ First name / + Campaign fill in at the cursor', filled[0] === 'Thanks, {{first_name}}' && filled[1] === 'Thank you for signing for 72 Ave. — {{campaign}}', JSON.stringify(filled));
+check('+ First name / + Campaign fill in at the cursor, as words', filled[0] === 'Thanks, [first name]' && filled[1] === 'Thank you for signing for 72 Ave. — [campaign]', JSON.stringify(filled));
 check('no code in the help line', !/\{\{/.test(await page.locator('.lad-new-step .lad-hint').innerText()));
 await page.getByRole('button', { name: 'Add step' }).click();
 await sleep(700);
-await addStep('Follow-up', () => page.getByLabel('Follow-up for staff').fill('Call {{first_name}} to say thanks'));
+await page.getByRole('button', { name: '+ Follow-up' }).click();
+const fuHint = await page.getByLabel('Follow-up for staff').getAttribute('placeholder');
+check('follow-up placeholder in words, no code', fuHint === 'Call [first name] to say thanks', fuHint);
+await page.getByLabel('Follow-up for staff').fill('Call [first name] to say thanks');
+await page.getByRole('button', { name: 'Add step' }).click();
+await sleep(700);
 // Open the follow-up card and move it above the email.
 await page.locator('.lad-step .ops-row', { hasText: 'Follow-up · Call' }).click();
 await page.getByRole('button', { name: 'Move up' }).click();
@@ -197,9 +205,18 @@ L = (await D.api(`/ladders/${ladderId}`)).json;
 const kinds = L.ladder.steps.map((s) => s.kind).join(',');
 check('steps saved in order (follow-up moved up)', kinds === 'tag,followup,email,wait', kinds);
 const cards = (await page.locator('.lad-step .lad-step__line').allInnerTexts()).join(' | ');
-check('cards read as the server has them', cards === 'Tag · thanked | Follow-up · Call {{first_name}} to say thanks | Email · Thanks, {{first_name}} | Wait 1 day', cards);
+const em = L.ladder.steps.find((x) => x.kind === 'email');
+const fu = L.ladder.steps.find((x) => x.kind === 'followup');
+check('the server keeps the codes underneath', em.subject === 'Thanks, {{first_name}}' && em.body === 'Thank you for signing for 72 Ave. — {{campaign}}'
+  && fu.text === 'Call {{first_name}} to say thanks', JSON.stringify([em, fu]));
+check('cards read as the server has them, in words', cards === 'Tag · thanked | Follow-up · Call [first name] to say thanks | Email · Thanks, [first name] | Wait 1 day', cards);
+check('no code on the builder', !/\{\{|\}\}/.test(await D.text()), (await D.text()).match(/.{0,40}\{\{.{0,40}/)?.[0]);
 const who = (await page.locator('.lad-step .lad-step__who').allInnerTexts()).map((x) => x.trim());
-check('the email card says who it reaches (= server)', who.length === 1 && who[0] === `Goes only to people who said yes to email · ${L.emailYes}`, `${who.join(' | ')} vs ${L.emailYes}`);
+const saidYes = `${L.emailYes} ${L.emailYes === 1 ? 'person' : 'people'} said yes`;
+check('the email card says who it reaches, the number with its noun (= server)', who.length === 1 && who[0] === `Goes only to people who said yes to email · ${saidYes}`, `${who.join(' | ')} vs ${L.emailYes}`);
+const back = async () => ({ text: ((await page.locator('.ops-back').first().textContent().catch(() => '')) || '').trim(), href: await page.locator('.ops-back').first().getAttribute('href').catch(() => null) });
+let bk = await back();
+check('builder back: "← Ladders", like every screen', bk.text === '← Ladders' && bk.href === '/ladders', JSON.stringify(bk));
 check('the steps row says "Other steps", the page has one More',
   await page.getByRole('button', { name: 'Other steps' }).isVisible() && (await page.getByRole('button', { name: 'More', exact: true }).count()) === 1);
 // Field targets inside an open email editor.
@@ -262,6 +279,8 @@ await sleep(700);
 let FU = (await D.api('/ladders/followups')).json;
 t = await D.text();
 check('follow-up reads as the server has it', FU.open.length === 1 && FU.open[0].text === 'Call Ana to say thanks' && t.includes('Call Ana to say thanks') && /1 to do/.test(t), t.slice(0, 200));
+bk = await back();
+check('follow-ups from Today: back says "← Today"', bk.text === '← Today' && bk.href === '/', JSON.stringify(bk));
 await simple(page, 'follow-ups (desktop)');
 await D.shot('6-follow-ups');
 await page.getByRole('button', { name: 'Done' }).click();
@@ -284,6 +303,11 @@ await sleep(300);
 t = await D.text();
 check('profile: Ladders section says where she is', /Thank petition signers Waiting — email isn’t connected/.test(t) && /Call Ana to say thanks/.test(t), t.slice(t.indexOf('Ladders'), t.indexOf('Ladders') + 160));
 await D.shot('7-profile');
+await page.locator('.lad-pf-runs a', { hasText: 'Thank petition signers' }).click();
+await page.waitForURL(`${BASE}/ladders/${ladderId}`, { timeout: 8000 }).catch(() => {});
+await sleep(700);
+bk = await back();
+check('ladder from her profile: back says "← Ana Souza"', bk.text === '← Ana Souza' && bk.href === `/people/${ana.id}`, JSON.stringify(bk));
 
 // ── 8. The list + engagement ──
 await D.go('/ladders');
@@ -291,6 +315,12 @@ t = await D.text();
 const rowText = (await page.locator('.ops-rows .ops-item', { hasText: 'Thank petition signers' }).innerText()).replace(/\s+/g, ' ').trim();
 check('list row: trigger, counts, On', /^Thank petition signers Signed a petition · Fix 72 Ave 1 in progress · 0 finished On$/i.test(rowText), rowText);
 check('list: follow-ups row and email note', /1 follow-up to do/.test(t) && /Email isn’t connected — email steps wait\./.test(t));
+await page.locator('a.lad-fu-link').click();
+await page.waitForURL(`${BASE}/follow-ups`, { timeout: 8000 }).catch(() => {});
+await sleep(500);
+bk = await back();
+check('follow-ups from Ladders: back says "← Ladders"', bk.text === '← Ladders' && bk.href === '/ladders', JSON.stringify(bk));
+await D.go('/ladders');
 await page.getByRole('button', { name: 'How involved people are' }).click();
 await sleep(300);
 const LS = (await D.api('/ladders')).json;

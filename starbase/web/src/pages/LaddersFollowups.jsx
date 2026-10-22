@@ -1,12 +1,13 @@
 // Follow-ups — the staff tasks ladders made ("Call Ana to say thanks").
 // A big number, then one row each: the task, who and which ladder, Call
 // (when there's a phone) and Done. Done says so in a toast with Undo; done
-// ones fold away under "Done · N". Desk only.
+// ones fold away under "Done · N". Back says where it came from ("← Today"
+// from Today's "2 follow-ups", else "← Ladders"). Desk only.
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
-import { fmtWhen } from '../components/LaddersBits.jsx';
+import { LadBack, fmtWhen } from '../components/LaddersBits.jsx';
 import './shifts.css';
 import './ladders.css';
 
@@ -69,7 +70,7 @@ export default function LaddersFollowups() {
   const done = q.data?.done ?? [];
   return (
     <div className="ops-page lad-page">
-      <Link className="ops-back" to="/ladders">‹ Ladders</Link>
+      <LadBack />
       <div className="ops-head"><h1>Follow-ups</h1></div>
       {q.isPending && <p className="muted">Loading…</p>}
       {q.isError && <p className="error" role="alert">{q.error.message}</p>}

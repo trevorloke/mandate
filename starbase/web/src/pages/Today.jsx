@@ -328,10 +328,10 @@ const OVER_LIMIT = 'Over limit';
 const PROSPECT_TAG = 'volunteer-prospect';
 const PROSPECT_MAX = 100;
 
-function LinkRow({ to, main, chip, chipCls = 'chip', end, title }) {
+function LinkRow({ to, state, main, chip, chipCls = 'chip', end, title }) {
   return (
     <li className="today-need">
-      <Link to={to} className="today-row" title={title}>
+      <Link to={to} state={state} className="today-row" title={title}>
         <span className="today-row__main">{main}</span>
         {chip && <span className={chipCls}>{chip}</span>}
         {end && <span className="today-row__end mono">{end}</span>}
@@ -340,6 +340,9 @@ function LinkRow({ to, main, chip, chipCls = 'chip', end, title }) {
     </li>
   );
 }
+
+// A screen opened from here says so on its back link ("← Today").
+const FROM_TODAY = { from: { to: '/', label: 'Today' } };
 
 // "5 spots left" — the same words as the Shifts screen.
 const spotsLeft = (n) => `${n} ${plural(n, 'spot')} left`;
@@ -406,7 +409,7 @@ function NeedsYou({ b, me }) {
             <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
           )}
           {followups.n > 0 && (
-            <LinkRow to="/follow-ups" main={<><strong className="mono">{followups.n}</strong> {plural(followups.n, 'follow-up')}</>} />
+            <LinkRow to="/follow-ups" state={FROM_TODAY} main={<><strong className="mono">{followups.n}</strong> {plural(followups.n, 'follow-up')}</>} />
           )}
           {newTexts > 0 && (
             <LinkRow to="/inbox" main={<><strong className="mono">{newTexts}</strong> new {plural(newTexts, 'text')}</>} />

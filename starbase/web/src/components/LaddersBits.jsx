@@ -4,7 +4,7 @@
 // chip, and the profile's Ladders section. Desk only: the server refuses
 // volunteers every ladder read.
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action } from '../api.js';
 import '../pages/ladders.css';
@@ -40,19 +40,9 @@ export const STEP_KINDS = [
 export const OTHER_STEPS = 'Other steps';
 export const STEP_WORD = { wait: 'Wait', email: 'Email', tag: 'Tag', untag: 'Remove tag', followup: 'Follow-up', stop: 'Stop' };
 
-export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const waitWords = (s) => plural(Number(s.n) || 0, s.unit === 'hours' ? 'hour' : 'day');
-
-// One step as one line: "Wait 1 day", "Email · Thanks, {{first_name}}".
-export const stepLine = (s) => {
-  if (!s) return '';
-  if (s.kind === 'wait') return `Wait ${waitWords(s)}`;
-  if (s.kind === 'email') return `Email · ${s.subject}`;
-  if (s.kind === 'tag') return `Tag · ${s.tag}`;
-  if (s.kind === 'untag') return `Remove tag · ${s.tag}`;
-  if (s.kind === 'followup') return `Follow-up · ${s.text}`;
-  return 'Stop';
-};
+// One step as one line ("Email · Thanks, [first name]") and the rest of the
+// words a step is shown in: LaddersWords.js (plain JS, tested on the server).
+export { plural, stepLine } from './LaddersWords.js';
 
 export const fmtWhen = (ts) => new Date(ts).toLocaleString('en-CA', {
   weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
@@ -104,6 +94,15 @@ export const logLine = (e) => {
 
 // Where the screens send "Connect" (Outreach's Website tab, Email & texting open).
 export const CONNECT_TO = '/outreach/website?connect=1';
+
+// "← Ladders", or back to the screen that opened this one when it said who
+// it is (router state, as Results does): Today's "2 follow-ups" → "← Today".
+export function LadBack() {
+  const from = useLocation().state?.from;
+  return from?.to
+    ? <Link className="ops-back" to={from.to}>← {from.label || 'Back'}</Link>
+    : <Link className="ops-back" to="/ladders">← Ladders</Link>;
+}
 
 // ── Starts when: the trigger, and which petition / event / tag ──
 export function TriggerPicker({ value, onChange, options, idp, disabled }) {
@@ -171,7 +170,10 @@ export const usePersonLadders = (id, desk) => useQuery({
   enabled: Boolean(desk && id),
 });
 
-export function PersonLadders({ data }) {
+export function PersonLadders({ data, name }) {
+  const location = useLocation();
+  // A ladder opened from here comes back here ("← Ana Souza").
+  const from = { to: `${location.pathname}${location.search}`, label: name || 'Back' };
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -209,7 +211,7 @@ export function PersonLadders({ data }) {
         <ul className="list-plain lad-pf-runs">
           {runs.map((r) => (
             <li key={r.id}>
-              <Link to={`/ladders/${r.ladder.id}`}>{r.ladder.name}</Link>
+              <Link to={`/ladders/${r.ladder.id}`} state={{ from }}>{r.ladder.name}</Link>
               <span className="lad-where">{r.ladder.active || r.status === 'done' ? whereLine(r, data.emailConfigured) : 'Ladder is off'}</span>
             </li>
           ))}

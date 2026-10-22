@@ -874,7 +874,7 @@ export default function Person() {
         )}
         {desk && (ladders.data?.runs?.length > 0 || ladders.data?.followups?.length > 0) && (
           <Section title="Ladders" count={ladders.data.runs.filter((r) => r.status !== 'done').length || ''} open={!!open.ladders} onToggle={toggle('ladders')}>
-            <PersonLadders data={ladders.data} />
+            <PersonLadders data={ladders.data} name={person.name} />
           </Section>
         )}
         {desk && answers.data?.answers?.length > 0 && (

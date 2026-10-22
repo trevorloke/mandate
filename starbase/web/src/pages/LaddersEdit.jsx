@@ -5,8 +5,10 @@
 //   Steps: numbered cards (Wait · Email · Tag · Follow-up; Remove a tag and
 //     Stop under "Other steps"). A card opens in place to edit, move or
 //     remove it. An email card says who it goes to: only people who said yes
-//     to email. "+ First name" / "+ Campaign" fill in; a {…} that wouldn't
-//     fill in is flagged before saving.
+//     to email ("· 67 people said yes"). "+ First name" / "+ Campaign" put
+//     in [first name] / [campaign] — the fields and lines show those words,
+//     {{first_name}} / {{campaign}} are stored underneath (LaddersWords.js);
+//     a {…} that wouldn't fill in is flagged before saving.
 //   People: each person and where they are ("Waiting until Fri, Oct 24",
 //     "Waiting — email isn't connected"); a row opens on what each step did,
 //     with Take off. Finished people fold away.
@@ -16,8 +18,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
 import {
-  CONNECT_TO, OTHER_STEPS, STEP_KINDS, TriggerPicker, countsLine, fmtWhen, logLine, stepLine, triggerLine, whereLine,
+  CONNECT_TO, LadBack, OTHER_STEPS, STEP_KINDS, TriggerPicker, countsLine, fmtWhen, logLine, stepLine, triggerLine, whereLine,
 } from '../components/LaddersBits.jsx';
+import { FILLS, emailWho, toCodes, toWords, unfilled } from '../components/LaddersWords.js';
 import './shifts.css';
 import './ladders.css';
 
@@ -31,30 +34,18 @@ const BLANK = {
 };
 const doesSomething = (steps) => steps.some((s) => s.kind !== 'wait' && s.kind !== 'stop');
 
-// What fills in, and the buttons that put it in.
-const TOKENS = [
-  { label: '+ First name', token: '{{first_name}}' },
-  { label: '+ Campaign', token: '{{campaign}}' },
-];
-const FILLS = /\{\{\s*(first_name|campaign)\s*\}\}/gi;
-// "{first_name} won't fill in — use + First name": anything in braces that
-// isn't one of the two would go out as typed.
-const unfilled = (text) => {
-  const rest = String(text || '').replace(FILLS, '');
-  const m = rest.match(/\{+[^{}\n]{0,40}\}*/) || rest.match(/[^\s{}]{0,40}\}+/);
-  if (!m) return null;
-  const use = /camp/i.test(m[0]) ? '+ Campaign' : /name/i.test(m[0]) ? '+ First name' : '+ First name or + Campaign';
-  return `${m[0].trim()} won’t fill in — use ${use}`;
-};
-
 // What a step needs before it can be saved.
 const missing = (s) => {
   if (s.kind === 'wait' && !(Number(s.n) >= 1)) return 'How long?';
   if (s.kind === 'email' && !s.subject.trim()) return 'Add a subject';
   if (s.kind === 'email' && !s.body.trim()) return 'Add a message';
   if (s.kind === 'email') { const u = unfilled(s.subject) || unfilled(s.body); if (u) return u; }
+  // The codes stored are a little longer than the words in the field.
+  if (s.kind === 'email' && s.subject.trim().length > 200) return 'Shorten the subject';
+  if (s.kind === 'email' && s.body.trim().length > 20000) return 'Shorten the message';
   if ((s.kind === 'tag' || s.kind === 'untag') && !s.tag.trim()) return 'Add a tag';
   if (s.kind === 'followup' && !s.text.trim()) return 'Say what to do';
+  if (s.kind === 'followup' && s.text.trim().length > 300) return 'Shorten the follow-up';
   return null;
 };
 const clean = (s) => {
@@ -66,19 +57,20 @@ const clean = (s) => {
 };
 
 // Subject and message, and the two fill-in buttons: a tap puts the fill-in
-// where the cursor was (in whichever of the two was last touched).
+// ("[first name]") where the cursor was (in whichever of the two was last
+// touched). The fields show the words; the step keeps the codes.
 function EmailFields({ s, set, idp }) {
   const subject = useRef(null);
   const body = useRef(null);
   const last = useRef('body');
-  const insert = (token) => {
+  const insert = (word) => {
     const key = last.current;
     const el = (key === 'subject' ? subject : body).current;
-    const val = s[key] || '';
+    const val = toWords(s[key]);
     const at = typeof el?.selectionStart === 'number' ? el.selectionStart : val.length;
     const end = typeof el?.selectionEnd === 'number' ? el.selectionEnd : at;
-    set({ ...s, [key]: val.slice(0, at) + token + val.slice(end) });
-    const caret = at + token.length;
+    set({ ...s, [key]: toCodes(val.slice(0, at) + word + val.slice(end)) });
+    const caret = at + word.length;
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange?.(caret, caret); });
   };
   return (
@@ -86,19 +78,19 @@ function EmailFields({ s, set, idp }) {
       <div className="field">
         <label htmlFor={`${idp}-subj`}>Subject</label>
         <input id={`${idp}-subj`} ref={subject} className="input lad-input" maxLength={200} autoComplete="off"
-          placeholder="Thanks for signing" value={s.subject}
-          onFocus={() => { last.current = 'subject'; }} onChange={(e) => set({ ...s, subject: e.target.value })} />
+          placeholder="Thanks for signing" value={toWords(s.subject)}
+          onFocus={() => { last.current = 'subject'; }} onChange={(e) => set({ ...s, subject: toCodes(e.target.value) })} />
       </div>
       <div className="field">
         <label htmlFor={`${idp}-body`}>Message</label>
         <textarea id={`${idp}-body`} ref={body} className="input lad-input lad-body" rows={6} maxLength={20000}
-          placeholder="Thank you for signing." value={s.body}
-          onFocus={() => { last.current = 'body'; }} onChange={(e) => set({ ...s, body: e.target.value })} />
+          placeholder="Thank you for signing." value={toWords(s.body)}
+          onFocus={() => { last.current = 'body'; }} onChange={(e) => set({ ...s, body: toCodes(e.target.value) })} />
       </div>
       <div className="lad-tokens" role="group" aria-label="Fill in">
-        {TOKENS.map((t) => (
-          <button key={t.token} type="button" className="btn btn-quiet ops-tap lad-token"
-            onMouseDown={(e) => e.preventDefault()} onClick={() => insert(t.token)}>{t.label}</button>
+        {FILLS.map((f) => (
+          <button key={f.code} type="button" className="btn btn-quiet ops-tap lad-token"
+            onMouseDown={(e) => e.preventDefault()} onClick={() => insert(f.word)}>{f.button}</button>
         ))}
       </div>
       <p className="lad-hint">An unsubscribe link is added.</p>
@@ -139,7 +131,8 @@ function StepFields({ s, set, idp, tags }) {
       <div className="field">
         <label htmlFor={`${idp}-fu`}>Follow-up for staff</label>
         <input id={`${idp}-fu`} className="input lad-input" maxLength={300} autoComplete="off"
-          placeholder="Call {{first_name}} to say thanks" value={s.text} onChange={(e) => set({ ...s, text: e.target.value })} />
+          placeholder="Call [first name] to say thanks" value={toWords(s.text)}
+          onChange={(e) => set({ ...s, text: toCodes(e.target.value) })} />
       </div>
     );
   }
@@ -179,7 +172,7 @@ function StepCard({ step, index, count, open, onToggle, onSave, onRemove, onMove
         <span className="ops-row__main">
           <span className="ops-row__name lad-step__line">{stepLine(step)}</span>
           {step.kind === 'email' && (
-            <span className="ops-row__sub lad-step__who">Goes only to people who said yes to email · {emailYes ?? '…'}</span>
+            <span className="ops-row__sub lad-step__who">{emailWho(emailYes)}</span>
           )}
         </span>
       </button>
@@ -408,7 +401,7 @@ export default function LaddersEdit() {
   if (q.isError) {
     return (
       <div className="ops-page lad-page">
-        <Link className="ops-back" to="/ladders">‹ Ladders</Link>
+        <LadBack />
         <p className="error" role="alert">{q.error.status === 404 ? 'This ladder isn’t here — it may have been deleted.' : q.error.message}</p>
       </div>
     );
@@ -427,7 +420,7 @@ export default function LaddersEdit() {
 
   return (
     <div className="ops-page lad-page">
-      <Link className="ops-back" to="/ladders">‹ Ladders</Link>
+      <LadBack />
       <div className="ops-head">
         <h1>{l.name}</h1>
         {!l.active && (
