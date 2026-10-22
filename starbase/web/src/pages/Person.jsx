@@ -15,6 +15,7 @@ import {
 } from '@starbase/shared/canvass';
 import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText } from '../components/RatingButtons.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
+import { EngagementChip, PersonLadders, usePersonLadders } from '../components/LaddersBits.jsx';
 import { queuedText } from '../components/queued.js';
 import { useOutbox } from '../offline.js';
 import {
@@ -130,7 +131,7 @@ function BackLink({ desk, className = 'eyebrow pf-back' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Header: name, rating, donor tier, Call · Text · Email · Map
 // ─────────────────────────────────────────────────────────────────────────────
-function Header({ person, donor, me, desk, onLog, contacted }) {
+function Header({ person, donor, me, desk, onLog, contacted, level }) {
   const r = ratingByCode(person.rating);
   const named = r?.band === 'opposed' && r.code !== '4'; // "4 · Locke" says it all
   // The date of the rating only when no contact says it below.
@@ -153,6 +154,7 @@ function Header({ person, donor, me, desk, onLog, contacted }) {
           </span>
         )}
         {isDnc(person) && <span className="chip chip-danger">Do not contact</span>}
+        {desk && <EngagementChip level={level} />}
         {/* donor is null for volunteers (the server hides money from them) */}
         {donor?.tier && TIER_LABEL[donor.tier] && (
           <span className={TIER_CLASS[donor.tier]} title={`${fmtMoney(donor.yearCents)} this year${Number(donor.monthlyCents) ? ` · ${fmtMoney(donor.monthlyCents)}/mo` : ''}`}>
@@ -741,6 +743,7 @@ export default function Person() {
     queryKey: ['person', id],
     queryFn: () => apiGet(`/persons/${id}`),
   });
+  const ladders = usePersonLadders(id, desk); // engagement level + ladders (desk only)
 
   // Awaited by useAction so controls stay disabled until the profile refetches.
   // Covers the map (['doors']: pins, ratings, unlocated count after an address
@@ -778,7 +781,7 @@ export default function Person() {
 
   return (
     <div className="pf-page">
-      <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} contacted={contacts.length > 0} />
+      <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} contacted={contacts.length > 0} level={ladders.data?.level} />
 
       <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
 
@@ -817,6 +820,11 @@ export default function Person() {
           <Section title="Gifts" count={thisYear ? fmtMoney(Number(thisYear.total_cents)) : gifts.length || ''}
             open={!!open.gifts} onToggle={toggle('gifts')}>
             <Gifts person={person} gifts={gifts} totals={totals} />
+          </Section>
+        )}
+        {desk && (ladders.data?.runs?.length > 0 || ladders.data?.followups?.length > 0) && (
+          <Section title="Ladders" count={ladders.data.runs.filter((r) => r.status !== 'done').length || ''} open={!!open.ladders} onToggle={toggle('ladders')}>
+            <PersonLadders data={ladders.data} />
           </Section>
         )}
         {desk && (

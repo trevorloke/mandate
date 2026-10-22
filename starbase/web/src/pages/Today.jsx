@@ -30,6 +30,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RATINGS } from '@starbase/shared/canvass';
 import { ApiError, apiGet, apiPost, fmtMoney } from '../api.js';
 import { ratingWho } from '../components/RatingButtons.jsx';
+import { useFollowupCount } from '../components/LaddersCount.js';
 import './today.css';
 
 const greeting = () => {
@@ -354,6 +355,7 @@ function NeedsYou({ b }) {
     queryFn: () => apiGet(`/persons?tag=${PROSPECT_TAG}&limit=${PROSPECT_MAX}`),
   });
   const newVols = prospects.data?.persons?.length ?? 0;
+  const followups = useFollowupCount(); // ladder follow-ups for staff
   const flagged = b.flagged ?? [];
   const pledges = Number(b.pledges?.n) || 0;
   const filings = (b.filings ?? []).filter((f) => Number(f.days_left) <= 7);
@@ -363,14 +365,14 @@ function NeedsYou({ b }) {
   const signs = Number(b.signs?.requested) || 0;
   const shownFlags = flagged.length > 3 ? flagged.slice(0, 2) : flagged;
   const moreFlags = flagged.length - shownFlags.length;
-  const empty = !flagged.length && !pledges && !filings.length && !newVols && !shortShifts.length && !signs;
+  const empty = !flagged.length && !pledges && !filings.length && !newVols && !shortShifts.length && !signs && !followups.n;
 
   return (
     <section className="today-section" aria-labelledby="today-needs-h">
       <h2 className="today-h" id="today-needs-h">Needs you</h2>
       {empty ? (
         // Don't say "All caught up" before the volunteer count is in.
-        prospects.isPending ? <p className="today-empty" aria-hidden="true">&nbsp;</p> : <p className="today-empty">All caught up.</p>
+        prospects.isPending || followups.pending ? <p className="today-empty" aria-hidden="true">&nbsp;</p> : <p className="today-empty">All caught up.</p>
       ) : (
         <ul className="today-rows">
           {shownFlags.map((g) => (
@@ -397,6 +399,9 @@ function NeedsYou({ b }) {
           })}
           {signs > 0 && (
             <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
+          )}
+          {followups.n > 0 && (
+            <LinkRow to="/follow-ups" main={<><strong className="mono">{followups.n}</strong> {plural(followups.n, 'follow-up')}</>} />
           )}
         </ul>
       )}
