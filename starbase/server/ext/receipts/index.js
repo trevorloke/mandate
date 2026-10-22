@@ -28,3 +28,6 @@ import { JOB } from './core.js';
 export const hooks = { events: onEvents };
 export const jobs = { [JOB]: runEmailJob };
 export const deskOnlyReads = [/^\/api\/receipts(\/.*)?$/];
+
+// In the full export: every receipt as issued — never the donor's link token.
+export const exportTables = ['receipt_settings', 'receipt_counters', { table: 'receipts', omit: ['token'] }];

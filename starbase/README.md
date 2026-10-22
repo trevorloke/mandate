@@ -128,7 +128,8 @@ Signal. **One event log underneath**: every mutation is one transaction —
 typed table writes + event append + hash-chain advance commit together or not
 at all. The `events` table is the sync protocol (`GET /api/events?since=`),
 the audit trail (`GET /api/audit/verify`), and the public API. `GET /api/export`
-returns everything, event log included. Money is integer cents; donors are
+returns every campaign table (each feature's too), event log included — never
+sign-ins or a link's secret token. Money is integer cents; donors are
 foreign keys; the cap engine sums `SUM(amount_cents)` per `person_id` per
 calendar year against `cap_rules(jurisdiction, year)` — Imagine Surrey
 defaults to `bc-municipal` (LECFA).
@@ -137,7 +138,8 @@ Database: PGlite (embedded, real Postgres) — in-memory for tests, file-backed
 via `STARBASE_DATA=./data`; hosted Postgres via `DATABASE_URL` in v0.3.
 Tenancy is a membership (`user × workspace × role`: manager / treasurer /
 staff / volunteer). **Volunteers** can rate doors, log calls and texts, drop
-pins, and request signs. The server never shows them money (profiles return no
+pins, request signs, and add a new housemate (name and phone) at a door in
+their turf. The server never shows them money (profiles return no
 gifts, totals, or donor tier; Today has no money), and refuses them the gift
 ledger, exports, the raw event log, the audit replay, and the subscriber,
 signature, and blast lists.

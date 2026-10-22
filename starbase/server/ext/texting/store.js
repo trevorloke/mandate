@@ -130,3 +130,33 @@ export const myConversationCount = async (q, workspaceId, userId) => (await q.qu
   'select count(*)::int as n from texting_conversations where workspace_id = $1 and started_by = $2',
   [workspaceId, userId],
 )).rows[0].n;
+
+// Today's "texts this week" (the brief hook). The core counts text contacts
+// logged by hand; this adds every text that went out through the campaign's
+// number in the same rolling 7 days (a failed send never went, so it doesn't
+// count). A text contact logged by someone who also texted that person
+// through the app this week is that conversation's rating, not another
+// text, so it is taken back out. mine: the same, for the signed-in member.
+export const briefTexts = async (db, ctx, brief) => {
+  if (!brief?.field) return;
+  const r = (await db.query(
+    `with sent as (
+       select m.sent_by, c.person_id
+       from texting_messages m join texting_conversations c on c.id = m.conversation_id
+       where m.workspace_id = $1 and m.direction = 'out' and m.status <> 'failed'
+         and m.created_at >= now() - interval '7 days'
+     ), logged as (
+       select k.created_by from contacts k
+       where k.workspace_id = $1 and k.channel = 'text' and k.created_at >= now() - interval '7 days'
+         and exists (select 1 from sent s where s.sent_by = k.created_by and s.person_id = k.person_id)
+     )
+     select (select count(*) from sent)::int as sent,
+            (select count(*) from sent where sent_by = $2)::int as my_sent,
+            (select count(*) from logged)::int as logged,
+            (select count(*) from logged where created_by = $2)::int as my_logged`,
+    [ctx.workspaceId, ctx.user.id],
+  )).rows[0];
+  const f = brief.field;
+  f.texts = Math.max(0, (Number(f.texts) || 0) + r.sent - r.logged);
+  if (f.mine) f.mine.texts = Math.max(0, (Number(f.mine.texts) || 0) + r.my_sent - r.my_logged);
+};

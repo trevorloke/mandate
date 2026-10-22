@@ -26,6 +26,15 @@ export { sql } from './sql.js';
 export { actions } from './actions.js';
 export { api } from './api.js';
 export { publicRoutes } from './public.js';
+import { briefTexts } from './store.js';
+
+// Today's "texts this week" counts texts sent through the app too.
+export const hooks = { brief: briefTexts };
+
+// In the full export: conversations, every text, opt-outs and the settings.
+// Never a caller's own phone or a call's token (texting_member_phones and
+// texting_calls stay out).
+export const exportTables = ['texting_settings', 'texting_optouts', 'texting_conversations', 'texting_messages'];
 
 // Volunteers read their own conversations (/texting/mine, a thread they
 // started, their Calls card); every conversation, a profile's conversations

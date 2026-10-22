@@ -68,7 +68,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // server's zod schema wants lat ∈ [-90, 90], lng ∈ [-180, 180].
 const wrapped = (latlng) => { const ll = L.latLng(latlng).wrap(); return { lat: ll.lat, lng: ll.lng }; };
 // person.create is desk-only (manager/treasurer/staff); volunteers can rate,
-// log, place pins and request signs, but not add people.
+// log, place pins and request signs, and add a housemate at a door inside a
+// turf they walk (person.addAtDoor), but not add new doors.
 const CREATE_ROLES = ['manager', 'treasurer', 'staff'];
 const isTyping = (el) =>
   el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
@@ -1747,6 +1748,7 @@ export default function MapPage() {
             toast={toast}
             me={me}
             canCreate={canCreate}
+            canAddHere={canCreate || Boolean(mineKeys?.has(selectedDoor.key))}
           />
         </div>
       )}

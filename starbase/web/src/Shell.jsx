@@ -14,7 +14,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, initials } from './api.js';
 import {
-  pendingCount, unsentCount, useOutbox, useOutboxAutoFlush, clearOutbox, dismissItem, retryItem, onOutboxSent, setOutboxOwner,
+  pendingCount, unsentCount, useOutbox, useOutboxAutoFlush, clearOutbox, dismissItem, retryItem, onOutboxSent, setOutboxOwner, NEW_PERSON,
 } from './offline.js';
 import OfflineSheet from './components/OfflineSheet.jsx';
 import { forgetPhoneCopies, keepOnlyMine } from './components/OfflineCache.js';
@@ -280,7 +280,7 @@ function SignedInShell({ me }) {
   // A person added offline has just reached the server: keep their pin on
   // the map (the outbox no longer lays it over) until the refetch lands.
   useEffect(() => onOutboxSent(({ name, result }) => {
-    const p = name === 'person.create' ? result?.person : null;
+    const p = NEW_PERSON.includes(name) ? result?.person : null;
     if (!p?.id || p.lat == null || p.lng == null) return;
     queryClient.setQueryData(['doors'], (d) => (d && !d.persons.some((x) => x.id === p.id) ? {
       ...d,

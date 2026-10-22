@@ -15,6 +15,7 @@ import dataRoutes from './data.js';
 import { pointInPolygon, groupDoors, walkOrder } from '../lib/geo.js';
 import { checkCap } from '../lib/cap.js';
 import { EXTENSIONS } from '../ext.js';
+import { runHooks } from '../lib/hooks.js';
 
 // A date column as YYYY-MM-DD (both backends hand back a Date at UTC midnight).
 const dateOnly = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
@@ -330,9 +331,23 @@ app.get('/turfs/:id/walk', async (c) => {
   const located = await loadLocated(db, ctx.workspaceId);
   const doors = walkOrder(groupDoors(located.filter((p) => pointInPolygon(p.lat, p.lng, polygon))));
   const view = forViewer(ctx);
+  // Each door's signs (requested or up), matched the way the map matches
+  // them — by a person there, or by the address of a door with no unit — so
+  // "Wants a sign?" never offers a kind the door already has.
+  const signs = (await db.query(
+    `select id, person_id, address, kind, status from signs where workspace_id = $1 and status <> 'removed'`,
+    [ctx.workspaceId],
+  )).rows;
+  const signsAt = (d) => {
+    const ids = new Set(d.persons.map((p) => p.id));
+    const addr = !d.unit && d.address ? String(d.address).trim().toLowerCase() : null;
+    return signs
+      .filter((s) => (s.person_id ? ids.has(s.person_id) : addr && String(s.address || '').trim().toLowerCase() === addr))
+      .map(({ id, kind, status }) => ({ id, kind, status }));
+  };
   return c.json({
     turf: { id: t.id, name: t.name, color: t.color, notes: t.notes, polygon },
-    doors: doors.map((d) => ({ ...d, persons: d.persons.map(view), done: doneDoor(d) })),
+    doors: doors.map((d) => ({ ...d, persons: d.persons.map(view), signs: signsAt(d), done: doneDoor(d) })),
     stats: turfStats(polygon, located),
   });
 });
@@ -632,8 +647,9 @@ app.get('/brief', async (c) => {
   // Field, over the last 7 days (rolling): doors are DISTINCT doors knocked —
   // a household rated twice, or a rating changed, is still one door; the key
   // is the address + unit (the walk list's grouping), or the person when they
-  // have no address. Calls and texts count contacts. mine: the same counts
-  // over the contacts the caller logged; week: every contact.
+  // have no address. Calls and texts count contacts (texts sent through the
+  // app are added by the texting feature's brief hook). mine: the same
+  // counts over the contacts the caller logged; week: every contact.
   const field = (await db.query(
     `select count(*)::int as week,
             count(distinct w.door) filter (where w.channel = 'door')::int as doors,
@@ -685,18 +701,23 @@ app.get('/brief', async (c) => {
     [ws, ctx.workspace.settings?.tz || 'America/Vancouver'],
   )).rows[0];
   const sampleLoaded = !!(ctx.workspace.settings?.sample);
-  const activation = {
-    steps: [
-      { key: 'person', label: 'Add your first person', done: people.total > 0 },
-      { key: 'gift', label: 'Log your first gift', done: Number(money.gifts) > 0 },
-      { key: 'filing', label: 'Add a filing deadline', done: (await db.query(
-        'select count(*)::int as n from filings where workspace_id = $1', [ws],
-      )).rows[0].n > 0 },
-    ],
-  };
-  activation.complete = activation.steps.every((s) => s.done);
   const desk = ctx.role !== 'volunteer';
-  return c.json({
+  // The desk's first steps. One of them is whether a gift was ever logged,
+  // so — like money, filings and pledges — a volunteer never receives it.
+  let activation = null;
+  if (desk) {
+    activation = {
+      steps: [
+        { key: 'person', label: 'Add your first person', done: people.total > 0 },
+        { key: 'gift', label: 'Log your first gift', done: Number(money.gifts) > 0 },
+        { key: 'filing', label: 'Add a filing deadline', done: (await db.query(
+          'select count(*)::int as n from filings where workspace_id = $1', [ws],
+        )).rows[0].n > 0 },
+      ],
+    };
+    activation.complete = activation.steps.every((s) => s.done);
+  }
+  const body = {
     money: desk ? { totalCents: Number(money.total), weekCents: Number(money.week), gifts: Number(money.gifts) } : null,
     flagged: desk ? flagged : [],
     filings: desk ? filings : [],
@@ -715,10 +736,22 @@ app.get('/brief', async (c) => {
     providers: { email: emailConfigured(), text: textConfigured() },
     activation,
     generatedAt: new Date().toISOString(),
-  });
+  };
+  // Features correct the counts they own (texts sent through the app).
+  await runHooks('brief', db, ctx, body);
+  return c.json(body);
 });
 
 // ── Export: contractual open data — everything, one click ──
+// Every campaign table, as rows: the core's below, the record types, and
+// each feature's own (exportTables). Never sign-ins, sessions or invites, and
+// never a link's secret token (omit).
+const CORE_EXPORT = [
+  'contacts', 'signs', 'volunteer_roles', 'shifts', 'shift_assignments', 'turfs', 'turf_members',
+  'petitions', 'petition_signatures', 'subscriptions', 'blasts', { table: 'blast_recipients', omit: ['token'] },
+  'campaign_events', 'event_rsvps', 'pledges',
+];
+const exportSpec = (spec) => (typeof spec === 'string' ? { table: spec, omit: [] } : { omit: [], ...spec });
 app.get('/export', async (c) => {
   const ctx = c.get('ctx');
   const db = c.get('db');
@@ -733,6 +766,13 @@ app.get('/export', async (c) => {
   };
   for (const t of Object.values(RECORD_TYPES)) {
     out[t.table] = (await db.query(`select * from ${t.table} where workspace_id = $1`, [ws])).rows;
+  }
+  for (const spec of [...CORE_EXPORT, ...EXTENSIONS.flatMap((e) => e.exportTables || [])]) {
+    const { table, omit } = exportSpec(spec);
+    const rows = (await db.query(`select * from ${table} where workspace_id = $1`, [ws])).rows;
+    out[table] = omit.length
+      ? rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !omit.includes(k))))
+      : rows;
   }
   c.header('Content-Disposition', 'attachment; filename="starbase-export.json"');
   return c.json(out);

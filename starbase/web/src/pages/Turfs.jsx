@@ -5,7 +5,9 @@
 //               "Next door". Doors in the server's walk order (street by
 //               street, odd side up, even side back — never re-sorted here),
 //               one row each; tap a door for the same rating buttons as the
-//               map, the outcomes, and "More" (note, call, profile). Like
+//               map, the outcomes, and "More" (note, call, profile, "Wants a
+//               sign?" with Undo on the toast, "+ Person at this door" — a
+//               new housemate, name and phone, at the door's address). Like
 //               Calls, a tap that settles the door (everyone there rated or
 //               answered — always so for one person) closes it and opens the
 //               next one; "Change" on the toast reopens it. A note left in
@@ -19,13 +21,15 @@
 //               so a reload with no signal still opens them ("Offline copy");
 //               cachedWalkLists(me) lists those copies for the map and Today.
 //               Someone added on this phone (not sent yet) whose pin is in
-//               the turf joins the list at once, marked "Not sent yet".
+//               the turf joins the list at once, marked "Not sent yet"; so
+//               does a sign request still on the phone.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet } from '../api.js';
-import { logContact, pendingKnocks, pendingPeopleIn, useOutbox } from '../offline.js';
+import { apiGet, ApiError } from '../api.js';
+import { logContact, pendingKnocks, pendingPeopleIn, queueAction, undoQueued, useOutbox } from '../offline.js';
 import { queuedChip, queuedText } from '../components/queued.js';
+import { AddPersonInline, SIGN_LABEL, SignAsk, signCancelOffered } from '../components/DoorCard.jsx';
 import RatingButtons, {
   More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
 } from '../components/RatingButtons.jsx';
@@ -384,6 +388,14 @@ function WalkList({ id }) {
   // People added on this phone (not sent yet) whose pin is in this turf: at
   // their housemates' door, or a door of their own at the end of the list.
   const added = useMemo(() => pendingPeopleIn(q.data?.turf?.polygon, outbox.items), [q.data, outbox.items]);
+  // Sign requests (and their Undo) still on the phone, laid over each door.
+  const waitingSigns = useMemo(() => {
+    const pending = outbox.items.filter((i) => i.state === 'pending');
+    return {
+      placed: pending.filter((i) => i.name === 'sign.place' && !i.undo && i.input?.person_id),
+      cancelled: new Set(pending.filter((i) => i.name === 'sign.cancel').map((i) => i.input?.id)),
+    };
+  }, [outbox.items]);
   const doors = useMemo(() => {
     const list = (q.data?.doors ?? []).map((d) => ({ ...d, persons: [...d.persons] }));
     const known = new Set(list.flatMap((d) => d.persons.map((p) => p.id)));
@@ -400,14 +412,21 @@ function WalkList({ id }) {
           ? { ...p, rating: mine.rating ?? p.rating, last_outcome: mine.outcome, last_contact_at: mine.at, door_knocked: true, queued: mine.queued }
           : p;
       });
+      const ids = new Set(persons.map((p) => p.id));
+      const signs = [
+        ...(d.signs || []).filter((s) => !waitingSigns.cancelled.has(s.id)),
+        ...waitingSigns.placed.filter((i) => ids.has(i.input.person_id))
+          .map((i) => ({ id: `pending:${i.cid}`, kind: i.input.kind, status: 'requested', pending: true })),
+      ];
       return {
         ...d,
         key: `${norm(d.address)}|${norm(d.unit)}|${d.address ? '' : d.persons[0]?.id}`,
         persons,
+        signs,
         done: d.done || persons.some((p) => local[p.id]),
       };
     });
-  }, [q.data, local, added]);
+  }, [q.data, local, added, waitingSigns]);
 
   // The latest list, open door and knocks, for handlers that finish after an
   // await (and for the unmount note flush).
@@ -632,6 +651,88 @@ function WalkList({ id }) {
     }
   };
 
+  // ── "Wants a sign?" and "+ Person at this door" (the door's More) ──
+  // The list's copy is patched at once after a send; the refetch follows.
+  const patchWalk = (fn) => {
+    queryClient.cancelQueries({ queryKey: ['turf', id] });
+    queryClient.setQueryData(['turf', id], (d) => (d?.doors ? { ...d, doors: d.doors.map(fn) } : d));
+  };
+  const signsChanged = () => { refresh(); queryClient.invalidateQueries({ queryKey: ['signs'] }); };
+  const atDoor = (door) => (d) => d.persons.some((p) => door.persons.some((x) => x.id === p.id));
+  // Through the outbox, like the map's door card. Undo is on the toast, and
+  // only where the server can truly take it back (sign.cancel) — never by
+  // filing the request as "taken down": it never went up.
+  const askSign = async (door, person, kind) => {
+    const label = SIGN_LABEL[kind] || 'Sign';
+    const busyKey = `sign:${door.key}`;
+    setBusyKey(busyKey, true);
+    try {
+      const r = await queueAction('sign.place', {
+        person_id: person.id, kind, lat: door.lat, lng: door.lng, address: door.address || undefined,
+      }, { who: person.name });
+      if (r.queued) {
+        toast(queuedText(r, label), { tone: 'queued', act: { label: 'Undo', onClick: () => undoQueuedSign(r.client_id, kind, person) } });
+        return;
+      }
+      const sign = r.result?.sign;
+      const mine = atDoor(door);
+      if (sign?.id) {
+        patchWalk((d) => (mine(d)
+          ? { ...d, signs: [...(d.signs || []).filter((s) => s.id !== sign.id), { id: sign.id, kind: sign.kind, status: sign.status }] }
+          : d));
+      }
+      const canCancel = sign?.id && await signCancelOffered(queryClient);
+      toast(`${label} requested`, { act: canCancel ? { label: 'Undo', onClick: () => undoSign(sign, person) } : null });
+      signsChanged();
+    } catch (err) {
+      toast(`Not saved — ${err.message}`, { tone: 'error' });
+    } finally {
+      setBusyKey(busyKey, false);
+    }
+  };
+  const undoSign = async (sign, person) => {
+    const label = SIGN_LABEL[sign.kind] || 'Sign';
+    const drop = () => patchWalk((d) => ({ ...d, signs: (d.signs || []).filter((s) => s.id !== sign.id) }));
+    try {
+      const r = await queueAction('sign.cancel', { id: sign.id }, { who: person?.name });
+      if (r.queued) { toast(queuedText(r, 'Undo'), { tone: 'queued' }); return; }
+      drop();
+      toast(`${label} cancelled`);
+      signsChanged();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        drop();
+        toast(`${label} already cancelled`);
+        signsChanged();
+        return;
+      }
+      toast(`Not undone — ${err.message}`, { tone: 'error' });
+    }
+  };
+  // Undo on a request still on the phone: take it off the phone, or — if it
+  // may already have gone — send its cancel after it.
+  const undoQueuedSign = (cid, kind, person) => {
+    const label = SIGN_LABEL[kind] || 'Sign';
+    const u = undoQueued(cid);
+    if (u === 'removed') toast(`${label} cancelled`);
+    else if (u === 'queued') toast(queuedText({}, 'Undo'), { tone: 'queued' });
+    else if (u?.sent?.sign?.id) undoSign(u.sent.sign, person);
+    else toast(`${label} already sent`);
+  };
+  // A new housemate the server has: on the list at once (one still on the
+  // phone is laid over it from the outbox).
+  const personAdded = (door, person) => {
+    if (!person?.id) return;
+    const row = {
+      id: person.id, name: person.name, phone: person.phone ?? null, email: null,
+      address: person.address ?? door.address ?? null, unit: person.unit ?? door.unit ?? null,
+      lat: person.lat ?? door.lat, lng: person.lng ?? door.lng, rating: null, rated_at: null, tags: [],
+      last_contact_at: null, last_outcome: null, door_knocked: false,
+    };
+    const mine = atDoor(door);
+    patchWalk((d) => (mine(d) ? { ...d, persons: [...d.persons.filter((p) => p.id !== person.id), row] } : d));
+  };
+
   const sendNow = async () => {
     await outbox.flush();
     refresh();
@@ -757,6 +858,9 @@ function WalkList({ id }) {
               onNoteFocus={hideToast}
               onLog={(p, outcome, rating = null, answers = null) => log(p, outcome, rating, { door: d, answers })}
               onNobodyHome={() => nobodyHome(d)}
+              onSign={(p, kind) => askSign(d, p, kind)}
+              onAdded={(person) => personAdded(d, person)}
+              toast={toast}
             />
           ))}
         </ol>
@@ -786,8 +890,12 @@ function WalkList({ id }) {
   );
 }
 
-function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, notes, setNote, onNoteFocus, onLog, onNobodyHome }) {
+function Door({
+  door, index, isNext, open, onToggle, selectedId, onPick, busy, notes, setNote, onNoteFocus, onLog, onNobodyHome,
+  onSign, onAdded, toast,
+}) {
   const [more, setMore] = useState(false);
+  const [adding, setAdding] = useState(false);
   const headId = `walk-door-${index}-addr`;
   const panelId = `walk-panel-${index}`;
   const multi = door.persons.length > 1;
@@ -896,6 +1004,25 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
               {sel.phone && <a className="btn walk-act" href={`tel:${dialable(sel.phone)}`}>Call</a>}
               {!sel.pending && <Link className="btn btn-quiet walk-act" to={`/people/${sel.id}`} state={fromHere} onClick={markDoor}>Profile</Link>}
             </div>
+            <SignAsk
+              idPrefix={`walk-${index}`}
+              signs={door.signs}
+              disabled={Boolean(busy[`sign:${door.key}`])}
+              onAsk={(kind) => onSign(sel, kind)}
+            />
+            {door.address && (adding ? (
+              <AddPersonInline
+                door={door}
+                toast={(text) => toast(text)}
+                toastQueued={(text) => toast(text, { tone: 'queued' })}
+                onCancel={() => setAdding(false)}
+                onDone={(pid, person) => { setAdding(false); onAdded(person); onPick(pid); }}
+              />
+            ) : (
+              <button type="button" className="btn walk-act door-add-btn" onClick={() => setAdding(true)}>
+                + Person at this door
+              </button>
+            ))}
           </More>
         </div>
       )}

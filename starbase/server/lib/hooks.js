@@ -10,7 +10,10 @@
 //   contactLogged(tx, ctx, { contact, input }, emit)
 //                                   after contact.log stores a contact; input
 //                                   carries any extras such as survey answers.
-const registry = { events: [], contactLogged: [] };
+//   brief(db, ctx, brief)           GET /api/brief, just before it is sent:
+//                                   a feature may correct the counts it owns
+//                                   (texts sent through the app, say).
+const registry = { events: [], contactLogged: [], brief: [] };
 
 export const onHook = (name, fn) => {
   if (!registry[name]) throw new Error(`unknown hook ${name}`);

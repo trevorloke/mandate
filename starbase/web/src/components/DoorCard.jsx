@@ -4,13 +4,19 @@
 // channel, sign request, add a person, profile) sits under "More". Several
 // people at one door → simple tabs at the top. The map decides where it sits
 // (bottom sheet on phones, right panel on desktop).
-// Also exports AddDoorForm — the same person.create flow for a tapped spot
-// that has no door yet.
+// Also exports AddDoorForm — person.create for a tapped spot that has no door
+// yet (desk only) — and, for the walk list's door: SignAsk (the "Wants a
+// sign?" row), AddPersonInline and signCancelOffered.
+//
+// "+ Person at this door" is person.addAtDoor: name and phone only; the
+// server copies the door's address and pin from someone already there. Every
+// role may use it — a volunteer at a door inside a turf they walk (canAddHere).
 //
 // Offline: every write here goes through the outbox (src/offline.js) — knocks
-// (logContact), a new person or door (person.create, on an id made here, so
-// they can be knocked at once), sign requests and their Undo — so a tap with
-// no signal is saved on the phone and sent later, in order, exactly once.
+// (logContact), a new person or door (person.addAtDoor / person.create, on an
+// id made here, so they can be knocked at once), sign requests and their
+// Undo — so a tap with no signal is saved on the phone and sent later, in
+// order, exactly once.
 // The card shows it straight away (queued.js has the words, shared with the
 // walk list, Calls and the profile); a person or sign not sent yet says
 // "Not sent yet" (the map lays the outbox over its doors).
@@ -77,6 +83,9 @@ const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 // GET /api/actions lists what this sign-in may do (same key as Shifts/Team).
 const ACTIONS_QUERY = { queryKey: ['actions'], queryFn: () => apiGet('/actions'), staleTime: 5 * 60_000 };
 const hasAction = (data, name) => Array.isArray(data?.actions) && data.actions.includes(name);
+// Whether a sign request's Undo can really take it back (sign.cancel).
+export const signCancelOffered = (queryClient) => queryClient.fetchQuery(ACTIONS_QUERY)
+  .then((d) => hasAction(d, 'sign.cancel')).catch(() => false);
 // Drop any extension ("604-555-0101 ext 2", "x2", "#2") before stripping to
 // digits, or it gets glued onto the number and dials the wrong line.
 const dialable = (phone) => String(phone || '').replace(/\s*(?:ext\.?|x|#).*$/i, '').replace(/[^\d+]/g, '');
@@ -168,8 +177,48 @@ function PersonFields({ idPrefix, form, set, withAddress }) {
   );
 }
 
-// Inline "add person at this door" — inherits the door's address/unit/lat/lng.
-function AddPersonInline({ door, onDone, onCancel, toast }) {
+// "Wants a sign?" — the door's signs as chips, then one button per kind the
+// door doesn't have yet (requested or up). onAsk(kind) files the request.
+export function SignAsk({ signs = [], disabled = false, onAsk, idPrefix = 'door' }) {
+  const have = new Set(signs.filter((s) => s.status !== 'removed').map((s) => s.kind));
+  const offer = SIGN_BUTTONS.filter((s) => !have.has(s.code));
+  const labelId = `${idPrefix}-sign-label`;
+  return (
+    <div className="door-more__sec">
+      <span className="door-more__label" id={labelId}>{offer.length ? 'Wants a sign?' : 'Signs'}</span>
+      {signs.length > 0 && (
+        <div className="door-signs-have">
+          {signs.map((s) => (
+            <span key={s.id} className={`chip ${s.pending ? 'fk-wait' : SIGN_CHIP[s.status] || ''}`} title={SIGN_LABEL[s.kind]}>
+              {SIGN_LABEL[s.kind]} · {s.pending ? 'Not sent yet' : SIGN_STATUS[s.status] || s.status}
+            </span>
+          ))}
+        </div>
+      )}
+      {offer.length > 0 && (
+        <div className="door-sign-btns" role="group" aria-labelledby={labelId}>
+          {offer.map((s) => (
+            <button
+              key={s.code} type="button" className="btn door-act" disabled={disabled}
+              title={`Request a ${SIGN_LABEL[s.code].toLowerCase()}`}
+              aria-label={`Request a ${SIGN_LABEL[s.code].toLowerCase()}`}
+              onClick={() => onAsk(s.code)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inline "add person at this door": name (+ phone). person.addAtDoor — the
+// server gives them the door's address, unit and pin, copied from someone
+// already there (one the server has, when there is one: an item still on the
+// phone is sent first anyway). onDone(id, person): person is null while it
+// waits on the phone. toastQueued: how the screen says "saved on the phone".
+export function AddPersonInline({ door, onDone, onCancel, toast, toastQueued = toast }) {
   const queryClient = useQueryClient();
   const refresh = useRefresh();
   const [form, setForm] = useState({ name: '', phone: '' });
@@ -183,17 +232,16 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
     setBusy(true);
     setError(null);
     try {
-      // Through the outbox: no signal, it's saved here and the door shows it.
+      // Through the outbox: no signal, it's saved here and the door shows it
+      // (meta.door: where the server will put them).
       const name = form.name.trim();
-      const r = await queueAction('person.create', {
+      const housemate = door.persons.find((p) => !p.pending) || door.persons[0];
+      const r = await queueAction('person.addAtDoor', {
+        housemate_id: housemate.id,
         name,
         phone: form.phone.trim() || undefined,
-        address: door.address || undefined,
-        unit: door.unit || undefined,
-        lat: door.lat,
-        lng: door.lng,
-      }, { who: name });
-      if (r.queued) { toast(queuedText(r, name)); onDone(r.client_id); return; }
+      }, { who: name, door: { address: door.address ?? null, unit: door.unit ?? null, lat: door.lat, lng: door.lng } });
+      if (r.queued) { toastQueued(queuedText(r, name)); onDone(r.client_id, null); return; }
       const res = r.result;
       toast(`Added ${res.person.name}`);
       patchDoors(queryClient, (d) => ({
@@ -201,7 +249,7 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
         persons: [...d.persons.filter((p) => p.id !== res.person.id), doorPerson(res.person, door)],
       }));
       refresh();
-      onDone(res.person.id);
+      onDone(res.person.id, res.person);
     } catch (err) {
       const msg = refusalMsg(err, 'Not saved — try again');
       setError(msg);
@@ -285,7 +333,8 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
 
 // Mount with key={door.key} so per-door state (optimistic ratings, pending
 // call log, note) resets naturally when the user moves to another door.
-export default function DoorCard({ door, selectedId, onSelect, onClose, toast, me, canCreate = true }) {
+// canAddHere: "+ Person at this door" (desk: anywhere; a volunteer: a door in a turf they walk).
+export default function DoorCard({ door, selectedId, onSelect, onClose, toast, me, canCreate = true, canAddHere = canCreate }) {
   const queryClient = useQueryClient();
   const location = useLocation();
   // The profile's back link reads this: "← Map", back to this door (the URL
@@ -434,7 +483,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       const sign = res?.sign;
       // Undo only where the server can truly take it back; never by filing
       // the request as "taken down".
-      const canCancel = hasAction(await queryClient.fetchQuery(ACTIONS_QUERY).catch(() => null), 'sign.cancel');
+      const canCancel = await signCancelOffered(queryClient);
       toast(`${SIGN_LABEL[kind]} requested`, sign?.id && canCancel ? { label: 'Undo', onClick: () => undoSign(sign) } : null);
       if (sign?.id) {
         patchDoors(queryClient, (d) => ({
@@ -484,8 +533,6 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     else if (u?.sent?.sign?.id) undoSign(u.sent.sign);
     else toast(`${label} already sent`);
   };
-  const haveSign = new Set(door.signs.filter((s) => s.status !== 'removed').map((s) => s.kind));
-  const signOffer = SIGN_BUTTONS.filter((s) => !haveSign.has(s.code));
 
   const smsBody = (p) =>
     `Hi ${firstName(p.name)}, it's ${me?.user?.name || 'a volunteer'} with ${me?.workspace?.name || 'the campaign'}.`;
@@ -570,34 +617,9 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
             </div>
           )}
 
-          <div className="door-more__sec">
-            <span className="door-more__label" id="door-sign-label">{signOffer.length ? 'Wants a sign?' : 'Signs'}</span>
-            {door.signs.length > 0 && (
-              <div className="door-signs-have">
-                {door.signs.map((s) => (
-                  <span key={s.id} className={`chip ${s.pending ? 'fk-wait' : SIGN_CHIP[s.status] || ''}`} title={SIGN_LABEL[s.kind]}>
-                    {SIGN_LABEL[s.kind]} · {s.pending ? 'Not sent yet' : SIGN_STATUS[s.status] || s.status}
-                  </span>
-                ))}
-              </div>
-            )}
-            {signOffer.length > 0 && (
-              <div className="door-sign-btns" role="group" aria-labelledby="door-sign-label">
-                {signOffer.map((s) => (
-                  <button
-                    key={s.code} type="button" className="btn door-act" disabled={busy}
-                    title={`Request a ${SIGN_LABEL[s.code].toLowerCase()}`}
-                    aria-label={`Request a ${SIGN_LABEL[s.code].toLowerCase()}`}
-                    onClick={() => placeSign(s.code)}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <SignAsk signs={door.signs} disabled={busy} onAsk={placeSign} />
 
-          {canCreate && (
+          {canAddHere && door.address && (
             adding ? (
               <AddPersonInline
                 door={door}

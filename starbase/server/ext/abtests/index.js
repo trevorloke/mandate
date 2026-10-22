@@ -16,5 +16,8 @@ import { WINNER_JOB } from './send.js';
 
 export const jobs = { [WINNER_JOB]: pickWinner };
 
+// In the full export: the links each send carried.
+export const exportTables = ['blast_links'];
+
 // Open and click counts per send are the desk's, like the sends themselves.
 export const deskOnlyReads = ['/blasts/stats'];

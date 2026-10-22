@@ -18,6 +18,9 @@ import { storeAnswers } from './answers.js';
 
 export const hooks = { contactLogged: storeAnswers };
 
+// In the full export: the surveys, their questions and every answer.
+export const exportTables = ['surveys', 'survey_questions', 'survey_responses'];
+
 // Volunteers read only /surveys/active (questions). Everything else — the
 // list, the builder, results, the CSV, a person's answers — is desk-only.
 export const deskOnlyReads = [

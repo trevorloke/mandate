@@ -7,8 +7,11 @@
 //   api            a Hono app mounted under /api (signed-in; c.get('ctx'))
 //   publicRoutes   a Hono app mounted at / before /api (no sign-in)
 //   jobs           { kind: async (db, job) => {} } — see lib/jobs.js
-//   hooks          { events, contactLogged } — see lib/hooks.js
+//   hooks          { events, contactLogged, brief } — see lib/hooks.js
 //   deskOnlyReads  ['/surveys/results', …] — GET paths volunteers may not read
+//   exportTables   ['surveys', { table: 'receipts', omit: ['token'] }, …] —
+//                  the feature's tables in GET /api/export (rows of this
+//                  workspace; omit drops secrets such as a link's token)
 //
 // Feature modules import from lib/* and actions/util.js only — never from
 // actions/index.js or routes/* (that would be an import cycle).

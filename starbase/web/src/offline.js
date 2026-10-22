@@ -36,8 +36,11 @@ import { SIGN_KINDS } from '@starbase/shared/canvass';
 import { action, ApiError } from './api.js';
 
 // The writes a phone may do with no signal (the door card, walk list, Calls,
-// the map's pins and Shifts).
-export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave'];
+// the map's pins and Shifts). person.addAtDoor: a new housemate at a door
+// already on the list (every role; the server copies the door's address).
+export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.addAtDoor', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave'];
+// The writes that add a person, on an id made here.
+export const NEW_PERSON = ['person.create', 'person.addAtDoor'];
 
 const KEY = 'starbase:outbox:v2';
 const V1_KEY = 'starbase:outbox:v1'; // knocks only (before this outbox)
@@ -144,11 +147,11 @@ export function clearOutbox() {
 
 // The id the server dedupes on, made here so a replay is the same write.
 const withClientId = (name, input) => {
-  if (name === 'person.create') return input.id ? input : { ...input, id: newClientId() };
+  if (NEW_PERSON.includes(name)) return input.id ? input : { ...input, id: newClientId() };
   if (name === 'contact.log' || name === 'sign.place') return input.client_id ? input : { ...input, client_id: newClientId() };
   return input;
 };
-const cidOf = (name, input) => (name === 'person.create' ? input.id
+const cidOf = (name, input) => (NEW_PERSON.includes(name) ? input.id
   : name === 'contact.log' || name === 'sign.place' ? input.client_id : newClientId());
 
 // A replay of something the server already did answers "already": that IS done.
@@ -177,7 +180,9 @@ export function onOutboxSent(fn) {
 }
 
 // meta: { who } — the name the sheet shows ("Knock · Maya Chen · 2:14 pm");
-// person.locate also keeps { person } so the pin still shows after a reload.
+// person.locate also keeps { person } so the pin still shows after a reload,
+// and person.addAtDoor { door: { address, unit, lat, lng } } — where the
+// server will put them — so the map and walk list show them meanwhile.
 export async function queueAction(name, input, meta = {}) {
   if (!FIELD_ACTIONS.includes(name)) throw new Error(`${name} can't be saved offline`);
   const body = withClientId(name, input);
@@ -354,7 +359,8 @@ export function itemText(item, nameOf = () => '') {
     case 'contact.log':
       what = i.rating || i.outcome !== 'contacted' || !i.note ? (CHANNEL_WORD[i.channel] || 'Knock') : 'Note';
       break;
-    case 'person.create': what = 'New person'; break;
+    case 'person.create':
+    case 'person.addAtDoor': what = 'New person'; break;
     case 'person.locate': what = 'Pin'; break;
     case 'sign.place': what = item.undo ? `${SIGN_WORD[i.kind] || 'Sign'} · undo` : (SIGN_WORD[i.kind] || 'Sign'); break;
     case 'sign.cancel': what = 'Sign undo'; break;
@@ -362,7 +368,7 @@ export function itemText(item, nameOf = () => '') {
     case 'shift.leave': what = 'Can’t make it'; break;
     default: what = 'Saved';
   }
-  const name = item.name === 'person.create' ? i.name : who;
+  const name = NEW_PERSON.includes(item.name) ? i.name : who;
   return [what, name, clockText(item.at)].filter(Boolean).join(' · ');
 }
 
@@ -380,21 +386,29 @@ export function pendingKnocks(items = visible) {
   return out;
 }
 
+// What a new-person item says about them: its input, plus (person.addAtDoor)
+// the door it was added at.
+const newPersonOf = (it) => (it.name === 'person.addAtDoor' ? { ...(it.meta?.door || {}), ...it.input } : it.input || {});
+const isNewPerson = (it) => NEW_PERSON.includes(it.name);
+
 // A person added on this phone, in the shape the map and walk list use.
-const pendingPerson = (it) => ({
-  id: it.input.id,
-  name: it.input.name,
-  phone: it.input.phone ?? null,
-  email: null,
-  address: it.input.address ?? null,
-  unit: it.input.unit ?? null,
-  lat: Number(it.input.lat),
-  lng: Number(it.input.lng),
-  rating: null,
-  rated_at: null,
-  tags: [],
-  pending: true,
-});
+const pendingPerson = (it) => {
+  const i = newPersonOf(it);
+  return {
+    id: i.id,
+    name: i.name,
+    phone: i.phone ?? null,
+    email: null,
+    address: i.address ?? null,
+    unit: i.unit ?? null,
+    lat: Number(i.lat),
+    lng: Number(i.lng),
+    rating: null,
+    rated_at: null,
+    tags: [],
+    pending: true,
+  };
+};
 
 // Same ray-casting test the server uses for walk lists (server/lib/geo.js).
 function inRing(lat, lng, ring) {
@@ -411,7 +425,7 @@ function inRing(lat, lng, ring) {
 export function pendingPeopleIn(ring, items = visible) {
   if (!Array.isArray(ring) || ring.length < 3) return [];
   return items
-    .filter((it) => it.state === 'pending' && it.name === 'person.create' && it.input?.lat != null && it.input?.lng != null)
+    .filter((it) => it.state === 'pending' && isNewPerson(it) && newPersonOf(it).lat != null && newPersonOf(it).lng != null)
     .map(pendingPerson)
     .filter((p) => inRing(p.lat, p.lng, ring));
 }
@@ -428,8 +442,9 @@ export function applyOutbox(data, items = visible) {
   let unlocated = data.unlocated || 0;
   for (const it of waiting) {
     const i = it.input || {};
-    if (it.name === 'person.create' && i.lat != null && i.lng != null) {
-      if (!persons.some((p) => p.id === i.id)) persons.push(pendingPerson(it));
+    if (isNewPerson(it)) {
+      const np = newPersonOf(it);
+      if (np.lat != null && np.lng != null && !persons.some((p) => p.id === np.id)) persons.push(pendingPerson(it));
     } else if (it.name === 'person.locate') {
       const at = persons.findIndex((p) => p.id === i.id);
       if (at >= 0) persons[at] = { ...persons[at], lat: i.lat, lng: i.lng };

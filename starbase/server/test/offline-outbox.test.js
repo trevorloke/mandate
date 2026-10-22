@@ -288,3 +288,49 @@ test('each item belongs to the sign-in that saved it: never sent or shown as som
   assert.equal(contacts[0].by_name, meA.user.name, 'recorded as the person who knocked');
   ob.setOutboxOwner(null);
 });
+
+test('a volunteer, offline: a new housemate at a door in their turf, then a knock — sent once, at the door', async () => {
+  const lat = 49.1331; const lng = -122.8531;
+  const maya = await c.createPerson('Door Maya', { address: '7230 124 St', city: 'Surrey', lat, lng });
+  const turf = (await c.action('turf.create', {
+    name: `Outbox turf ${tag}`, polygon: [[lat + 0.001, lng - 0.001], [lat + 0.001, lng + 0.001], [lat - 0.001, lng + 0.001], [lat - 0.001, lng - 0.001]],
+  })).json.turf;
+  const meB = (await vol.get('/api/auth/me')).json;
+  assert.equal((await c.action('turf.assign', { turf_id: turf.id, user_id: meB.user.id })).status, 200);
+  ob.setOutboxOwner(meB);
+  net.cookie = vol.cookie;
+
+  nav.onLine = false;
+  const door = { address: '7230 124 St', unit: null, lat, lng };
+  const made = await ob.queueAction('person.addAtDoor', { housemate_id: maya.id, name: 'Ravi Housemate', phone: '604-555-0107' }, { who: 'Ravi Housemate', door });
+  assert.equal(made.queued, true);
+  const id = made.client_id;
+  await ob.logContact({ person_id: id, channel: 'door', outcome: 'contacted', rating: '1' }, { who: 'Ravi Housemate' });
+  const item = JSON.parse(store.get('starbase:outbox:v2')).find((i) => i.cid === id);
+  assert.equal(item.input.id, id, 'the id is made on the phone');
+  assert.equal(item.input.address, undefined, 'the server, not the phone, says where they live');
+  assert.match(ob.itemText(item), /^New person · Ravi Housemate · /);
+  // The walk list and map show them at the door before anything is sent.
+  const inTurf = ob.pendingPeopleIn(turf.polygon);
+  assert.equal(inTurf.length, 1);
+  assert.equal(inTurf[0].address, '7230 124 St');
+  assert.equal(inTurf[0].pending, true);
+  const over = ob.applyOutbox({ persons: [], signs: [], unlocated: 0 });
+  assert.equal(over.persons.find((p) => p.id === id)?.rating, '1');
+
+  // Signal back; the first answer is lost after the server wrote it.
+  nav.onLine = true;
+  net.loseNext = 1;
+  assert.equal((await ob.flushOutbox()).sent, 0);
+  assert.equal((await ob.flushOutbox()).sent, 2);
+  const found = await persons('Ravi Housemate');
+  assert.equal(found.length, 1, 'one Ravi, not two');
+  assert.equal(found[0].id, id);
+  assert.equal(found[0].address, '7230 124 St');
+  assert.equal(found[0].city, 'Surrey');
+  assert.equal(found[0].rating, '1');
+  assert.equal((await contactsOf(id)).length, 1, 'one knock');
+  assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+  ob.setOutboxOwner(null);
+  net.cookie = c.cookie;
+});

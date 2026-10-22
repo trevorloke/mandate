@@ -27,6 +27,9 @@ import { onEvents, runStepJob, JOB } from './engine.js';
 export const hooks = { events: onEvents };
 export const jobs = { [JOB]: runStepJob };
 
+// In the full export: the ladders, who is on which step, and the follow-ups.
+export const exportTables = ['ladders', 'ladder_runs', 'ladder_followups'];
+
 export const deskOnlyReads = [
   /^\/api\/ladders(\/.*)?$/,
   '/persons/:id/ladders',
