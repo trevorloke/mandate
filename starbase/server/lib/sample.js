@@ -91,7 +91,7 @@ export const buildSample = () => {
     ['Charlotte Hughes', 100000, 'one-time', 'cheque'], // star ($1K)
     ['Kwame Mensah', 50000, 'one-time', 'etransfer'],
     ['Arjun Mehta', 80000, 'one-time', 'card'],
-    ['Arjun Mehta', 60000, 'one-time', 'card'],        // crosses the municipal cap → flagged
+    ['Arjun Mehta', 70000, 'one-time', 'card'],        // $1,500 crosses the municipal cap → flagged
     ['Peter Andersen', 5000, 'one-time', 'cash'],
     ['Leah Goldberg', 2500, 'monthly', 'card'],
   ];

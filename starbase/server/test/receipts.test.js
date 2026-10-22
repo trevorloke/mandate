@@ -496,7 +496,7 @@ test('disclosure: contributors over $100 for one period (editable), each contrib
   await gift(c, rec, 2000, '2025-11-15');
   await gift(c, rec, 9000, '2026-02-01');
   // Over the contribution limit this year (Money flags it).
-  await gift(c, olga, 130000, '2026-02-02');
+  await gift(c, olga, 150000, '2026-02-02');
 
   const res = await raw(tr, '/api/receipts/disclosure.csv?period=2026');
   assert.equal(res.status, 200);
@@ -511,7 +511,7 @@ test('disclosure: contributors over $100 for one period (editable), each contrib
     ['Ann Over', '1 First St, Surrey, V3W 1A1', '110.00', 'No', '2026-03-01', '60.00'],
     ['Ann Over', '1 First St, Surrey, V3W 1A1', '110.00', 'No', '2026-04-01', '50.00'],
     ['Cy Single', '3 Third St', '150.00', 'No', '2026-06-01', '150.00'],
-    ['Olga Overlimit', '9 Ninth St', '1300.00', 'Yes', '2026-02-02', '1300.00'],
+    ['Olga Overlimit', '9 Ninth St', '1500.00', 'Yes', '2026-02-02', '1500.00'],
   ], 'over $100 in 2026 only: exactly $100 is not over, a voided gift does not count, two people with one name never pool, last year never adds in');
   assert.ok(rows.slice(2).every((r) => /^2026-\d{4}$/.test(r[6])), 'each contribution names its receipt');
   const last = parseCsv((await raw(tr, '/api/receipts/disclosure.csv?period=2025')).text);

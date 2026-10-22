@@ -289,7 +289,7 @@ test('donate page: pledge logged as public.pledge; the law’s words stay; no re
     'This contribution is from my own funds and I will not be reimbursed.',
     'Full name', 'Home address',
   ]) assert.ok(pageRes.text.includes(words), words);
-  assert.match(pageRes.text, /The annual limit is \$1,250 per contributor, including monthly gifts\./);
+  assert.match(pageRes.text, /The annual limit is \$1,429\.70 per contributor, including monthly gifts\./);
   assert.doesNotMatch(pageRes.text, /receipt/i);
 
   const donate = (fields) => pub('POST', `/d/${slug}`, new URLSearchParams(fields));

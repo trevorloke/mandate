@@ -338,7 +338,8 @@ const SEED = `
 insert into cap_rules (jurisdiction, year, cap_cents, source_note) values
   ('bc-provincial', 2024, 145082, 'Elections BC 2024 indexed annual limit — verify before filing'),
   ('bc-provincial', 2025, 149565, 'Elections BC 2025 indexed annual limit — verify before filing'),
-  ('bc-municipal',  2022, 125000, 'LECFA 2022 per-campaign contribution limit — verify the indexed amount for the current election year')
+  ('bc-municipal',  2022, 125000, 'LECFA 2022 per-campaign contribution limit — verify the indexed amount for the current election year'),
+  ('bc-municipal',  2026, 142970, 'Elections BC 2026 local elections limit — one limit for an elector organization and its endorsed candidates together; verify before filing')
 on conflict do nothing;
 `;
 

@@ -213,9 +213,11 @@ the same file never creates duplicates.
   tile provider before election week (`STARBASE_TILE_URL`, see the README).
 - Offline mode covers **field work** (knocks, new people and doors, pins,
   sign requests, shift sign-ups). Gifts, imports and outreach need signal.
-- The BC municipal contribution limit is seeded at the 2022 figure
-  ($1,250) — **confirm the current indexed amount with Elections BC** and set
-  it before relying on cap checks.
+- The BC municipal contribution limit is seeded at Elections BC's 2026
+  figure, **$1,429.70** per contributor for the calendar year — one limit
+  shared by an elector organization and its endorsed candidates (2022:
+  $1,250; 2023–2025 gifts are checked against $1,250, the lower, until
+  those years' figures are added). Confirm with Elections BC before filing.
 - Without Twilio, calls and texts use the phone's own dialer and messages
   (no auto-dialer).
 - Contribution receipts: the wording (including the *not tax-deductible*

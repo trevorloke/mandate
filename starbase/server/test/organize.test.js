@@ -130,7 +130,7 @@ const eligible = { attest_individual: '1', attest_resident: '1', attest_own_fund
 test('donate page: attestations required, name + address required, cap refused up front, pledge recorded', async () => {
   const page = await pub('GET', `/d/${slug}`);
   assert.match(page.text, /Canadian citizen or permanent resident/);
-  assert.match(page.text, /annual limit is \$1,250/);
+  assert.match(page.text, /annual limit is \$1,429\.70/);
   const noAttest = await donate({ amount: '100', name: 'Pat Donor', email: 'pat@example.org', address: '1 Main St' });
   assert.equal(noAttest.status, 400);
   assert.match(noAttest.text, /eligibility/);
@@ -154,9 +154,9 @@ test('donate page: attestations required, name + address required, cap refused u
   assert.equal((await mgr.action('pledge.receive', { id: pledges[0].id, date: '2026-01-01' })).status, 404, 'only once');
 
   // Second visit by the same email: the up-front check counts the first gift.
-  const over = await donate({ other: '1100', name: 'Pat Donor', email: 'pat@example.org', address: '1 Main St', ...eligible });
+  const over = await donate({ other: '1200', name: 'Pat Donor', email: 'pat@example.org', address: '1 Main St', ...eligible });
   assert.equal(over.status, 400);
-  assert.match(over.text, /up to \$1,000 more this year/);
+  assert.match(over.text, /up to \$1,179\.70 more this year/);
 });
 
 const sign = (body, secret, t = Math.floor(Date.now() / 1000)) =>

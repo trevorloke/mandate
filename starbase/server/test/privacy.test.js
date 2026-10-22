@@ -74,7 +74,7 @@ test('volunteer person list: their own note rides along — same row shape, some
 
 test('volunteer brief never carries flagged gifts or their numbers', async () => {
   // Push the donor over the cap: the desk sees the numbers, the volunteer sees nothing.
-  await desk.action('gift.log', { person_id: donor.id, amount_cents: 20000, date: '2026-04-01' });
+  await desk.action('gift.log', { person_id: donor.id, amount_cents: 30000, date: '2026-04-01' });
   const d = (await desk.get('/api/brief')).json;
   assert.equal(d.flagged.length, 1);
   assert.equal(typeof d.flagged[0].total_cents, 'number');
