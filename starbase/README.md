@@ -93,6 +93,32 @@ them, blasts and shift notifications are recorded as **queued** per recipient
 uses `tel:` / `sms:` links (the phone's own dialer and messages) with one-tap
 logging.
 
+## Map tiles and offline field mode
+
+The map draws OpenStreetMap tiles unless these say otherwise (read on each
+request to the signed-in `GET /api/map/config`, so a restart applies them).
+OpenStreetMap's volunteer-run servers are not for heavy use — a large team in
+election week should switch to a paid provider.
+
+| Variable | What for | Default |
+|---|---|---|
+| `STARBASE_TILE_URL` | tile template, `https://…/{z}/{x}/{y}.png` (`{s}` optional; an API key can ride in the query string) | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` |
+| `STARBASE_TILE_ATTRIBUTION` | the provider's credit line (text and links) | the OpenStreetMap credit (none for another provider unless set) |
+| `STARBASE_TILE_MAX_ZOOM` | deepest zoom the provider serves, 1–22 | `19` |
+
+A bad value falls back to the default (and logs once). The service worker
+keeps the tiles a phone has already looked at (about 1,500, oldest out), so a
+turf viewed with signal still draws offline; it never fetches tiles ahead.
+
+With no signal, field work saves on the phone and sends once, in order, when
+the signal is back: knocks, new people and doors (staff), dropped pins, sign
+requests and their Undo, and *Count me in* / *Can't make it*. The map's doors,
+the Calls list, shifts and walk lists keep their last loaded copy on the
+phone for a day ("Offline copy"); sign-out forgets them. Anything the server
+refuses on the way is kept and listed under the strip's "saved on this phone"
+chip with the reason — *Try again* or *Dismiss*. Gifts, imports and outreach
+need signal.
+
 ## Architecture
 
 **Five primitives** — Person (first-class table, real FKs) · Record

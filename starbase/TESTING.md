@@ -97,7 +97,8 @@ one tap away under **More**.
 - **Shifts** — *Count me in* on an open shift; *Can't make it* to drop out.
 - **Signs** (from Today when there are signs to put up) — *Put up ✓*.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved
-  offline*), turn it off — they send once, never twice.
+  offline*), *Count me in* on a shift, turn it off — they send once, never
+  twice. The strip's *saved on this phone* chip lists what's waiting.
 - Confirm a volunteer **never sees money or the supporter list**: no Money,
   People or Outreach; typing those addresses lands back on Today. (The
   server enforces this too: their browser never receives other people's
@@ -151,9 +152,9 @@ the same file never creates duplicates.
 ## 4 · Known limits in this build
 
 - Map tiles come from OpenStreetMap; very large teams should switch to a paid
-  tile provider before election week.
-- Offline mode covers **door knocks** (ratings, outcomes, notes). Adding new
-  people, signs, and gifts needs signal.
+  tile provider before election week (`STARBASE_TILE_URL`, see the README).
+- Offline mode covers **field work** (knocks, new people and doors, pins,
+  sign requests, shift sign-ups). Gifts, imports and outreach need signal.
 - The BC municipal contribution limit is seeded at the 2022 figure
   ($1,250) — **confirm the current indexed amount with Elections BC** and set
   it before relying on cap checks.

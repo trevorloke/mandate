@@ -18,11 +18,13 @@
 //               door you're at. Both lists are kept on the phone for a day,
 //               so a reload with no signal still opens them ("Offline copy");
 //               cachedWalkLists(me) lists those copies for the map and Today.
+//               Someone added on this phone (not sent yet) whose pin is in
+//               the turf joins the list at once, marked "Not sent yet".
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet } from '../api.js';
-import { logContact, useOutbox } from '../offline.js';
+import { logContact, pendingKnocks, pendingPeopleIn, useOutbox } from '../offline.js';
 import { queuedChip, queuedText } from '../components/queued.js';
 import RatingButtons, {
   More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
@@ -61,8 +63,6 @@ const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce
 // queryClient.clear()). forgetFieldCache() is exported for the shell too.
 const CACHE_PREFIX = 'starbase:field:v1:';
 const CACHE_TTL = 24 * 3600 * 1000;
-// offline.js's outbox, read only: knocks still waiting show as done after a reload.
-const OUTBOX_KEY = 'starbase:outbox:v1';
 const cacheKey = (me, name) => (me?.user?.id && me?.workspace?.id ? `${CACHE_PREFIX}${me.workspace.id}:${me.user.id}:${name}` : null);
 function readCache(key) {
   if (!key) return undefined;
@@ -143,19 +143,8 @@ function usePhoneCopy(queryClient, q, key) {
   const status = q.error?.status;
   useEffect(() => { if (status === 403 || status === 404) dropCache(key); }, [key, status]);
 }
-// Knocks still in the outbox (e.g. after a reload with no signal), as the
-// walk list's per-person overlay.
-function queuedKnocks() {
-  try {
-    const items = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]');
-    const out = {};
-    for (const it of Array.isArray(items) ? items : []) {
-      if (!it?.person_id || it.channel !== 'door') continue;
-      out[it.person_id] = { rating: it.rating || out[it.person_id]?.rating || null, outcome: it.outcome, at: it.queued_at, queued: true };
-    }
-    return out;
-  } catch { return {}; }
-}
+// Knocks still in the outbox (e.g. after a reload with no signal) are the
+// walk list's per-person overlay: pendingKnocks() in offline.js.
 
 // "3:41 p.m." today, "Oct 18" before that — the canvasser's local clock.
 const fmtWhen = (iso) => {
@@ -219,7 +208,7 @@ function TurfList() {
   });
   usePhoneCopy(queryClient, q, ck);
   const turfs = q.data?.turfs ?? [];
-  const offlineCopy = Boolean(q.data) && (q.fetchStatus === 'paused' || q.isError);
+  const offlineCopy = Boolean(q.data) && (q.fetchStatus === 'paused' || q.isError || !onlineNow());
 
   return (
     <div className="turfs-page">
@@ -327,7 +316,7 @@ function WalkList({ id }) {
   // What this phone logged since the list loaded, by person id:
   // { rating, outcome, at, queued }. Laid over the server's data so the list
   // reacts at once — and keeps showing knocks still waiting in the outbox.
-  const [local, setLocal] = useState(queuedKnocks);
+  const [local, setLocal] = useState(() => pendingKnocks());
   const [notes, setNotes] = useState({});      // person id → unsent note
   const [busy, setBusy] = useState({});        // person id | door key → true
   // Back from a profile opened at a door: that door opens again (Door's
@@ -371,37 +360,53 @@ function WalkList({ id }) {
   // The outbox drained (here or from the app shell): refetch, and stop
   // calling anything "not sent yet".
   const prevPending = useRef(outbox.pending);
+  const refusedAtStart = useRef(outbox.refused);
   useEffect(() => {
+    if (outbox.pending > 0 && prevPending.current === 0) refusedAtStart.current = outbox.refused;
     if (outbox.pending < prevPending.current) {
       refresh();
       if (outbox.pending === 0) {
         // This render's `local` is the latest: the effect runs right after it.
         if (Object.values(local).some((v) => v.queued)) {
-          // A knock the server refused leaves the outbox too, unsent: then
-          // the error line says so, and nothing says "Sent".
-          if (!outbox.lastError) toast('Sent');
+          // Something the server refused stays on the phone, unsent: the
+          // shell's chip says "1 refused", and nothing here says "Sent".
+          if (!outbox.lastError && outbox.refused <= refusedAtStart.current) toast('Sent');
           setLocal((l) => Object.fromEntries(Object.entries(l).map(([k, v]) => [k, { ...v, queued: false }])));
         }
+        refusedAtStart.current = outbox.refused;
       }
     }
     prevPending.current = outbox.pending;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outbox.pending]);
 
-  const doors = useMemo(() => (q.data?.doors ?? []).map((d) => {
-    const persons = d.persons.map((p) => {
-      const mine = local[p.id];
-      return mine
-        ? { ...p, rating: mine.rating ?? p.rating, last_outcome: mine.outcome, last_contact_at: mine.at, door_knocked: true, queued: mine.queued }
-        : p;
+  // People added on this phone (not sent yet) whose pin is in this turf: at
+  // their housemates' door, or a door of their own at the end of the list.
+  const added = useMemo(() => pendingPeopleIn(q.data?.turf?.polygon, outbox.items), [q.data, outbox.items]);
+  const doors = useMemo(() => {
+    const list = (q.data?.doors ?? []).map((d) => ({ ...d, persons: [...d.persons] }));
+    const known = new Set(list.flatMap((d) => d.persons.map((p) => p.id)));
+    for (const p of added) {
+      if (known.has(p.id)) continue;
+      const home = p.address && list.find((d) => d.address && norm(d.address) === norm(p.address) && norm(d.unit) === norm(p.unit));
+      if (home) home.persons.push(p);
+      else list.push({ address: p.address, unit: p.unit, lat: p.lat, lng: p.lng, persons: [p], done: false });
+    }
+    return list.map((d) => {
+      const persons = d.persons.map((p) => {
+        const mine = local[p.id];
+        return mine
+          ? { ...p, rating: mine.rating ?? p.rating, last_outcome: mine.outcome, last_contact_at: mine.at, door_knocked: true, queued: mine.queued }
+          : p;
+      });
+      return {
+        ...d,
+        key: `${norm(d.address)}|${norm(d.unit)}|${d.address ? '' : d.persons[0]?.id}`,
+        persons,
+        done: d.done || persons.some((p) => local[p.id]),
+      };
     });
-    return {
-      ...d,
-      key: `${norm(d.address)}|${norm(d.unit)}|${d.address ? '' : d.persons[0]?.id}`,
-      persons,
-      done: d.done || persons.some((p) => local[p.id]),
-    };
-  }), [q.data, local]);
+  }, [q.data, local, added]);
 
   // The latest list, open door and knocks, for handlers that finish after an
   // await (and for the unmount note flush).
@@ -489,7 +494,7 @@ function WalkList({ id }) {
   // "talked" contact carrying just the note — the same as "Save note".
   const sendNote = async (person, text, multi) => {
     try {
-      const r = await logContact({ person_id: person.id, channel: 'door', outcome: 'contacted', note: text });
+      const r = await logContact({ person_id: person.id, channel: 'door', outcome: 'contacted', note: text }, { who: person.name });
       if (!r.queued) refresh();
       if (!alive.current) return;
       setLocal((l) => ({
@@ -559,7 +564,7 @@ function WalkList({ id }) {
     if (note) { input.note = note; setNote(person.id, ''); }
     setBusyKey(person.id, true);
     try {
-      const r = await logContact(input);
+      const r = await logContact(input, { who: person.name });
       const before = localRef.current;
       setLocal((l) => ({
         ...l,
@@ -660,7 +665,7 @@ function WalkList({ id }) {
   }
 
   const { turf } = q.data;
-  const offlineCopy = q.isError || q.fetchStatus === 'paused';
+  const offlineCopy = q.isError || q.fetchStatus === 'paused' || !online;
   const nextLabel = target && (skipping ? (
     <>
       <span className="walk-next__label">Skip</span>
@@ -716,7 +721,7 @@ function WalkList({ id }) {
           row here, and no "Send now" that can't send. */}
       {online && outbox.pending > 0 && (
         <div className="walk-outbox" role="status">
-          <span className="chip fk-wait">{plural(outbox.pending, 'knock', 'knocks')} not sent yet</span>
+          <span className="chip fk-wait">{outbox.pending} not sent yet</span>
           {outbox.lastError && <span className="walk-outbox__err">{outbox.lastError}</span>}
           <button type="button" className="btn walk-act" onClick={sendNow} disabled={outbox.flushing}>
             {outbox.flushing ? 'Sending…' : 'Send now'}
@@ -793,6 +798,8 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
   const markDoor = () => navigate(here, { replace: true, state: { door: door.key, person: sel?.id } });
   const doorBusy = Boolean(busy[door.key]) || door.persons.some((p) => busy[p.id]);
   const queued = door.persons.some((p) => p.queued);
+  // Someone added on this phone the server doesn't have yet.
+  const added = door.persons.some((p) => p.pending);
   const rated = door.persons.filter((p) => p.rating);
   const phoneOnly = door.done && reachedByPhoneOnly(door);
   const note = notes[sel?.id] || '';
@@ -827,7 +834,7 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
           </span>
           {/* One line: a household says "2 rated" (whose is whose is inside). */}
           <span className="walk-door__chips">
-            {queued && <span className="chip fk-wait">{queuedChip(true)}</span>}
+            {(queued || added) && <span className="chip fk-wait">{added ? 'Not sent' : queuedChip(true)}</span>}
             {multi
               ? rated.length > 0 && <span className="chip walk-rated">{rated.length} rated</span>
               : rated.map((p) => <RatingChip key={p.id} code={p.rating} who />)}
@@ -852,6 +859,7 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
             <p className="walk-last mono">
               {multi && <strong>{firstName(sel.name)} · </strong>}{last}
               {sel.queued && <span className="chip fk-wait"> {queuedChip()}</span>}
+              {sel.pending && <span className="chip fk-wait"> Not sent yet</span>}
             </p>
             <div className="field walk-note">
               <label htmlFor={`walk-note-${sel.id}`} className="walk-sr">Note</label>
@@ -874,7 +882,7 @@ function Door({ door, index, isNext, open, onToggle, selectedId, onPick, busy, n
                 </button>
               )}
               {sel.phone && <a className="btn walk-act" href={`tel:${dialable(sel.phone)}`}>Call</a>}
-              <Link className="btn btn-quiet walk-act" to={`/people/${sel.id}`} state={fromHere} onClick={markDoor}>Profile</Link>
+              {!sel.pending && <Link className="btn btn-quiet walk-act" to={`/people/${sel.id}`} state={fromHere} onClick={markDoor}>Profile</Link>}
             </div>
           </More>
         </div>

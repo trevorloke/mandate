@@ -7,15 +7,19 @@
 // Also exports AddDoorForm — the same person.create flow for a tapped spot
 // that has no door yet.
 //
-// Offline: every contact.log goes through the outbox (logContact), so a knock
-// tapped with no signal is saved on the phone and sent later — the card still
-// shows the rating straight away (queued.js has the words, shared with the
-// walk list, Calls and the profile). Sign requests and new people need the
-// server, so those say so.
+// Offline: every write here goes through the outbox (src/offline.js) — knocks
+// (logContact), a new person or door (person.create, on an id made here, so
+// they can be knocked at once), sign requests and their Undo — so a tap with
+// no signal is saved on the phone and sent later, in order, exactly once.
+// The card shows it straight away (queued.js has the words, shared with the
+// walk list, Calls and the profile); a person or sign not sent yet says
+// "Not sent yet" (the map lays the outbox over its doors).
 //
 // A sign request's toast offers Undo only when the server has sign.cancel
 // (GET /api/actions): it takes the request back — off every list and count —
-// so "Lawn sign cancelled" is true. Never "taken down": it never went up.
+// so "Lawn sign cancelled" is true. Never "taken down": it never went up. A
+// request still on the phone is simply taken off it ("Lawn sign cancelled");
+// one that may already have gone sends its cancel after it ("Undo saved…").
 //
 // Contacts are append-only: after a tap the toast offers "Change", which
 // puts focus back on the rating row — the next tap logs the correction.
@@ -27,8 +31,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { action, apiGet, ApiError } from '../api.js';
-import { logContact } from '../offline.js';
+import { apiGet, ApiError } from '../api.js';
+import { logContact, queueAction, undoQueued } from '../offline.js';
 import { isOffline, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
@@ -175,18 +179,21 @@ function AddPersonInline({ door, onDone, onCancel, toast }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { setError('Add a name'); return; }
-    if (isOffline()) { setError(OFFLINE_MSG); toast(OFFLINE_MSG); return; }
     setBusy(true);
     setError(null);
     try {
-      const res = await action('person.create', {
-        name: form.name.trim(),
+      // Through the outbox: no signal, it's saved here and the door shows it.
+      const name = form.name.trim();
+      const r = await queueAction('person.create', {
+        name,
         phone: form.phone.trim() || undefined,
         address: door.address || undefined,
         unit: door.unit || undefined,
         lat: door.lat,
         lng: door.lng,
-      });
+      }, { who: name });
+      if (r.queued) { toast(queuedText(r, name)); onDone(r.client_id); return; }
+      const res = r.result;
       toast(`Added ${res.person.name}`);
       patchDoors(queryClient, (d) => ({
         ...d,
@@ -228,18 +235,20 @@ export function AddDoorForm({ latlng, onDone, onCancel, toast }) {
     // Whitespace passes `required`; the server trims names (→ 400) and a
     // blank address would make an unaddressed pin, not a door.
     if (!form.name.trim() || !form.address.trim()) { setError('Add a name and address'); return; }
-    if (isOffline()) { setError(OFFLINE_MSG); toast(OFFLINE_MSG); return; }
     setBusy(true);
     setError(null);
     try {
-      const res = await action('person.create', {
-        name: form.name.trim(),
+      const name = form.name.trim();
+      const r = await queueAction('person.create', {
+        name,
         address: form.address.trim(),
         unit: form.unit.trim() || undefined,
         phone: form.phone.trim() || undefined,
         lat: latlng.lat,
         lng: latlng.lng,
-      });
+      }, { who: name });
+      if (r.queued) { toast(queuedText(r, name)); onDone(r.client_id); return; }
+      const res = r.result;
       toast(`Added ${res.person.name}`);
       patchDoors(queryClient, (d) => ({
         ...d,
@@ -309,7 +318,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const sendNote = async (person, via, text, { toast: say, refresh: reload, multi: many }) => {
     const who = many ? `${firstName(person.name)} · ` : '';
     try {
-      const r = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text });
+      const r = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text }, { who: person.name });
       say(r.queued ? `${who}${queuedText(r, 'Note')}` : `${who}Note saved`);
       if (!r.queued) reload();
     } catch (err) {
@@ -368,7 +377,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         outcome,
         rating: rating || undefined,
         note: sentNote || undefined,
-      });
+      }, { who: person.name });
       if (pending) backToDoor(); // the call/text is logged — the next tap is back at the door
       // Append-only: "Change" brings the rating row back; the next tap logs the fix.
       const change = { label: 'Change', onClick: () => focusRating(rateRef.current) };
@@ -399,16 +408,22 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
 
   const placeSign = async (kind) => {
     if (!sel || busy) return;
-    if (isOffline()) { toast(OFFLINE_MSG); return; }
     setBusy(true);
     try {
-      const res = await action('sign.place', {
+      // Through the outbox (client_id: a replay is the same request).
+      const r = await queueAction('sign.place', {
         person_id: sel.id,
         kind,
         lat: door.lat,
         lng: door.lng,
         address: door.address || undefined,
-      });
+      }, { who: sel.name });
+      if (r.queued) {
+        // The map shows it from the outbox ("Not sent yet"); Undo takes it back.
+        toast(queuedText(r, SIGN_LABEL[kind]), { label: 'Undo', onClick: () => undoQueuedSign(r.client_id, kind) });
+        return;
+      }
+      const res = r.result;
       const sign = res?.sign;
       // Undo only where the server can truly take it back; never by filing
       // the request as "taken down".
@@ -432,11 +447,12 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   // the sign crew's list, Today and every count. A sign already put up is
   // refused (409) and the toast says so. Runs after the card closed too.
   const undoSign = async (sign) => {
-    if (isOffline()) { toast(OFFLINE_MSG); return; }
     const label = SIGN_LABEL[sign.kind] || 'Sign';
     const drop = () => patchDoors(queryClient, (d) => ({ ...d, signs: (d.signs || []).filter((s) => s.id !== sign.id) }));
     try {
-      await action('sign.cancel', { id: sign.id });
+      // No signal: the cancel waits on the phone (the map hides the sign meanwhile).
+      const r = await queueAction('sign.cancel', { id: sign.id }, { who: sel?.name });
+      if (r.queued) { toast(queuedText(r, 'Undo')); return; }
       drop();
       toast(`${label} cancelled`);
       refresh();
@@ -450,6 +466,16 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       }
       toast(refusalMsg(err, 'Not undone — try again'));
     }
+  };
+  // Undo on a request still on the phone: take it off the phone, or — if it
+  // may already have gone — send its cancel after it.
+  const undoQueuedSign = (cid, kind) => {
+    const label = SIGN_LABEL[kind] || 'Sign';
+    const u = undoQueued(cid);
+    if (u === 'removed') toast(`${label} cancelled`);
+    else if (u === 'queued') toast(queuedText({}, 'Undo'));
+    else if (u?.sent?.sign?.id) undoSign(u.sent.sign);
+    else toast(`${label} already sent`);
   };
   const haveSign = new Set(door.signs.filter((s) => s.status !== 'removed').map((s) => s.kind));
   const signOffer = SIGN_BUTTONS.filter((s) => !haveSign.has(s.code));
@@ -467,6 +493,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           <h2 className="mapsheet-title door-head__name">
             {multi ? doorTitle(door) : sel?.name}
             {!multi && dnc && <span className="chip chip-danger door-dnc">Do not contact</span>}
+            {!multi && sel?.pending && <span className="chip fk-wait door-dnc">Not sent yet</span>}
           </h2>
           {!multi && <span className="door-head__addr">{doorTitle(door)}</span>}
         </div>
@@ -477,6 +504,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         <section className="door-rate" ref={rateRef} aria-label={`Rate ${sel.name}`}>
           <PersonTabs persons={persons} value={sel.id} onPick={pickPerson} ratingOf={ratingOf} />
           {multi && dnc && <p className="door-dnc-line"><span className="chip chip-danger">Do not contact</span> {firstName(sel.name)}</p>}
+          {multi && sel.pending && <p className="door-dnc-line"><span className="chip fk-wait">Not sent yet</span> {firstName(sel.name)}</p>}
           {channel !== 'door' && (
             <p className="door-via">
               <span className="chip fk-wait">{CHANNEL_CHIP[channel]}</span>
@@ -539,8 +567,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
             {door.signs.length > 0 && (
               <div className="door-signs-have">
                 {door.signs.map((s) => (
-                  <span key={s.id} className={`chip ${SIGN_CHIP[s.status] || ''}`} title={SIGN_LABEL[s.kind]}>
-                    {SIGN_LABEL[s.kind]} · {SIGN_STATUS[s.status] || s.status}
+                  <span key={s.id} className={`chip ${s.pending ? 'fk-wait' : SIGN_CHIP[s.status] || ''}`} title={SIGN_LABEL[s.kind]}>
+                    {SIGN_LABEL[s.kind]} · {s.pending ? 'Not sent yet' : SIGN_STATUS[s.status] || s.status}
                   </span>
                 ))}
               </div>
@@ -595,7 +623,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           </div>
 
           <div className="door-more__foot">
-            <Link className="btn btn-quiet door-act" to={`/people/${sel.id}`} state={fromHere}>Profile</Link>
+            {!sel.pending && <Link className="btn btn-quiet door-act" to={`/people/${sel.id}`} state={fromHere}>Profile</Link>}
             {sel.rated_at && <span className="muted mono door-more__when">Rated {localDate(sel.rated_at)}</span>}
           </div>
         </More>
