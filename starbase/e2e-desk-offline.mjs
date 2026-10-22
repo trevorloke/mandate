@@ -170,6 +170,10 @@ await page.waitForSelector('.pp-table tbody tr', { timeout: 10000 }).catch(() =>
 const rowsOnline = await page.locator('.pp-table tbody tr').count();
 const countOf = (pg) => pg.$eval('.pp-count strong', (el) => el.innerText.trim()).catch(() => '');
 const countOnline = await countOf(page);
+await page.fill('.pp-search input', 'Maya');
+await sleep(1800);
+check('a search typed with signal isn’t kept as its own copy (it would push the list out)',
+  !Object.keys((await D.stored()).local).some((x) => x.includes('q=Maya')) && /Maya Chen/.test(await D.main()));
 await D.go(`/people/${tom.id}`);
 await page.waitForSelector('.pf-page h1', { timeout: 10000 }).catch(() => {});
 await D.go(`/people/${maya.id}`);
@@ -199,6 +203,10 @@ const tagEventsBefore = (await D.api('/events?since=0&limit=5000')).json.events.
 // 2. No signal: every desk screen reloads from its copy
 // ════════════════════════════════════════════════════════════════════════════
 await ctx.setOffline(true);
+// In the app, no reload: a screen not opened since this page loaded starts from its copy.
+await page.click('nav.links a[href="/signs"]');
+await page.waitForSelector('.ops-rows li', { timeout: 6000 }).catch(() => {});
+check('no signal, in the app: Signs opens from its copy at once', (await page.locator('.ops-rows li').count()) > 0 && KEPT.test(await D.kept()), await D.kept());
 await D.go('/');
 await page.waitForSelector('.today-nums', { timeout: 10000 }).catch(() => {});
 let t = await D.text();
@@ -371,6 +379,8 @@ await goOnline(ctx, page);
 await until(async () => !(await D.chip()), 25000);
 await page.unroute('**/api/actions/person.tag');
 check('back online: everything sent (the lost answer replayed by itself)', !(await D.chip()) && (await D.outbox()).length === 0 && lost === 1, await D.chip());
+await until(async () => !(await page.$('.offline-strip__kept')), 8000);
+check('…and the screen loaded again by itself: no "from <time>" left on the strip (Money, unchanged)', !(await page.$('.offline-strip__kept')), await D.kept());
 const tomAfter = (await D.api(`/persons/${tom.id}`)).json;
 const noted = tomAfter.contacts.filter((c) => c.note === note);
 check('server: the note once, with its rating', noted.length === 1 && noted[0].rating === '1' && tomAfter.contacts.length === tomBefore.contacts.length + 1
@@ -387,6 +397,14 @@ t = await D.text();
 check('the profile, online: no "Not sent yet", no waiting line, no chip', !/Not sent yet/i.test(t) && !/Saved on this device/.test(t) && !(await D.kept()) && t.includes(note));
 check('…writes are on again', !(await page.locator('.pf-rate button[aria-label="2: Lean support"]').isDisabled()));
 await simple(D, 'Profile, online (1360)', '.pf-rate button[aria-label]');
+// Signal, but the server can't be reached (wifi with no internet): the copy, said as "No answer".
+await page.route('**/api/persons?*', (route) => route.abort('internetdisconnected'));
+await D.go('/people');
+await page.waitForSelector('.pp-table tbody tr', { timeout: 8000 }).catch(() => {});
+t = await D.text();
+check('wifi with no internet: People shows the kept list, "No answer · from <time>", no error line',
+  /No answer · from \d{1,2}:\d{2} (am|pm)/i.test(await D.kept()) && (await countOf(page)) === countOnline && !/check your signal|No signal — the list loads/.test(t), `${await D.kept()} · ${t.slice(0, 160)}`);
+await page.unroute('**/api/persons?*');
 
 // ════════════════════════════════════════════════════════════════════════════
 // 5. Sign-out forgets; the next sign-in on this browser sees none of it

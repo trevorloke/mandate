@@ -23,7 +23,8 @@
 // push the field's copies out. Only what the server sent this sign-in is
 // kept — the same answer the screen drew (forViewer already shaped a
 // volunteer's) — never the outbox's changes laid over it.
-//   this browser   People lists, Signs, Shifts, the Inbox and its threads;
+//   this browser   People lists (searches are answered from them), Signs,
+//                  Shifts, the Inbox and its threads;
 //                  a volunteer's Today and profiles (no money in them).
 //   this tab only  on a desk sign-in, anything with money in it: Today
 //                  (raised, gifts over the limit), profiles (gifts), Money,
@@ -62,7 +63,10 @@ function planFor(key, me) {
   switch (k0) {
     case 'brief': return key.length === 1 ? q('brief', money) : null;
     case 'person': return key.length === 2 && typeof k1 === 'string' ? q(`person:${k1}`, money) : null;
-    case 'persons': return k1 === 'list' && key.length === 3 ? q(`persons:${k2}`, 'local') : null;
+    // A search isn't kept (each one typed would be another copy, pushing the
+    // whole list out): with no signal it's answered from the kept list.
+    case 'persons': return k1 === 'list' && key.length === 3
+      ? { ...q(`persons:${k2}`, 'local'), keep: !(new URLSearchParams(String(k2)).get('q') || '').trim() } : null;
     case 'signs': return key.length === 1 ? q('signs', 'local') : null;
     case 'texting': return (k1 === 'inbox' || k1 === 'thread') && key.length === 3 ? q(`texting:${k1}:${k2}`, 'local') : null;
     case 'shifts': return key.length === 1 ? { name: 'shifts', tier: 'local', field: true } : null;
@@ -142,9 +146,12 @@ export async function keptPersister(queryFn, context, query) {
   const gen = copyGeneration();
   try {
     const data = await queryFn(context);
+    // Fresh from the server: what was on screen is no longer a copy (even if
+    // it's the same object — react-query keeps it when nothing changed).
+    if (query.state.data !== undefined) { keptAt.delete(query.state.data); partial.delete(query.state.data); }
     // A screen that keeps its own phone copy (OfflineCache phoneCopy) writes
     // it itself; anything else is kept here — for this sign-in only.
-    if (query.options.initialData === undefined && copyScope(meNow()) === scope && gen === copyGeneration()) {
+    if (plan.keep !== false && query.options.initialData === undefined && copyScope(meNow()) === scope && gen === copyGeneration()) {
       writeCopy(copyKey(me, plan.name), data, Date.now(), {
         tier: plan.tier, gen, group: plan.field ? null : { scope, name: 'q:', max: DESK_MAX },
       });

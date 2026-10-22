@@ -113,6 +113,21 @@ test('person.tag: limits, unknown people, other campaigns, volunteers', async ()
   assert.ok((await c.get('/api/actions')).json.actions.includes('person.tag'));
 });
 
+test('person.tag starts a ladder that starts on that tag — once, not on the replay', async () => {
+  const created = await c.action('ladder.create', {
+    name: `Hosts ${tag}`, trigger: { kind: 'tag', ref: `host-${tag}` }, steps: [{ kind: 'followup', text: 'Call {{first_name}}' }],
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.json));
+  const ladderId = created.json.ladder.id;
+  assert.equal((await c.action('ladder.setActive', { id: ladderId, active: true })).status, 200);
+  const p = await c.createPerson('Ladder Person', { tags: [] });
+  const cid = randomUUID();
+  assert.equal((await c.action('person.tag', { id: p.id, add: [`host-${tag}`], client_id: cid })).status, 200);
+  assert.equal((await c.action('person.tag', { id: p.id, add: [`host-${tag}`], client_id: cid })).json.duplicate, true);
+  const on = (await c.get(`/api/ladders/${ladderId}`)).json.people.filter((x) => x.person.id === p.id);
+  assert.equal(on.length, 1, 'on the ladder once');
+});
+
 test('a note saved offline (contact.log, no rating) replays once; client_writes is in the export', async () => {
   const p = await c.createPerson('Note Person', { phone: '604-555-0142' });
   const cid = randomUUID();
