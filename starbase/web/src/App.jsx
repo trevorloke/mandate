@@ -7,7 +7,7 @@
 import { lazy } from 'react';
 import { Routes, Route, Navigate, Outlet, useOutletContext } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet } from './api.js';
+import { apiGet, noAnswer } from './api.js';
 import Shell, { isDesk } from './Shell.jsx';
 import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
@@ -40,15 +40,21 @@ const MyPeople = lazy(() => import('./pages/MyPeople.jsx'));
 const PeopleConnected = lazy(() => import('./pages/PeopleConnected.jsx'));
 import Join from './pages/Join.jsx';
 
+// No answer from the server (wifi with no internet, a restart) is not a
+// sign-out: the app opens as who signed in here (main.jsx), on the copies
+// kept for them, and asks again every 15 s. Only a refusal goes to Sign in.
+const askAgain = (q) => ((q.state.data !== undefined && q.state.dataUpdatedAt === 0)
+  || (q.state.status === 'error' && noAnswer(q.state.error)) ? 15_000 : false);
 function RequireAuth() {
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => apiGet('/auth/me'),
     retry: false,
     staleTime: 60_000,
+    refetchInterval: askAgain,
   });
   if (me.isLoading) return null;
-  if (me.isError) return <Navigate to="/login" replace />;
+  if (me.isError && !(noAnswer(me.error) && me.data)) return <Navigate to="/login" replace />;
   return <Shell me={me.data} />;
 }
 

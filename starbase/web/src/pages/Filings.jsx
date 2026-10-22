@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, fmtDate, todayISO, daysUntil } from '../api.js';
+import { NoSignal, noSignal, useOnline, NeedsSignalLine } from '../components/NoSignal.jsx';
 import './shifts.css';
 
 const longDate = (value) => {
@@ -28,10 +29,12 @@ function AddFilingForm({ onDone, onClose }) {
   const [more, setMore] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!online) return;
     setBusy(true);
     setError(null);
     try {
@@ -81,14 +84,14 @@ function AddFilingForm({ onDone, onClose }) {
       )}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="ops-actions">
-        <button type="submit" className="btn btn-primary ops-tap" disabled={busy}>{busy ? 'Saving…' : 'Save filing'}</button>
+        <button type="submit" className="btn btn-primary ops-tap" disabled={busy || !online}>{busy ? 'Saving…' : 'Save filing'}</button>
         <button type="button" className="btn btn-quiet ops-tap" onClick={onClose}>Cancel</button>
       </div>
     </form>
   );
 }
 
-function FilingRow({ f, open, onToggle, canFile, onFiled }) {
+function FilingRow({ f, open, onToggle, canFile, onFiled, online }) {
   const bodyId = `filing-${f.id}`;
   return (
     <li className="ops-item" data-open={open ? '' : undefined}>
@@ -104,7 +107,7 @@ function FilingRow({ f, open, onToggle, canFile, onFiled }) {
           {f.note && <p>{f.note}</p>}
           {canFile && f.status === 'upcoming' && (
             <div className="ops-actions">
-              <button type="button" className="btn ops-solid ops-tap" onClick={onFiled}>Mark filed</button>
+              <button type="button" className="btn ops-solid ops-tap" onClick={onFiled} disabled={!online}>Mark filed</button>
             </div>
           )}
         </div>
@@ -122,6 +125,7 @@ export default function Filings() {
   const [openId, setOpenId] = useState(null);
   const [showFiled, setShowFiled] = useState(false);
   const [error, setError] = useState(null);
+  const online = useOnline();
 
   const filings = useInfiniteQuery({
     queryKey: ['records', 'filing'],
@@ -155,7 +159,7 @@ export default function Filings() {
   if (me.role === 'volunteer') return <Navigate to="/" replace />;
 
   const row = (f) => (
-    <FilingRow key={f.id} f={f} open={openId === f.id} canFile={canFile}
+    <FilingRow key={f.id} f={f} open={openId === f.id} canFile={canFile} online={online}
       onToggle={() => setOpenId((cur) => (cur === f.id ? null : f.id))}
       onFiled={() => markFiled(f.id)} />
   );
@@ -166,17 +170,18 @@ export default function Filings() {
       <div className="ops-head">
         <h1>Filings</h1>
         {canFile && !showNew && (
-          <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>
+          <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })} disabled={!online}>
             Add filing
           </button>
         )}
       </div>
+      {canFile && !online && <NeedsSignalLine>Adding or filing a deadline needs signal</NeedsSignalLine>}
 
       {showNew && <AddFilingForm onDone={() => { setParams({}); invalidate(); }} onClose={() => setParams({})} />}
 
       {error && <p className="error">{error}</p>}
-      {filings.isError && <p className="error">{filings.error.message}</p>}
-      {filings.isPending && <p className="muted">Loading…</p>}
+      {noSignal(filings) ? <NoSignal /> : filings.isError && <p className="error">{filings.error.message}</p>}
+      {filings.isPending && !noSignal(filings) && <p className="muted">Loading…</p>}
       {filings.isSuccess && rows.length === 0 && <p className="ops-empty">No filings yet.</p>}
       {filings.isSuccess && rows.length > 0 && upcoming.length === 0 && <p className="ops-empty">All filed.</p>}
 

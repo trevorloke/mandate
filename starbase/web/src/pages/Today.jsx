@@ -157,6 +157,7 @@ function SampleClear({ onToast, onCleared }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const online = useOnline();
   // Keep focus where the hand is: on "Keep it" when the question opens, back
   // on the link when it closes.
   const keepRef = useRef(null);
@@ -189,9 +190,10 @@ function SampleClear({ onToast, onCleared }) {
   if (!confirming) {
     return (
       <div className="today-actions today-sample-clear">
-        <button type="button" ref={openRef} className="btn today-tap" onClick={() => setConfirming(true)}>
+        <button type="button" ref={openRef} className="btn today-tap" onClick={() => setConfirming(true)} disabled={!online}>
           Clear sample data
         </button>
+        {!online && <NeedsSignal>Needs signal</NeedsSignal>}
       </div>
     );
   }
@@ -200,13 +202,14 @@ function SampleClear({ onToast, onCleared }) {
       onKeyDown={(e) => { if (e.key === 'Escape' && !busy) setConfirming(false); }}>
       <p>Remove all sample data? Your own records stay.</p>
       <div className="today-actions">
-        <button type="button" className="btn today-tap today-danger" onClick={clear} disabled={busy}>
+        <button type="button" className="btn today-tap today-danger" onClick={clear} disabled={busy || !online}>
           {busy ? 'Clearing…' : 'Clear it'}
         </button>
         <button type="button" ref={keepRef} className="btn btn-quiet today-tap" onClick={() => setConfirming(false)} disabled={busy}>
           Keep it
         </button>
       </div>
+      {!online && <NeedsSignal>Needs signal</NeedsSignal>}
       {error && <p className="error" role="alert">{error}</p>}
     </div>
   );

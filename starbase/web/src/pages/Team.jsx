@@ -9,6 +9,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, fmtDate } from '../api.js';
+import { NoSignal, noSignal, useOnline, NeedsSignalLine } from '../components/NoSignal.jsx';
 import './outreach.css';
 
 const ROLES = [
@@ -76,7 +77,7 @@ function JoinLink({ sent, testId }) {
 // (same email, same role) and shows it right here. "Cancel" asks in place.
 // `onLinkGone(email)`: that email's earlier link just stopped working, so no
 // other spot on the screen may still offer it.
-function InvitedRow({ inv, ids, canCancel, onChanged, onLinkGone }) {
+function InvitedRow({ inv, ids, canCancel, onChanged, onLinkGone, online = true }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(null);
@@ -132,11 +133,11 @@ function InvitedRow({ inv, ids, canCancel, onChanged, onLinkGone }) {
         </span>
         {!confirming && (
           <span className="ot-actions ot-row__acts">
-            <button type="button" className="btn ot-btn-tap" disabled={busy} onClick={newLink}>
+            <button type="button" className="btn ot-btn-tap" disabled={busy || !online} onClick={newLink}>
               {busy ? 'Making…' : 'New link'}
             </button>
             {canCancel && (
-              <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy}
+              <button type="button" className="btn btn-quiet ot-btn-tap" disabled={busy || !online}
                 onClick={() => { setConfirming(true); setSent(null); }}>Cancel</button>
             )}
           </span>
@@ -183,8 +184,9 @@ export default function Team() {
   const queryClient = useQueryClient();
   const isManager = me.role === 'manager';
   const team = useQuery({ queryKey: ['team'], queryFn: () => apiGet('/team'), enabled: isManager });
-  // Is email connected? (Same read Today and Shifts use.)
-  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), enabled: isManager, staleTime: Infinity });
+  // Is email connected? (Same read Today and Shifts use; only that, so the
+  // strip never says this screen is from Today's kept copy.)
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), enabled: isManager, staleTime: Infinity, meta: { side: true } });
   // Which actions this login may run — "Cancel" waits for the server.
   const allowed = useQuery({ queryKey: ['actions'], queryFn: () => apiGet('/actions'), enabled: isManager, staleTime: Infinity });
   const [email, setEmail] = useState('');
@@ -192,6 +194,7 @@ export default function Team() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(null); // { email, joinUrl, emailStatus }
+  const online = useOnline();
 
   if (!isManager) return <Navigate to="/" replace />;
 
@@ -253,13 +256,19 @@ export default function Team() {
         <select id="team-role" className="input ot-role" value={role} onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
         </select>
-        <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy}>
+        <button type="submit" className="btn btn-primary ot-btn-tap" disabled={busy || !online}>
           {busy ? 'Inviting…' : emailOn ? 'Send invite' : 'Get invite link'}
         </button>
       </form>
+      {!online && <NeedsSignalLine>Inviting and changing roles need signal</NeedsSignalLine>}
       {error && <p className="error">{error}</p>}
       {sent && <JoinLink sent={sent} testId="join-url" />}
 
+      {/* Not loaded (no signal): say so, never "Members 0". */}
+      {!team.data ? (
+        noSignal(team) ? <NoSignal /> : team.isError ? <p className="error">{team.error.message}</p> : <p className="muted">Loading…</p>
+      ) : (
+      <>
       <h2 className="ot-sec-h">Members <span className="ot-count">{members.length}</span></h2>
       <ul className="ot-list">
         {members.map((m) => (
@@ -273,7 +282,7 @@ export default function Team() {
                 </span>
               </span>
               <select className="input ot-role" aria-label={`Role for ${m.name}`} value={m.role}
-                disabled={m.id === me.user.id} onChange={(e) => setMemberRole(m.id, e.target.value)}>
+                disabled={m.id === me.user.id || !online} onChange={(e) => setMemberRole(m.id, e.target.value)}>
                 {ROLES.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
               </select>
             </div>
@@ -287,10 +296,12 @@ export default function Team() {
           <ul className="ot-list">
             {invites.map(({ inv, ids }) => (
               <InvitedRow key={String(inv.email).toLowerCase()} inv={inv} ids={ids} canCancel={canCancel}
-                onChanged={refresh} onLinkGone={linkGone} />
+                onChanged={refresh} onLinkGone={linkGone} online={online} />
             ))}
           </ul>
         </>
+      )}
+      </>
       )}
 
       <RolesHelp />

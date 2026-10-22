@@ -25,6 +25,11 @@ export class NoSignalError extends Error {
     this.name = 'NoSignalError';
   }
 }
+// No answer, not a refusal: fetch itself failed, or the server is down
+// behind its proxy (502/503 while it restarts or deploys). The outbox keeps
+// a tap for later on the same test; screens show their kept copy.
+export const noAnswer = (err) => !(err instanceof ApiError) || err.status >= 500 || err.status === 0;
+
 const offlineNow = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 export const noSignalWords = (write) => (offlineNow()
   ? (write ? 'No signal — not sent' : 'No signal — this loads when you’re back online')
@@ -41,6 +46,17 @@ export const apiPost = (path, body) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   }).catch(unreached(true)).then(handle);
+
+// The sign-in this browser remembers (main.jsx keeps it: name, email,
+// campaign, role — no voter data), or null. The app opens on it when the
+// server can't be reached, so what's kept and saved here stays reachable.
+export const ME_KEY = 'starbase:me:v1';
+export const savedSignIn = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ME_KEY) || 'null');
+    return saved?.user?.id && saved?.workspace?.id ? saved : null;
+  } catch { return null; }
+};
 
 // The only write path: POST /api/actions/:name
 export const action = (name, input) => apiPost(`/actions/${name}`, input);

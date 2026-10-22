@@ -250,6 +250,11 @@ function SignedInShell({ me }) {
   // are listed and sent while they're signed in (idempotent, so here, before
   // any screen reads the outbox).
   setOutboxOwner(me);
+  // Phone copies (components/OfflineCache.js) of anyone else who signed in
+  // on this phone go, and any this person kept under another role or more
+  // than a day ago; the rest stay for the screens (once per sign-in and
+  // role, before any screen reads one).
+  keepOnlyMine(me);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -271,12 +276,6 @@ function SignedInShell({ me }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate, desk]);
-
-  // Phone copies (components/OfflineCache.js) of anyone else who signed in
-  // on this phone go; this person's stay for the field screens.
-  const userId = me.user.id;
-  const workspaceId = me.workspace.id;
-  useEffect(() => { keepOnlyMine({ user: { id: userId }, workspace: { id: workspaceId } }); }, [userId, workspaceId]);
 
   // Offline outbox: send queued field work on reconnect / focus / every 30s,
   // then refresh every screen that shows what it changed.

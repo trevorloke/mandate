@@ -9,7 +9,7 @@
 // and History (open by default). Volunteers see only what a door needs: Details
 // (open), the rating card, one "Last contact" line and Signs. Their back link
 // returns to wherever they came from (walk list, map, Calls).
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams, useOutletContext, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -19,11 +19,11 @@ import {
 import { ratingByCode } from '@starbase/shared/scale';
 import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText, useScale } from '../components/RatingButtons.jsx';
 import SurveyQuestions, { PersonAnswers, answersTail, usePersonAnswers, useSurvey } from '../components/SurveyQuestions.jsx';
-import { apiGet, fmtMoney, fmtDate } from '../api.js';
+import { apiGet, fmtMoney, fmtDate, noAnswer } from '../api.js';
 import { EngagementChip, PersonLadders, usePersonLadders } from '../components/LaddersBits.jsx';
 import { queuedText, useThisDevice } from '../components/queued.js';
 import { PersonFields, filledCount, usePersonFields } from '../components/FieldsBits.jsx';
-import { useOutbox, applyOutboxToProfile, pendingAbout } from '../offline.js';
+import { useOutbox, applyOutboxToProfile, pendingAbout, logContact } from '../offline.js';
 import { useOnline } from '../components/NoSignal.jsx';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
@@ -231,8 +231,25 @@ function Header({ person, donor, me, desk, onLog, contacted, level }) {
 // by the Call / Text tiles (else Door); the manual switch sits under the note.
 // ─────────────────────────────────────────────────────────────────────────────
 function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
-  const [note, setNote] = useState('');
+  const [note, setNoteState] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
+  // The note lives in a ref too, so leaving the profile can still send it
+  // (as the door card does): a note that goes out with a tap is cleared at
+  // once (and put back if it isn't saved), so it's never sent twice.
+  const noteRef = useRef('');
+  const setNote = (v) => { noteRef.current = v; setNoteState(v); };
+  const latest = useRef(null);
+  useLayoutEffect(() => { latest.current = { person, channel, refresh }; });
+  useEffect(() => () => {
+    const text = noteRef.current.trim();
+    const ctx = latest.current;
+    if (!text || !ctx?.person) return;
+    noteRef.current = '';
+    // Through the outbox: with no signal it waits on this device.
+    logContact({ person_id: ctx.person.id, channel: ctx.channel, outcome: 'contacted', note: text }, { who: ctx.person.name })
+      .then((r) => { if (!r.queued) ctx.refresh?.(); })
+      .catch(() => { /* refused: nothing else to say on a screen that's gone */ });
+  }, []);
   // { text, what, queued }: the line under the buttons. A knock still in the
   // outbox says so, and the line turns to "✓ Sent" once the outbox empties.
   const [said, setSaid] = useState(null);
@@ -257,11 +274,13 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
     const answers = outcome === 'contacted' ? survey.take() : [];
     // After "Save answers" the next tap finishes that same contact.
     const visitOf = survey.visitOf(channel);
+    const sentNote = noteRef.current.trim();
+    if (sentNote) noteRef.current = '';
     const res = await act.run('contact.log', {
-      person_id: person.id, channel, outcome, rating: rating || undefined, note: note.trim() || undefined,
+      person_id: person.id, channel, outcome, rating: rating || undefined, note: sentNote || undefined,
       answers: answers.length ? answers : undefined, visit_of: visitOf,
     }, { who: person.name });
-    if (!res) survey.restore(answers);
+    if (!res) { survey.restore(answers); if (sentNote) setNote(note); }
     if (res) {
       survey.logged(res, { channel, outcome, rating, answers, visitOf });
       setNote('');
@@ -831,9 +850,11 @@ export default function Person() {
     );
   }
   if (profile.isError || !profile.data?.person) {
+    // Only the server saying so means they're gone (a 502 mid-deploy doesn't).
+    const gone = profile.error?.status === 404 || (!profile.isError && !profile.data?.person);
     return (
       <div className="pp-empty">
-        <p>{profile.error?.status === 404 || !profile.data?.person ? 'No one here — they may have been removed.' : profile.error.message}</p>
+        <p>{gone ? 'No one here — they may have been removed.' : noAnswer(profile.error) ? 'No answer — check your signal' : profile.error.message}</p>
         <BackLink desk={desk} className="btn pp-btn" />
       </div>
     );
@@ -859,7 +880,7 @@ export default function Person() {
         <p className="ds-waiting" role="status">Saved on {device} — {online ? 'sends soon' : 'sends when you’re back online'}</p>
       )}
 
-      <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
+      <RatingCard key={person.id} person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
       {/* Undecided or not rated: a supporter who knows them (desk). */}
       {desk && <KnowsNudge query={knows} person={person} />}
 

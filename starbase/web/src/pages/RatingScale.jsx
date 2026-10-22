@@ -43,7 +43,8 @@ function Editor() {
   // Fresh from the server every time the screen opens.
   const q = useQuery({ queryKey: SCALE_KEY, queryFn: () => apiGet('/scale'), staleTime: 0 });
   // How many people have each rating (Today's numbers): said for those off the list.
-  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief') });
+  // Only the "N rated" counts (side: the strip's time isn't this screen's).
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), meta: { side: true } });
   const saved = useMemo(() => (q.data?.scale ? normalizeScale(q.data.scale) : null), [q.data]);
   const [draft, setDraft] = useState(null);
   const [base, setBase] = useState(null);

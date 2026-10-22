@@ -19,7 +19,7 @@ import { queueAction } from '../offline.js';
 import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
-import { apiGet, action } from '../api.js';
+import { apiGet, action, noAnswer } from '../api.js';
 import { noSignal, useOnline, NeedsSignalLine } from '../components/NoSignal.jsx';
 import { keptPartial } from '../components/KeptCopies.js';
 import { FieldFilterChip, FieldFilterGroups } from '../components/FieldsBits.jsx';
@@ -750,11 +750,11 @@ function PeopleList() {
 
       {!offline && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}{partial ? ' in the kept list' : ''}</p>}
 
-      {persons.isError && !offline && <p className="error">{persons.error.message}</p>}
+      {persons.isError && !offline && <p className="error">{noAnswer(persons.error) ? 'No answer — check your signal' : persons.error.message}</p>}
 
       {offline ? (
         <p className="pp-offline" role="status">No signal — the list loads when you’re back online.</p>
-      ) : rows.length === 0 && !persons.isLoading ? (
+      ) : rows.length === 0 && !persons.isLoading && !persons.isError ? (
         <div className="pp-empty">
           <p>{partial ? 'No one in the kept list matches.' : anyFilter ? 'No one matches.' : 'No people yet.'}</p>
           {anyFilter ? (

@@ -23,6 +23,12 @@
 //                        ({ name, input, meta, result, later }; later: sent from
 //                        the phone after the tap, not while the screen waited).
 //
+// Two tabs on one computer share one outbox: every change starts from what's
+// stored now (never this tab's older list, which would drop the other tab's
+// items), a tab hears the other's changes ('storage'), and only one tab sends
+// at a time (navigator.locks, where the browser has it — a second send is
+// harmless anyway: every item dedupes, or reads "already" as done).
+//
 // One FIFO queue — order matters: a person added offline, then knocked, must
 // reach the server in that order — so a new item goes behind anything still
 // waiting, even with signal. Every item carries a client-made id the server
@@ -107,6 +113,15 @@ const read = () => {
   } catch { return []; }
 };
 let memory = read();
+// The stored list is this tab's own (its last save worked): changes start
+// from it. Storage blocked or full: from this tab's memory.
+let stored = true;
+const valid = (list) => (Array.isArray(list) ? list.filter((i) => i && i.cid && i.name) : null);
+const latest = () => {
+  const ls = storage();
+  if (!ls || !stored) return memory;
+  try { return valid(JSON.parse(ls.getItem(KEY) || '[]')) || memory; } catch { return memory; }
+};
 // An item is this sign-in's when it says so (older items, saved before items
 // had owners, count as whoever is signed in).
 const mine = (i) => !owner || !i.owner || i.owner === owner;
@@ -129,12 +144,40 @@ makeSnap();
 const changed = () => { makeSnap(); listeners.forEach((fn) => fn()); };
 const write = (items) => {
   memory = items;
-  try { storage()?.setItem(KEY, JSON.stringify(items)); } catch { /* storage full: keep in memory */ }
+  try {
+    const ls = storage();
+    if (ls) ls.setItem(KEY, JSON.stringify(items));
+    stored = Boolean(ls);
+  } catch { stored = false; /* storage full: keep in memory */ }
   changed();
 };
-const update = (cid, patch) => write(memory.map((i) => (i.cid === cid ? { ...i, ...patch } : i)));
-const remove = (cid) => write(memory.filter((i) => i.cid !== cid));
+// Every change is made to what's stored now (another tab may have added to it).
+const change = (fn) => write(fn(latest()));
+const add = (item) => change((list) => [...list, item]);
+const update = (cid, patch) => change((list) => list.map((i) => (i.cid === cid ? { ...i, ...patch } : i)));
+const remove = (cid) => change((list) => list.filter((i) => i.cid !== cid));
 const find = (cid) => memory.find((i) => i.cid === cid) || null;
+
+// Another tab saved, sent or dismissed something: show what's stored now.
+// What it sent of this sign-in's is told to onSentElsewhere (Shell reloads
+// the screens it changed, as for a send from here).
+const elsewhere = new Set();
+export function onSentElsewhere(fn) {
+  elsewhere.add(fn);
+  return () => elsewhere.delete(fn);
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY && e.key !== null) return;
+    if (e.storageArea && e.storageArea !== storage()) return;
+    const before = memory;
+    stored = true;
+    memory = latest();
+    const gone = before.filter((i) => mine(i) && i.state === 'pending' && !memory.some((n) => n.cid === i.cid)).length;
+    changed();
+    if (gone) elsewhere.forEach((fn) => { try { fn(gone); } catch { /* a listener's bug is not the outbox's */ } });
+  });
+}
 
 const isNetworkFailure = (err) => !(err instanceof ApiError) || err.status >= 500 || err.status === 0;
 // A lapsed sign-in is not a bad item: keep it and send after signing in.
@@ -162,7 +205,7 @@ export function clearOutbox() {
   lastError = null;
   signedOutNow = false;
   results.clear();
-  write(memory.filter((i) => !mine(i)));
+  change((list) => list.filter((i) => !mine(i)));
 }
 
 // The id the server dedupes on, made here so a replay is the same write.
@@ -208,13 +251,13 @@ export async function queueAction(name, input, meta = {}) {
   const body = withClientId(name, input);
   const item = { cid: cidOf(name, body), name, input: body, meta, at: new Date().toISOString(), tries: 0, state: 'pending', owner };
   if (offlineNow()) {
-    write([...memory, item]);
+    add(item);
     return { queued: true, client_id: item.cid };
   }
   // Something is still waiting: go behind it (order matters), then see
   // whether this flush got it through.
   if (pendingCount() > 0) {
-    write([...memory, item]);
+    add(item);
     await flushOutbox();
     const left = find(item.cid);
     if (!left) {
@@ -236,7 +279,7 @@ export async function queueAction(name, input, meta = {}) {
   } catch (err) {
     if (!isNetworkFailure(err) && !isSignedOut(err)) throw err;
     // It may have reached the server (the answer got lost): tries says so.
-    write([...memory, { ...item, tries: 1 }]);
+    add({ ...item, tries: 1 });
     return { queued: true, signedOut: isSignedOut(err), client_id: item.cid };
   }
 }
@@ -247,6 +290,7 @@ async function runFlush() {
   let sent = 0;
   lastError = null;
   signedOutNow = false;
+  memory = latest(); // another tab may have sent some while this one waited its turn
   changed();
   for (;;) {
     const next = memory.find((i) => i.state === 'pending' && mine(i));
@@ -292,10 +336,21 @@ async function runFlush() {
   return { sent, left: pendingCount() };
 }
 
+// One tab sends at a time (the others wait their turn, then find it done).
+const oneTabAtATime = (fn) => {
+  const locks = globalThis.navigator?.locks;
+  if (!locks?.request) return fn();
+  let ran = false;
+  try {
+    return locks.request('starbase-outbox', () => { ran = true; return fn(); })
+      .catch((err) => { if (ran) throw err; return fn(); });
+  } catch { return fn(); }
+};
+
 export function flushOutbox() {
   if (flushing) return flushing;
   if (pendingCount() === 0) return Promise.resolve({ sent: 0, left: 0 });
-  flushing = runFlush().finally(() => { flushing = null; changed(); });
+  flushing = oneTabAtATime(runFlush).finally(() => { flushing = null; changed(); });
   changed();
   return flushing;
 }
@@ -311,7 +366,7 @@ export function retryItem(cid) {
   const along = NEW_PERSON.includes(it.name)
     ? (i) => i.state === 'refused' && i.error?.code === NOT_ADDED.code && personOf(i) === cid
     : () => false;
-  write(memory.map((i) => (i.cid === cid || along(i) ? { ...i, state: 'pending', error: null } : i)));
+  change((list) => list.map((i) => (i.cid === cid || along(i) ? { ...i, state: 'pending', error: null } : i)));
   return offlineNow() ? Promise.resolve({ sent: 0, left: pendingCount() }) : flushOutbox();
 }
 
@@ -363,8 +418,11 @@ export function useOutboxAutoFlush(onFlushed) {
     window.addEventListener('online', reconnect);
     window.addEventListener('focus', go);
     const id = setInterval(go, 30000);
+    // Sent by another tab: the screens here reload what it changed too.
+    const offElsewhere = onSentElsewhere(() => { if (onFlushed) onFlushed({ sent: 0, left: pendingCount() }); setTick((t) => t + 1); });
     go();
     return () => {
+      offElsewhere();
       clearTimeout(soon);
       window.removeEventListener('online', reconnect);
       window.removeEventListener('focus', go);
