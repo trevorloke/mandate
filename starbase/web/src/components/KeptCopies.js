@@ -24,16 +24,16 @@
 // kept — the same answer the screen drew (forViewer already shaped a
 // volunteer's) — never the outbox's changes laid over it.
 //   this browser   People lists (searches are answered from them), Signs,
-//                  Shifts, the Inbox and its threads;
-//                  a volunteer's Today and profiles (no money in them).
+//                  Shifts, the Inbox and its threads; a volunteer's Today
+//                  and profiles (the server sends them no money).
 //   this tab only  on a desk sign-in, anything with money in it: Today
-//                  (raised, gifts over the limit), profiles (gifts), Money,
-//                  Receipts, Filings, pledges. Money is the most sensitive
-//                  thing a campaign holds; a treasurer who walks away from a
-//                  church-basement computer without signing out leaves no
-//                  donor ledger behind once the tab is closed, while a wifi
-//                  drop mid-session (the common case) still reads fine — and
-//                  every money write needs signal anyway.
+//                  (raised, gifts over the limit), profiles (gifts) and Money
+//                  (gifts, pledges, receipts needing an address). Money is
+//                  the most sensitive thing a campaign holds; a treasurer who
+//                  walks away from a church-basement computer without signing
+//                  out leaves no donor ledger behind once the tab is closed,
+//                  while a wifi drop mid-session (the common case) still
+//                  reads fine — and every money write needs signal anyway.
 import { useCallback, useSyncExternalStore } from 'react';
 import { onlineManager, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../api.js';
@@ -71,11 +71,11 @@ function planFor(key, me) {
     case 'texting': return (k1 === 'inbox' || k1 === 'thread') && key.length === 3 ? q(`texting:${k1}:${k2}`, 'local') : null;
     case 'shifts': return key.length === 1 ? { name: 'shifts', tier: 'local', field: true } : null;
     case 'shift': return key.length === 2 ? { name: `shift:${k1}`, tier: 'local', field: true } : null;
-    // Money: desk roles only (the server refuses volunteers these).
+    // Money: desk roles only (the server refuses volunteers these) — the
+    // ledger, pledges and receipts waiting for an address, as Money shows them.
     case 'records': return desk && k1 === 'gift' ? q('gifts', 'session') : null;
     case 'pledges': return desk && key.length === 1 ? q('pledges', 'session') : null;
-    case 'receipts':
-    case 'filings': return desk ? q(`${k0}:${JSON.stringify(key.slice(1))}`, 'session') : null;
+    case 'receipts': return desk && k1 === 'needs' && key.length === 2 ? q('receipts:needs', 'session') : null;
     default: return null;
   }
 }
@@ -207,7 +207,7 @@ export function watchKeptCopies(queryClient) {
 // The screens on the strip's mind: what a desk or field screen draws (not
 // the small reads every screen makes, like texting status).
 const SHOWN = new Set(['brief', 'persons', 'person', 'signs', 'shifts', 'shift', 'records', 'pledges',
-  'receipts', 'filings', 'doors', 'turf', 'turfs']);
+  'receipts', 'doors', 'turf', 'turfs']);
 const shown = (key) => SHOWN.has(key[0]) || (key[0] === 'texting' && (key[1] === 'inbox' || key[1] === 'thread'));
 function snapshotOf(queryClient) {
   const offline = offlineNow();

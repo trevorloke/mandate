@@ -17,6 +17,7 @@ import { apiGet, action, ApiError } from '../api.js';
 import { isDesk } from '../Shell.jsx';
 import { fmtWhen, noSignal } from './People.jsx';
 import { FOOTER, namesCampaign, TextingOff } from '../components/TextingCard.jsx';
+import { useOnline } from '../components/NoSignal.jsx';
 import './people.css';
 import '../components/texting-card.css';
 import './texting.css';
@@ -28,6 +29,7 @@ function OptOut({ conv, onDone }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const online = useOnline(); // a conversation kept from before (no signal) is read only
   const run = async () => {
     setBusy(true);
     setError(null);
@@ -44,7 +46,7 @@ function OptOut({ conv, onDone }) {
   };
   return (
     <>
-      <button type="button" className="tx-quiet tx-quiet--block tx-optout" disabled={busy} onClick={run}>
+      <button type="button" className="tx-quiet tx-quiet--block tx-optout" disabled={busy || !online} onClick={run}>
         {busy ? 'Opting out…' : 'Opt out this number'}
       </button>
       {error && <p className="error" role="alert">{error}</p>}
@@ -57,6 +59,7 @@ function ReplyBox({ data, desk, onSent }) {
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const online = useOnline();
   const { conversation: conv, quiet, campaign } = data;
   if (!data.sms) return desk ? <TextingOff className="tx-line tx-stop" /> : <p className="tx-line tx-stop">Texts open on your phone</p>;
   if (conv.opted_out || conv.no_texts) return <p className="tx-line tx-stop">Opted out — no more texts</p>;
@@ -96,8 +99,9 @@ function ReplyBox({ data, desk, onSent }) {
       </div>
       {missing && <p className="tx-line tx-line--warn">Say it’s {campaign} in the first text</p>}
       {quiet?.now && <p className="tx-line">Quiet hours — sending opens at {quiet.opens || quiet.label}</p>}
+      {!online && <p className="tx-line">Texts send with signal</p>}
       <button type="button" className="btn btn-primary pp-btn tx-send-btn"
-        disabled={busy || quiet?.now || missing || !body.trim()} onClick={send}>
+        disabled={busy || quiet?.now || missing || !body.trim() || !online} onClick={send}>
         {busy ? 'Sending…' : 'Send'}
       </button>
       {error && <p className="error" role="alert">{error}</p>}
