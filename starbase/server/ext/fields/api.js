@@ -5,6 +5,12 @@
 //                             have it filled in, each choice's count, and the
 //                             most common values of a Text or Number field
 //                             (the People filter offers those)
+//   GET /fields/:id           any role: one field's name and kind, for the
+//                             words on a People / Calls filter chip. A
+//                             volunteer only gets a field on the profile
+//                             marked "Volunteers can see this" (any other
+//                             is not found) — the same names their profiles
+//                             already show them.
 //   GET /persons/:id/fields   any role: this person's fields and values.
 //                             The desk gets every field on the profile (empty
 //                             ones too, to fill in); a volunteer only the
@@ -68,6 +74,17 @@ api.get('/fields', async (c) => {
       return out;
     }),
   });
+});
+
+api.get('/fields/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!UUID_RE.test(id || '')) return c.json({ error: 'not found' }, 404);
+  const ctx = c.get('ctx');
+  const f = (await c.get('db').query(
+    'select id, name, kind, volunteers, retired_at from person_fields where id = $1 and workspace_id = $2', [id, ctx.workspaceId],
+  )).rows[0];
+  if (!f || (ctx.role === 'volunteer' && (!f.volunteers || f.retired_at))) return c.json({ error: 'not found' }, 404);
+  return c.json({ field: { id: f.id, name: f.name, kind: f.kind } });
 });
 
 api.get('/persons/:id/fields', async (c) => {

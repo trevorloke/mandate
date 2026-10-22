@@ -10,7 +10,8 @@
 // import cell, a filter in the address bar — so they can never disagree.
 // Yes/no reads yes · no · y · n · true · false (any case) as well as a real
 // true/false; a choice matches its words in any case and stores them as the
-// field spells them; a number may carry thousands commas ("1,200"); a date
+// field spells them; a number may carry thousands commas or spaces ("1,200",
+// "1 200"); a date
 // is YYYY-MM-DD and must be a real day. Empty (null, "", spaces) means
 // "not filled in" — saving it clears the value.
 
@@ -32,6 +33,7 @@ export const cleanName = (s) => String(s ?? '').trim().replace(/\s+/g, ' ');
 const YES = new Set(['yes', 'y', 'true']);
 const NO = new Set(['no', 'n', 'false']);
 const NUMBER_RE = /^[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$|^[-+]?\.\d+$/;
+const SPACED_RE = /^[-+]?\d{1,3}(\s\d{3})+(\.\d+)?$/;
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const quote = (v) => `“${String(v).length > 40 ? `${String(v).slice(0, 40)}…` : String(v)}”`;
@@ -74,7 +76,9 @@ export const parseValue = (field, raw) => {
       if (typeof s === 'number') {
         return Number.isFinite(s) && Math.abs(s) < NUMBER_MAX ? { value: s } : { error: `${quote(s)} isn’t a number` };
       }
-      const t = String(s).replace(/\s+/g, '');
+      // Spaces only as thousands separators ("1 200", "1 200 000"): "1 2 3"
+      // or "12 5" is a typo, never 123 or 125.
+      const t = SPACED_RE.test(String(s)) ? String(s).replace(/\s/g, '') : String(s);
       if (!NUMBER_RE.test(t)) return { error: `${quote(s)} isn’t a number` };
       const n = Number(t.replace(/,/g, ''));
       return Number.isFinite(n) && Math.abs(n) < NUMBER_MAX ? { value: n } : { error: `${quote(s)} is too big` };

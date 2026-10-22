@@ -11,7 +11,8 @@
 //                  profile save — a cell that doesn't fit refuses the row,
 //                  with its row number, like a bad email. A person on file
 //                  gets only the fields still blank (an import never
-//                  overwrites); a new person gets them all.
+//                  overwrites); a new person gets them all. A cell for a
+//                  field taken off is passed over (nothing to fill).
 //   sampleLoaded   the Imagine Surrey sample's three fields and a few values
 //   sampleCleared  removes exactly those; a sample field you filled in for
 //                  your own people stays (no longer sample), and says so.
@@ -55,11 +56,14 @@ export const personsWhere = async (db, ctx, query, w) => {
 
 export const importRows = async (db, ctx, extras) => {
   const ws = ctx.workspaceId;
-  const fields = (await db.query(
-    'select * from person_fields where workspace_id = $1 and retired_at is null', [ws],
-  )).rows;
+  const all = (await db.query('select * from person_fields where workspace_id = $1', [ws])).rows;
+  const fields = all.filter((f) => !f.retired_at);
   const byId = new Map(fields.map((f) => [f.id, f]));
   const byName = new Map(fields.map((f) => [nameKey(f.name), f]));
+  // A field taken off (perhaps while this import was being set up) has
+  // nothing to fill: its cells are passed over, the row still comes in.
+  const offIds = new Set(all.filter((f) => f.retired_at).map((f) => f.id));
+  const offNames = new Set(all.filter((f) => f.retired_at).map((f) => nameKey(f.name)));
   // Blanks only: what is already filled in, person|field.
   const filled = new Set((await db.query(
     'select person_id, field_id from person_field_values where workspace_id = $1', [ws],
@@ -73,6 +77,9 @@ export const importRows = async (db, ctx, extras) => {
       const out = [];
       for (const [key, cell] of Object.entries(given)) {
         const f = byId.get(key) || byName.get(nameKey(key));
+        if (!f && (offIds.has(key) || offNames.has(nameKey(key)))) continue;
+        // Never an id on screen: one that names no field here is a field since removed.
+        if (!f && UUID_RE.test(key)) return { error: 'a profile field in this import was removed — set its column to Don’t import' };
         if (!f) return { error: `there’s no field called “${String(key).slice(0, 60)}”` };
         if (out.some((o) => o.f.id === f.id)) return { error: `“${f.name}” is in two columns` };
         const p = parseValue(f, typeof cell === 'number' || typeof cell === 'boolean' || cell === null ? cell : String(cell ?? ''));
@@ -171,8 +178,13 @@ export const sampleLoaded = async (tx, ctx, { people, emit }) => {
   }
 };
 
-// After the sample's people are gone (their values with them): the sample's
-// values left on people who stay, then the sample's fields with nothing left.
+// Just before the sample's people go (routes/data.js): every value the
+// sample made goes, each with a void event — on the people who stay and on
+// those about to be removed alike, so none vanishes by cascade off the books.
+// A value you set on a sample person is yours (sample = false) and keeps
+// that person (clearSample counts it as one of your records), so what is
+// left is yours, on people who stay. Then the sample's fields
+// with nothing left go; one you filled in stays, and the message says so.
 export const sampleCleared = async (tx, ctx, { emit, said }) => {
   const ws = ctx.workspaceId;
   const vals = (await tx.query(
