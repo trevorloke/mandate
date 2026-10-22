@@ -52,7 +52,7 @@ export function MyPeopleLink({ me }) {
   const n = useMyPeople(me).data?.people?.length || 0;
   const label = location.pathname === '/calls' && new URLSearchParams(location.search).get('channel') === 'text' ? 'Texts' : 'Calls';
   return (
-    <Link className="tx-replies rel-link" to="/my-people" state={{ from: { to: `${location.pathname}${location.search}`, label } }}>
+    <Link className="rel-link" to="/my-people" state={{ from: { to: `${location.pathname}${location.search}`, label } }}>
       My people{n ? <> · <span className="mono">{n}</span></> : null}
     </Link>
   );
