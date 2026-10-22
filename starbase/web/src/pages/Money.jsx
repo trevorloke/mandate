@@ -24,6 +24,7 @@ import {
   useInfiniteQuery, useQuery, useQueryClient, keepPreviousData,
 } from '@tanstack/react-query';
 import { apiGet, action, fmtMoney, fmtDate, todayISO, dollarsToCents } from '../api.js';
+import ReceiptsGiftLine from '../components/ReceiptsGiftLine.jsx';
 import './shifts.css';
 
 // gift.log / gift.void / gift.restore and GET /records/* are desk-only
@@ -522,6 +523,7 @@ function GiftRow({ g, open, onToggle, onVoid }) {
             </p>
           )}
           {g.flagged && <p className="ops-over" title={g.flag_reason || undefined}>{overLine(overOf(g))}</p>}
+          <ReceiptsGiftLine giftId={g.id} />
           <GiftActions personId={g.person_id} onVoid={onVoid} />
         </div>
       )}
@@ -628,6 +630,7 @@ export default function Money() {
     queryClient.invalidateQueries({ queryKey: ['brief'] });
     queryClient.invalidateQueries({ queryKey: ['person'] });
     queryClient.invalidateQueries({ queryKey: ['pledges'] });
+    queryClient.invalidateQueries({ queryKey: ['receipts'] }); // a gift's receipt is made, voided and restored with it
   };
   const refreshPledges = invalidate;
 
@@ -806,6 +809,7 @@ export default function Money() {
         </button>
         {more && (
           <div id="money-more" className="ops-more-body">
+            <Link className="btn btn-quiet ops-tap rc-moneylink" to="/money/receipts">Receipts</Link>
             <DonateLink slug={slug} />
             {monthlyIn.length > 0 && (
               <>
