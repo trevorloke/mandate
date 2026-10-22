@@ -13,6 +13,8 @@
 //       tests call this directly, scoped to their own workspace (under
 //       test:pg every test file shares one database).
 //   startJobRunner(db, { everyMs }) / stopJobRunner()
+//   runJobsSoon()  run due jobs now (once the runner has started)
+//   jobRunnerOn()  whether it has
 import { newId } from './events.js';
 
 const handlers = new Map();
@@ -83,15 +85,33 @@ export const runDueJobs = async (db, { limit = 25, workspaceId = null } = {}) =>
   return { ran, failed };
 };
 
+// One runner per process: the timer, and runJobsSoon() for work that should
+// start now rather than on the next tick (a send handed over by the request
+// that started it; the next part of a big list). A call while the runner is
+// busy makes it go round once more when it's done. Before startJobRunner
+// (tests) runJobsSoon does nothing: tests call runDueJobs themselves.
 let timer = null;
+let runner = null;
+const tick = async () => {
+  const r = runner;
+  if (!r) return;
+  if (r.busy) { r.again = true; return; }
+  r.busy = true;
+  try {
+    do { r.again = false; await runDueJobs(r.db); } while (r.again && runner === r);
+  } catch (e) {
+    console.error('jobs:', e.message);
+  } finally {
+    r.busy = false;
+  }
+};
 export const startJobRunner = (db, { everyMs = 30_000 } = {}) => {
   if (timer) return;
-  let busy = false;
-  timer = setInterval(async () => {
-    if (busy) return;
-    busy = true;
-    try { await runDueJobs(db); } catch (e) { console.error('jobs:', e.message); } finally { busy = false; }
-  }, everyMs);
+  runner = { db, busy: false, again: false };
+  timer = setInterval(tick, everyMs);
   timer.unref?.();
 };
-export const stopJobRunner = () => { if (timer) clearInterval(timer); timer = null; };
+export const runJobsSoon = () => { if (runner) setImmediate(tick); };
+// Whether this process runs jobs (off before startJobRunner, or STARBASE_JOBS=off).
+export const jobRunnerOn = () => !!runner;
+export const stopJobRunner = () => { if (timer) clearInterval(timer); timer = null; runner = null; };

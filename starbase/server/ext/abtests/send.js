@@ -1,5 +1,6 @@
 // The newsletter / press send path, tracked — shared by blast.send and
-// blast.resend (actions/field.js) and the A/B winner job (winner.js).
+// blast.resend (actions/field.js), the send job that carries their sends on
+// (SEND_JOB) and the A/B winner job (winner.js).
 //
 // Every recipient row carries a random, unguessable token. Each email goes
 // out with the plain-text part it always had plus an HTML part: the same
@@ -19,8 +20,8 @@
 // reaches it once it is 10 minutes old, with the same key.
 import { z } from 'zod';
 import { randomBytes, randomInt } from 'node:crypto';
-import { sendEmail, unsubscribeHeaders } from '../../lib/notify.js';
-import { enqueueJob } from '../../lib/jobs.js';
+import { emailConfigured, sendEmail, unsubscribeHeaders } from '../../lib/notify.js';
+import { enqueueJob, jobRunnerOn, runJobsSoon } from '../../lib/jobs.js';
 import { runAction } from '../../lib/events.js';
 
 export const AB_MIN = 50;
@@ -28,6 +29,7 @@ export const AB_PCTS = [10, 20, 30];
 export const AB_WAITS = [1, 2, 4, 12, 24];
 export const AB_METRICS = ['opens', 'clicks'];
 export const WINNER_JOB = 'abtests.winner';
+export const SEND_JOB = 'abtests.send';
 // sendEmail's own words when email isn't connected (the screen keys on them).
 export const NO_PROVIDER = 'no email provider configured (set RESEND_API_KEY)';
 
@@ -38,15 +40,37 @@ export const abInput = z.object({
   metric: z.enum(AB_METRICS),
 });
 
-// One rule for a send's status, shared by blast.send, blast.resend and the
-// winner job: everyone sent → 'sent'; everyone failed (or no one left on it)
-// → 'failed'; anything else — still saved because email wasn't connected,
-// held for an A/B winner, a mix of sent and failed, or not sure — → 'queued'.
-// The status alone can't say "partly sent", so each also answers exact counts:
-//   counts: { total, sent, failed, queued, sending? }
-//   (total = sent + failed + queued + sending; sending only when there are any)
+// One rule for a send's status, shared by blast.send, blast.resend, the send
+// job and the winner job: everyone sent → 'sent'; everyone failed (or no one
+// left on it) → 'failed'; anything else — still saved because email wasn't
+// connected, on its way, held for an A/B winner, a mix of sent and failed, or
+// not sure — → 'queued'. The status alone can't say "partly sent", so each
+// also answers exact counts:
+//   counts: { total, sent, failed, queued, sending?, going? }
+//   (total = sent + failed + queued + sending; sending only when there are
+//   any; going — of those, on their way now (goingRow) — only when there are)
 export const blastStatus = ({ total, sent, failed }) =>
   (total > 0 && sent === total ? 'sent' : failed === total ? 'failed' : 'queued');
+
+// A 'sending' row this old never heard back: Try again may reach it (same key).
+export const STALE_SENDING = "interval '10 minutes'";
+export const retryable = (alias = '') => {
+  const a = alias ? `${alias}.` : '';
+  return `(${a}status in ('queued', 'failed') or (${a}status = 'sending' and ${a}sending_at < now() - ${STALE_SENDING}))`;
+};
+// Asked to go now and not claimed yet: the send job's (and the request's) to send.
+export const askedRow = (alias = '') => `(${alias ? `${alias}.` : ''}send_asked_at is not null and ${retryable(alias)})`;
+// On its way while a send job for the blast is on: asked, or claimed a moment
+// ago and with the email service now. Never "not sent", never tried again.
+export const goingRow = (alias = '') => {
+  const a = alias ? `${alias}.` : '';
+  return `(${askedRow(alias)} or (${a}status = 'sending' and ${a}sending_at >= now() - ${STALE_SENDING}))`;
+};
+// Whether a send job for a blast is waiting or running (SQL; the blast's id
+// and workspace as expressions).
+export const sendJobOn = (blastId, workspaceId) => `exists (select 1 from jobs j
+  where j.workspace_id = ${workspaceId} and j.kind = '${SEND_JOB}' and j.status in ('pending', 'running')
+    and j.payload->>'blast_id' = (${blastId})::text)`;
 
 export const blastCounts = async (tx, workspaceId, blastId) => {
   const r = (await tx.query(
@@ -54,11 +78,15 @@ export const blastCounts = async (tx, workspaceId, blastId) => {
             (count(*) filter (where status = 'sent'))::int as sent,
             (count(*) filter (where status = 'failed'))::int as failed,
             (count(*) filter (where status = 'queued'))::int as queued,
-            (count(*) filter (where status = 'sending'))::int as sending
+            (count(*) filter (where status = 'sending'))::int as sending,
+            (count(*) filter (where ${goingRow()} and ${sendJobOn('$1::uuid', '$2')}))::int as going
      from blast_recipients where blast_id = $1 and workspace_id = $2`,
     [blastId, workspaceId],
   )).rows[0];
-  return { total: r.total, sent: r.sent, failed: r.failed, queued: r.queued, ...(r.sending ? { sending: r.sending } : {}) };
+  return {
+    total: r.total, sent: r.sent, failed: r.failed, queued: r.queued,
+    ...(r.sending ? { sending: r.sending } : {}), ...(r.going ? { going: r.going } : {}),
+  };
 };
 
 // The idempotency key of one email: send, recipient row, refusals so far.
@@ -72,13 +100,6 @@ export const outcomeOf = (res) => {
   if (res.status === 'failed' && res.unknown) return { status: 'sending', refused: false };
   if (res.status === 'failed') return { status: 'failed', refused: true };
   return { status: 'queued', refused: false };
-};
-
-// A 'sending' row this old never heard back: Try again may reach it (same key).
-export const STALE_SENDING = "interval '10 minutes'";
-export const retryable = (alias = '') => {
-  const a = alias ? `${alias}.` : '';
-  return `(${a}status in ('queued', 'failed') or (${a}status = 'sending' and ${a}sending_at < now() - ${STALE_SENDING}))`;
 };
 
 // Store one row's answer. A row someone else already settled is left alone.
@@ -235,38 +256,51 @@ export const decide = (groups, metric) => {
   return { winner: rb > ra ? 'b' : 'a', tie: false };
 };
 
-// Send some of a blast's rows — blast.send's and blast.resend's (actions/
-// field.js, their `after` step) — in the same two phases as the winner job,
-// never holding the campaign lock while the email service is called. `ids`
-// are the rows this run may send, in order, ten at a time:
-//   1. claim   each still waiting → 'sending', committed before the call. A
-//              newsletter subscriber who left the list since is taken off the
-//              send, never emailed. A row someone else claimed or settled
-//              meanwhile is left to them.
+// Send a blast's asked rows (askedRow: a person asked for them to go now) in
+// the same phases as the winner job, never holding the campaign lock while
+// the email service is called. blast.send and blast.resend (actions/field.js)
+// ask for their rows and commit, then send the first few in the request
+// (their `after` step, for a few seconds: SEND_INLINE_MS); the send job
+// (SEND_JOB, below) sends the rest, a few hundred per run. Ten at a time:
+//   1. claim   each asked row → 'sending', no longer asked, committed before
+//              the call. A newsletter subscriber who left the list since is
+//              taken off the send, never emailed. A row someone else claimed
+//              or settled meanwhile is left to them.
 //   2. send    each claimed row, outside any transaction, with its key.
 //   3. record  each answer in its own write; a row someone else settled
 //              meanwhile is left alone.
 // A crash leaves the claimed few 'sending' (not sure — Try again sends them
-// with the same key once they are ten minutes old) and the rest waiting (not
-// sent): never no record, never a second copy by itself. Each write is on
-// the event log as blast.deliver by the person who sent.
-// Answers { sent, failed, skipped, unsure, claimed, note }.
+// with the same key once they are ten minutes old) and the rest asked: the
+// send job carries on with those by itself. Never no record, never a second
+// copy by itself. Each write is on the event log as blast.deliver by the
+// person who sent.
+// Stops after `max` rows or `budgetMs`; `more` says whether asked rows are
+// left. Answers { sent, failed, skipped, unsure, claimed, note, more }.
 export const DELIVER_ACTION = 'blast.deliver';
 const BATCH = 10;
-export const deliver = async (db, ctx, blast, ids, { actorId = null } = {}) => {
+const anyAsked = async (db, workspaceId, blastId) => (await db.query(
+  `select 1 from blast_recipients where blast_id = $1 and workspace_id = $2 and ${askedRow()} limit 1`,
+  [blastId, workspaceId],
+)).rows.length > 0;
+export const deliver = async (db, ctx, blast, { actorId = null, budgetMs = Infinity, max = Infinity } = {}) => {
   const workspaceId = ctx.workspaceId;
   const act = (fn) => runAction(db, { workspaceId, actorId, action: DELIVER_ACTION }, fn);
   const links = findLinks(blast.body);
-  const run = { sent: 0, failed: 0, skipped: 0, unsure: 0, claimed: 0, note: null };
-  const left = [...ids];
-  while (left.length) {
-    const batch = left.splice(0, BATCH);
+  const run = { sent: 0, failed: 0, skipped: 0, unsure: 0, claimed: 0, note: null, more: false };
+  const t0 = Date.now();
+  for (;;) {
+    // Email disconnected since the tap: nothing is claimed; the rest stay not sent.
+    if (!emailConfigured()) { run.note = NO_PROVIDER; break; }
+    if (run.claimed >= max || Date.now() - t0 >= budgetMs) {
+      run.more = await anyAsked(db, workspaceId, blast.id);
+      break;
+    }
     const { result: go } = await act(async (tx, emit) => {
       const rows = (await tx.query(
         `select id, email, token, ab_group, send_tries from blast_recipients
-         where blast_id = $1 and workspace_id = $2 and id = any($3::uuid[]) and ${retryable()}
-         order by created_at, id for update skip locked`,
-        [blast.id, workspaceId, batch],
+         where blast_id = $1 and workspace_id = $2 and ${askedRow()}
+         order by created_at, id limit $3 for update skip locked`,
+        [blast.id, workspaceId, Math.min(BATCH, max - run.claimed)],
       )).rows;
       const out = [];
       let gone = 0;
@@ -286,16 +320,17 @@ export const deliver = async (db, ctx, blast, ids, { actorId = null } = {}) => {
         }
         const token = r.token || newToken();
         await tx.query(
-          `update blast_recipients set status = 'sending', sending_at = now(), token = $3
+          `update blast_recipients set status = 'sending', sending_at = now(), token = $3, send_asked_at = null
            where id = $1 and workspace_id = $2`,
           [r.id, workspaceId, token],
         );
         out.push({ ...r, token, subscriptionId });
       }
       if (out.length || gone) emit('blast', blast.id, 'update', { sending: out.length, unsubscribed: gone });
-      return { rows: out, gone };
+      return { rows: out, gone, empty: rows.length === 0 };
     });
     run.skipped += go.gone;
+    if (go.empty) break;
     for (const r of go.rows) {
       run.claimed += 1;
       const res = await sendEmail({
@@ -318,24 +353,113 @@ export const deliver = async (db, ctx, blast, ids, { actorId = null } = {}) => {
   return run;
 };
 
+// A send's status, counts and note, written from its rows (inside a write).
+// The send's time is when its last email went. `quiet` — the run did nothing
+// — writes only when the stored row disagrees with its rows (the finish of a
+// run that stopped after its last email: everyone has it, the send still
+// says otherwise), and keeps the note it has. Answers { blast, counts,
+// status, wrote } (null when there is no such send). `note` may be a
+// function of the counts.
+export const settleBlast = async (tx, workspaceId, blastId, { note = null, quiet = false } = {}) => {
+  const cur = (await tx.query('select * from blasts where id = $1 and workspace_id = $2 for update', [blastId, workspaceId])).rows[0];
+  if (!cur) return null;
+  const counts = await blastCounts(tx, workspaceId, blastId);
+  const status = blastStatus(counts);
+  if (quiet && cur.status === status && Number(cur.audience_count) === counts.total && (status !== 'sent' || cur.sent_at)) {
+    return { blast: cur, counts, status, wrote: false };
+  }
+  const row = (await tx.query(
+    `update blasts set status = $3, provider_note = $4, audience_count = $5,
+       sent_at = case when $3 = 'sent'
+         then coalesce((select max(r.sent_at) from blast_recipients r where r.blast_id = $1 and r.workspace_id = $2), now())
+         else sent_at end
+     where id = $1 and workspace_id = $2
+     returning *`,
+    [blastId, workspaceId, status,
+      counts.total === 0 ? 'everyone on this send has unsubscribed'
+        : quiet ? cur.provider_note : typeof note === 'function' ? note(counts) : note,
+      counts.total],
+  )).rows[0];
+  return { blast: row, counts, status, wrote: true };
+};
+
 // After a run: the whole send's status, counts and note, in one write
-// labelled by the run (blast.send / blast.resend). `payload` adds this run's
-// numbers to its event. Answers { blast (the row), counts, lastSeq }.
-export const finishRun = async (db, ctx, { actorId = null, action, blastId, note = null, payload = {} }) => {
-  const { result, lastSeq } = await runAction(db, { workspaceId: ctx.workspaceId, actorId, action }, async (tx, emit) => {
-    const counts = await blastCounts(tx, ctx.workspaceId, blastId);
-    const status = blastStatus(counts);
-    const row = (await tx.query(
-      `update blasts set status = $3, provider_note = $4, audience_count = $5,
-         sent_at = case when $3 = 'sent' then now() else sent_at end
-       where id = $1 and workspace_id = $2
-       returning *`,
-      [blastId, ctx.workspaceId, status, counts.total === 0 ? 'everyone on this send has unsubscribed' : note, counts.total],
-    )).rows[0];
-    emit('blast', blastId, 'update', { ...payload, status });
-    return { blast: row, counts };
+// labelled by what the person asked for (blast.send / blast.resend).
+// `payload` adds this run's numbers to its event. `done`: nothing asked is
+// left — the tap's own job (`jobId`, the one waiting in case the request
+// dies) has nothing to do and is cancelled. Not done: that job is due now
+// (`jobId`), or the next run is queued (`next`, its payload), and runs
+// straight away. Answers { blast (the row), counts, lastSeq }.
+export const finishRun = async (db, ctx, {
+  actorId = null, action, blastId, note = null, payload = {}, quiet = false, done = true, jobId = null, next = null,
+}) => {
+  const workspaceId = ctx.workspaceId;
+  const { result, lastSeq } = await runAction(db, { workspaceId, actorId, action }, async (tx, emit) => {
+    if (jobId) {
+      await tx.query(
+        done
+          ? `update jobs set status = 'cancelled', done_at = now() where id = $1 and workspace_id = $2 and status = 'pending'`
+          : `update jobs set run_at = now() where id = $1 and workspace_id = $2 and status = 'pending'`,
+        [jobId, workspaceId],
+      );
+    }
+    if (!done && next) await enqueueJob(tx, { workspaceId, kind: SEND_JOB, payload: next });
+    const s = await settleBlast(tx, workspaceId, blastId, { note, quiet: quiet && done });
+    if (s?.wrote) emit('blast', blastId, 'update', { ...payload, status: s.status, ...(done ? {} : { more: true }) });
+    return { blast: s?.blast || null, counts: s?.counts || null };
   });
+  if (!done) runJobsSoon();
   return { ...result, lastSeq };
+};
+
+// How long a tap's request sends before it hands the rest to the send job
+// (STARBASE_SEND_INLINE_MS, default 5 s) — all of it when nothing would run
+// that job (no job runner in this process: STARBASE_JOBS=off).
+export const inlineMs = () => {
+  const v = process.env.STARBASE_SEND_INLINE_MS;
+  if (v != null && v !== '' && Number(v) >= 0) return Number(v);
+  return jobRunnerOn() ? 5_000 : Infinity;
+};
+// The tap's send job, queued with the send: it waits long enough for the
+// request to finish (its last ten can take 150 s with a hung email service),
+// so it only runs when the request hands over or never got to finish.
+export const queueSend = (tx, ctx, blastId, action) => enqueueJob(tx, {
+  workspaceId: ctx.workspaceId,
+  kind: SEND_JOB,
+  runAt: new Date(Date.now() + 3 * 60_000).toISOString(),
+  payload: { blast_id: blastId, base: ctx.publicUrl || '', actor_id: ctx.user?.id || null, action },
+});
+
+// This run's numbers on the summary event: blast.resend says how many it
+// tried (resent); both say how each went.
+export const runPayload = (action, run, extra = {}) => ({
+  ...(action === 'blast.resend' ? { resent: run.claimed } : {}),
+  sent: run.sent, failed: run.failed, unsubscribed: run.skipped,
+  ...(run.unsure ? { unsure: run.unsure } : {}), ...extra,
+});
+
+// The send job: the rest of a tap's send, up to 200 per run
+// (STARBASE_SEND_PER_RUN), then the next run straight away — so other
+// background work (receipts, ladders) isn't kept waiting behind a big list.
+// Its writes are the tapping person's, labelled as theirs (blast.send /
+// blast.resend). A run with nothing left to send writes nothing, unless the
+// send's status was never brought up to date (settleBlast).
+const sendPerRun = () => Number(process.env.STARBASE_SEND_PER_RUN) || 200;
+export const runSendJob = async (db, job) => {
+  const { blast_id: blastId, base = '', actor_id: actorId = null, action = 'blast.send' } = job.payload || {};
+  const workspaceId = job.workspace_id;
+  const blast = (await db.query(
+    'select id, kind, subject, body, ab_subject_b, ab_winner from blasts where id = $1 and workspace_id = $2',
+    [blastId, workspaceId],
+  )).rows[0];
+  if (!blast) return;
+  const ws = (await db.query('select name from workspaces where id = $1', [workspaceId])).rows[0];
+  const ctx = { workspaceId, workspace: { name: ws?.name || '' }, publicUrl: base };
+  const run = await deliver(db, ctx, blast, { actorId, max: sendPerRun() });
+  await finishRun(db, ctx, {
+    actorId, action, blastId, note: run.note, payload: runPayload(action, run),
+    quiet: run.claimed === 0 && run.skipped === 0, done: !run.more, next: run.more ? job.payload : null,
+  });
 };
 
 // A new A/B send: store its two subjects and settings. Saved while email

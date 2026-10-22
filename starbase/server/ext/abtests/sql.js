@@ -15,6 +15,9 @@
 // emails that person again by itself). sending_at is when; send_tries counts
 // the service's refusals, part of each send's idempotency key (send.js).
 // sent_at: when the service took it (a click seconds later is a scanner).
+// send_asked_at: a person asked for this row to go now (Send, Send now, Try
+// again) and no run has claimed it yet — a send job takes it from here, so
+// the rest of a big list, or a send the server stopped in, goes on by itself.
 // open_logged_at / click_logged_at: the first open / click is on the event
 // log (track.js writes the hit without the campaign lock; a job logs it).
 export const sql = `
@@ -41,6 +44,8 @@ alter table blast_recipients add column if not exists first_click_n int;
 alter table blast_recipients add column if not exists sent_at timestamptz;
 alter table blast_recipients add column if not exists sending_at timestamptz;
 alter table blast_recipients add column if not exists send_tries int not null default 0;
+alter table blast_recipients add column if not exists send_asked_at timestamptz;
+create index if not exists brecip_asked_idx on blast_recipients (blast_id) where send_asked_at is not null;
 create unique index if not exists brecip_token_idx on blast_recipients (token) where token is not null;
 
 -- Rows from before 'sending' existed carry the core check.

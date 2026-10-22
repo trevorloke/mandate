@@ -16,7 +16,10 @@
 //                idempotency key (send.js sendKey).
 //   4. record    each answer in its own write; a row someone else settled
 //                meanwhile is left alone.
-//   5. finish    the send's status and counts.
+//   5. finish    the send's status and counts — also on a retry that had
+//                nothing left to send, when the send still says otherwise
+//                (a run that stopped after its last email: send.js
+//                settleBlast).
 // One run sends at most 200 (STARBASE_AB_SEND_PER_RUN), then leaves the
 // next run queued, so other background work (receipts, ladders) isn't kept
 // waiting behind a big list.
@@ -26,15 +29,14 @@
 // (released, not held) and go out on Send now.
 import { runAction } from '../../lib/events.js';
 import { emailConfigured, sendEmail } from '../../lib/notify.js';
-import { enqueueJob } from '../../lib/jobs.js';
+import { enqueueJob, runJobsSoon } from '../../lib/jobs.js';
 import {
-  WINNER_JOB, blastCounts, blastStatus, composeBlast, decide, findLinks, groupStats, newToken, outcomeOf,
-  recordOutcome, saveLinks, sendKey, subjectFor,
+  NO_PROVIDER, WINNER_JOB, composeBlast, decide, findLinks, groupStats, newToken, outcomeOf,
+  recordOutcome, saveLinks, sendKey, settleBlast, subjectFor,
 } from './send.js';
 
 const BATCH = 10;
 const perRun = () => Number(process.env.STARBASE_AB_SEND_PER_RUN) || 200;
-const NO_PROVIDER = 'no email provider configured (set RESEND_API_KEY)';
 
 export const pickWinner = async (db, job) => {
   const { blast_id: blastId, base = '' } = job.payload || {};
@@ -99,7 +101,7 @@ export const pickWinner = async (db, job) => {
         }
         const token = r.token || newToken();
         await tx.query(
-          `update blast_recipients set status = 'sending', sending_at = now(), token = $3
+          `update blast_recipients set status = 'sending', sending_at = now(), token = $3, send_asked_at = null
            where id = $1 and workspace_id = $2`,
           [r.id, workspaceId, token],
         );
@@ -131,24 +133,19 @@ export const pickWinner = async (db, job) => {
   }
 
   // 5. Finish: the whole send's status and counts. A retry that found
-  // nothing to do writes nothing.
-  if (!blast.decidedNow && run.claimed === 0 && run.skipped === 0) return;
+  // nothing to do writes nothing — unless the send still says otherwise
+  // (the last run stopped after its last email, before this write).
+  const quiet = !blast.decidedNow && run.claimed === 0 && run.skipped === 0 && !more;
   await act('blast.ab_rest', async (tx, emit) => {
-    const counts = await blastCounts(tx, workspaceId, blastId);
-    const status = blastStatus(counts);
-    const note = counts.total === 0 ? 'everyone on this send has unsubscribed'
-      : run.note || (!emailConfigured() && counts.queued > 0 ? NO_PROVIDER : null);
-    await tx.query(
-      `update blasts set status = $3, provider_note = $4, audience_count = $5,
-         sent_at = case when $3 = 'sent' then now() else sent_at end
-       where id = $1 and workspace_id = $2`,
-      [blastId, workspaceId, status, note, counts.total],
-    );
-    emit('blast', blastId, 'update', {
-      ab_winner: blast.ab_winner, rest: run.claimed, sent: run.sent, failed: run.failed,
-      unsure: run.unsure, unsubscribed: run.skipped, status, ...(more ? { more: true } : {}),
-    });
     // The rest of a big list: the next run, right away.
     if (more) await enqueueJob(tx, { workspaceId, kind: WINNER_JOB, payload: { blast_id: blastId, base } });
+    const note = (counts) => run.note || (!emailConfigured() && counts.queued > 0 ? NO_PROVIDER : null);
+    const s = await settleBlast(tx, workspaceId, blastId, { note, quiet });
+    if (!s?.wrote) return;
+    emit('blast', blastId, 'update', {
+      ab_winner: blast.ab_winner, rest: run.claimed, sent: run.sent, failed: run.failed,
+      unsure: run.unsure, unsubscribed: run.skipped, status: s.status, ...(more ? { more: true } : {}),
+    });
   });
+  if (more) runJobsSoon();
 };

@@ -96,8 +96,11 @@ Provider-pluggable, no SDKs: `RESEND_API_KEY` (+ `MAIL_FROM`) for email,
 them, blasts and shift notifications are recorded as **queued** per recipient
 — nothing is lost; connect the provider and resend. A newsletter or press
 send commits its list first and claims each email before it goes, outside
-the campaign lock, so a crash mid-send leaves who got it, who might ("not
-sure" — Try again, same key) and who didn't; shift emails carry a key per
+the campaign lock; the tap sends for a few seconds and a background send
+job sends the rest ("Sending · 40 of 340"), so a big list never keeps the
+person waiting and a crash mid-send leaves who got it, who might ("not
+sure" — Try again, same key) and who hasn't yet (the job carries on by
+itself); shift emails carry a key per
 person and round, so Notify again after a crash isn't a second copy. Without Twilio, calling
 and texting use `tel:` / `sms:` links (the phone's own dialer and messages)
 with one-tap logging; with it, texts and calls go through the campaign's

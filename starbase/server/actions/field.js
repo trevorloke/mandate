@@ -14,8 +14,8 @@ import { httpError } from './util.js';
 import { runHooks, hasHook } from '../lib/hooks.js';
 // The tracked newsletter/press send path and A/B subject lines.
 import {
-  AB_MIN, NO_PROVIDER, abInput, abGroups, abOf, blastCounts, deliver, finishRun,
-  findLinks, newToken, openTest, restReleased, retryable, saveLinks, startTest,
+  AB_MIN, NO_PROVIDER, abInput, abGroups, abOf, blastCounts, deliver, finishRun, findLinks, inlineMs,
+  newToken, openTest, queueSend, restReleased, retryable, runPayload, saveLinks, startTest,
 } from '../ext/abtests/send.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
@@ -59,9 +59,11 @@ const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
 // with the A/B winner job.
 
 // A newsletter / press send in two phases (the A/B winner job's): the
-// handler commits the send and its list; its `after` step then sends,
-// outside the transaction (send.js deliver). What the handler hands to
-// `after` sits under this key — a Symbol, so it never reaches the reply.
+// handler commits the send, its list (the rows to go now asked for) and a
+// send job; its `after` step then sends for a few seconds, outside the
+// transaction (send.js deliver), and hands whatever is left to that job.
+// What the handler hands to `after` sits under this key — a Symbol, so it
+// never reaches the reply.
 const SEND = Symbol('send');
 const blastOut = (b) => ({
   id: b.id, kind: b.kind, subject: b.subject, status: b.status,
@@ -646,12 +648,15 @@ export const FIELD_ACTIONS = {
   },
 
   // ── Email blasts: newsletter → subscribed list; press → media-tagged people ──
-  // The send and every recipient row ('queued', each with its own token for
-  // the open pixel and its links) commit first; then `after` sends them, a
-  // few at a time, each claimed 'sending' before its email goes — so a crash
-  // or a deploy mid-send leaves a true record: who has it ('sent'), who might
-  // ('sending' — not sure; Try again with the same key) and who doesn't
-  // ('queued'), never no record and never a second copy by itself.
+  // The send, every recipient row ('queued', each with its own token for the
+  // open pixel and its links; the ones to go now asked for) and a send job
+  // commit first; then `after` sends them for a few seconds (SEND_INLINE_MS),
+  // a few at a time, each claimed 'sending' before its email goes, and hands
+  // the rest to the send job — the reply then says they're going ("Sending ·
+  // 40 of 340"). A crash or a deploy mid-send leaves a true record: who has
+  // it ('sent'), who might ('sending' — not sure; Try again with the same
+  // key) and who doesn't yet ('queued' — the send job carries on with them),
+  // never no record and never a second copy by itself.
   // Without email connected nothing is sent: the send is saved, and
   // blast.resend sends it once it is.
   'blast.send': {
@@ -699,20 +704,21 @@ export const FIELD_ACTIONS = {
          values ($1, $2, $3, $4, $5, 'queued', $6, $7, $8)`,
         [id, ctx.workspaceId, input.kind, input.subject, input.body, note, audience.length, ctx.user.id],
       );
-      // The rows `after` sends now. The rest of an A/B send waits for the
-      // winner: nothing goes to them now.
-      const now = [];
+      // The rows to go now are asked for. The rest of an A/B send waits for
+      // the winner: nothing goes to them now.
+      let now = 0;
       for (const [i, r] of audience.entries()) {
         const group = groups[i] || null;
-        const rowId = newId();
+        const asked = live && group !== 'rest';
         await tx.query(
-          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group)
-           values ($1, $2, $3, $4, $5, 'queued', $6, $7)`,
-          [rowId, ctx.workspaceId, id, r.email, r.name || null, newToken(), group],
+          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group, send_asked_at)
+           values ($1, $2, $3, $4, $5, 'queued', $6, $7, case when $8 then now() end)`,
+          [newId(), ctx.workspaceId, id, r.email, r.name || null, newToken(), group, asked],
         );
-        if (live && group !== 'rest') now.push(rowId);
+        if (asked) now += 1;
       }
       await saveLinks(tx, ctx.workspaceId, id, findLinks(input.body));
+      const jobId = now ? await queueSend(tx, ctx, id, 'blast.send') : null;
       // Not connected: the whole test is saved and starts on Send now.
       const test = ab ? await openTest(tx, ctx, id, ab, live) : null;
       emit('blast', id, 'create', {
@@ -726,22 +732,21 @@ export const FIELD_ACTIONS = {
         },
         counts: { total: audience.length, sent: 0, failed: 0, queued: audience.length },
         ...(input.ab && !ab ? { ab_skipped: `A/B needs at least ${AB_MIN}` } : {}),
-        [SEND]: now.length ? {
-          ids: now,
+        [SEND]: now ? {
+          jobId,
           blast: { id, kind: input.kind, subject: input.subject, body: input.body, ab_subject_b: ab?.subject_b ?? null, ab_winner: null },
         } : null,
       };
     },
-    // Committed: now the emails. Answers the send as it stands after them.
+    // Committed: now the emails, for a few seconds; the send job sends the
+    // rest. Answers the send as it stands then (counts.going: on their way).
     after: async (db, ctx, result) => {
       const plan = result[SEND];
       if (!plan) return { result };
-      const run = await deliver(db, ctx, plan.blast, plan.ids, { actorId: ctx.user.id });
+      const run = await deliver(db, ctx, plan.blast, { actorId: ctx.user.id, budgetMs: inlineMs() });
       const done = await finishRun(db, ctx, {
         actorId: ctx.user.id, action: 'blast.send', blastId: plan.blast.id, note: run.note,
-        payload: {
-          sent: run.sent, failed: run.failed, unsubscribed: run.skipped, ...(run.unsure ? { unsure: run.unsure } : {}),
-        },
+        payload: runPayload('blast.send', run), done: !run.more, jobId: plan.jobId,
       });
       const { status, audience_count: audienceCount, provider_note: providerNote } = done.blast;
       return {
@@ -754,7 +759,8 @@ export const FIELD_ACTIONS = {
   // "Send now": send one saved blast to everyone on it not yet reached — the
   // 'queued' rows (saved while email wasn't connected) and the 'failed' rows
   // (the provider turned them down) — through the same two phases as
-  // blast.send (the handler picks them; `after` claims and sends them).
+  // blast.send (the handler asks for them; `after` claims and sends them for
+  // a few seconds, the send job the rest).
   // A 'sent' row is never touched, so no one gets it twice however often it
   // runs. Refused (409) while email isn't connected: nothing pretends to send.
   // A newsletter subscriber who unsubscribed since is taken off the send
@@ -777,12 +783,12 @@ export const FIELD_ACTIONS = {
       if (!emailConfigured()) throw httpError(409, "email isn't connected yet — connect it, then send");
       // Not reached yet: queued, failed, or 'sending' long enough ago that
       // the service never answered (sent again with the same key, so the
-      // service drops it if it did go).
+      // service drops it if it did go). Each is asked for now.
       const waiting = (await tx.query(
-        `select id from blast_recipients
+        `update blast_recipients set send_asked_at = coalesce(send_asked_at, now())
          where blast_id = $1 and workspace_id = $2 and ${retryable()}
            and ($3::boolean or ab_group is distinct from 'rest')
-         order by created_at, id`,
+         returning id`,
         [blast.id, ctx.workspaceId, restReleased(blast)],
       )).rows;
       const starting = blast.ab_status === 'saved';
@@ -792,19 +798,19 @@ export const FIELD_ACTIONS = {
       await saveLinks(tx, ctx.workspaceId, blast.id, findLinks(blast.body));
       // A saved A/B send starts its test now: A and B go out below.
       const test = starting ? await startTest(tx, ctx, blast.id) : null;
-      if (test) emit('blast', blast.id, 'update', { ab: test.status });
-      return { blast: blastOut(blast), [SEND]: { ids: waiting.map((r) => r.id), blast, test } };
+      // On the log: who was asked for (and a test that starts).
+      emit('blast', blast.id, 'update', { asked: waiting.length, ...(test ? { ab: test.status } : {}) });
+      const jobId = waiting.length ? await queueSend(tx, ctx, blast.id, 'blast.resend') : null;
+      return { blast: blastOut(blast), [SEND]: { blast, test, jobId } };
     },
     after: async (db, ctx, result) => {
       const plan = result[SEND];
       if (!plan) return { result };
-      const run = await deliver(db, ctx, plan.blast, plan.ids, { actorId: ctx.user.id });
+      const run = await deliver(db, ctx, plan.blast, { actorId: ctx.user.id, budgetMs: inlineMs() });
       const done = await finishRun(db, ctx, {
         actorId: ctx.user.id, action: 'blast.resend', blastId: plan.blast.id, note: run.note,
-        payload: {
-          resent: run.claimed, sent: run.sent, failed: run.failed, unsubscribed: run.skipped,
-          ...(run.unsure ? { unsure: run.unsure } : {}), ...(plan.test ? { ab: plan.test.status } : {}),
-        },
+        payload: runPayload('blast.resend', run, plan.test ? { ab: plan.test.status } : {}),
+        done: !run.more, jobId: plan.jobId,
       });
       return {
         result: { blast: blastOut(done.blast), counts: done.counts, resent: { sent: run.sent, failed: run.failed, skipped: run.skipped } },

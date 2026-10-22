@@ -81,14 +81,19 @@ one tap away under **More**.
   signs to put up.
 - **Outreach → Newsletter** — without email connected, a newsletter is
   *Saved — not sent*; connect email (Resend) and tap *Send now*. A send
-  that partly fails says *Sent to 1 of 2 — 1 failed* with *Try again*. If
-  the server stops mid-send, the send is still listed — *Sent to 7 of 20 —
-  10 not sent · 3 not sure* — and *Try again* sends with the same keys
+  that partly fails says *Sent to 1 of 2 — 1 failed* with *Try again*. A
+  big list says *Sending · 40 of 340* and counts up while it goes out in the
+  background (door knocks aren't kept waiting). If the server stops
+  mid-send, the send is still listed and the rest go out by themselves
+  within a few minutes of the restart; the few it isn't sure about say *We
+  don't know if 3 got it*, and *Try again* sends those with the same keys
   (Resend drops a repeat).
 - **Two subject lines** (50+ subscribers) — Write newsletter → *Try two
   subject lines*: A and B each go to a small group; after the wait the better
   one (by opens, or by clicks when the message has a link) goes to everyone
-  else by itself, and *Last sent* shows *Opened · Clicked*. A tie sends A and
+  else by itself, and *Last sent* shows the whole list's *All 60: opened ·
+  clicked*. While writing, the plan sits under the settings (*A to 12, B to
+  12, winner to 36 after 1 hour*). A tie sends A and
   says *Tie — sent A*. Opens run high (Apple Mail opens by itself); clicks
   from mail scanners aren't counted.
 - **Outreach → Ladders** (automatic emails & follow-ups) — email steps go

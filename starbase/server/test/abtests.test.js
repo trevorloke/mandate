@@ -113,6 +113,11 @@ const rows = async (blastId) => (await db.query(
 )).rows;
 const events = async (c, action) => (await c.get('/api/events?since=0&limit=5000')).json.events.filter((e) => e.action === action);
 const statsFor = async (c, id) => (await c.get('/api/blasts/stats')).json.stats.find((s) => s.id === id);
+// Another run of a send's winner job (a retry), due now.
+const enqueueAgain = (ws, blastId) => db.query(
+  `insert into jobs (id, workspace_id, kind, run_at, payload) values (gen_random_uuid(), $1, 'abtests.winner', now(), $2)`,
+  [ws, JSON.stringify({ blast_id: blastId, base: '' })],
+);
 const dueNow = (ws) => db.query(`update jobs set run_at = now() where workspace_id = $1 and kind = 'abtests.winner' and status = 'pending'`, [ws]);
 
 const BODY = 'Hello neighbours.\n\nRead the plan: https://imaginesurrey.example/plan.\nRSVP (https://imaginesurrey.example/rsvp?x=1) today!';
@@ -629,6 +634,46 @@ test('a write that fails mid-send: the retry carries on, nobody is emailed twice
     assert.equal(new Set(sent.map((m) => m.to[0])).size, 50, 'everyone exactly once');
     assert.deepEqual(again.json.counts, { total: 50, sent: 50, failed: 0, queued: 0 });
     assert.equal(again.json.blast.status, 'sent');
+  });
+  assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+});
+
+test('the winner\'s last write is lost after everyone got it: the retry brings the send up to date, once', async () => {
+  const { c, ws } = await workspace('Lost winner finish', 50);
+  await withEmail(async (sent) => {
+    const id = (await c.action('blast.send', ab10('Lost finish'))).json.blast.id;
+    // The finish write fails (the last answer is already written down).
+    const flaky = {
+      ...db,
+      transaction: (fn) => db.transaction((tx) => fn({
+        query: (sql, params) => {
+          if (/update blasts set status = \$3/.test(sql)) throw new Error('connection dropped');
+          return tx.query(sql, params);
+        },
+      })),
+    };
+    await dueNow(ws);
+    assert.deepEqual(await runDueJobs(flaky, { workspaceId: ws }), { ran: 0, failed: 1 });
+    assert.equal(sent.length, 50, 'everyone has it');
+    let listed = (await c.get('/api/blasts')).json.blasts.find((x) => x.id === id);
+    assert.deepEqual([listed.status, listed.sent_count, listed.sent_at], ['queued', 50, null], 'the send still says otherwise');
+
+    // The retry claims nothing, and still finishes the send.
+    await dueNow(ws);
+    assert.deepEqual(await runDueJobs(db, { workspaceId: ws }), { ran: 1, failed: 0 });
+    assert.equal(sent.length, 50, 'nobody emailed again');
+    listed = (await c.get('/api/blasts')).json.blasts.find((x) => x.id === id);
+    assert.equal(listed.status, 'sent');
+    assert.ok(listed.sent_at, 'sent when the last one went');
+    const finishes = (await events(c, 'blast.ab_rest')).filter((e) => e.entity_type === 'blast' && e.payload.status);
+    assert.deepEqual(finishes.map((e) => [e.payload.rest, e.payload.status]), [[0, 'sent']]);
+    const exp = (await c.get('/api/export')).json;
+    assert.equal(exp.blasts.find((x) => x.id === id).status, 'sent', 'the export says the same');
+    // Settled: another run writes nothing.
+    const before = (await c.get('/api/events?since=0&limit=5000')).json.events.length;
+    await enqueueAgain(ws, id);
+    assert.deepEqual(await runDueJobs(db, { workspaceId: ws }), { ran: 1, failed: 0 });
+    assert.equal((await c.get('/api/events?since=0&limit=5000')).json.events.length, before);
   });
   assert.equal((await c.get('/api/audit/verify')).json.ok, true);
 });

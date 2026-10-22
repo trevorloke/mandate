@@ -309,10 +309,12 @@ test('send later is real: a saved newsletter goes out with blast.resend once ema
   assert.equal(listed.status, 'sent');
   assert.equal(listed.audience_count, 2);
   assert.ok(listed.sent_at);
-  const ev = (await w.get('/api/events?since=0&limit=1000')).json.events
-    .filter((e) => e.action === 'blast.resend');
-  assert.equal(ev.length, 1, 'one logged resend; the no-op second run logs nothing');
-  assert.deepEqual(ev[0].payload, { resent: 2, sent: 2, failed: 0, unsubscribed: 1, status: 'sent' });
+  // On the log: the tap (who was asked for), then how it went.
+  const resends = (await w.get('/api/events?since=0&limit=1000')).json.events
+    .filter((e) => e.action === 'blast.resend' && e.entity_type === 'blast');
+  assert.deepEqual(resends.map((e) => e.payload), [
+    { asked: 3 }, { resent: 2, sent: 2, failed: 0, unsubscribed: 1, status: 'sent' },
+  ], 'one logged resend; the no-op second run logs nothing');
   assert.equal((await w.get('/api/audit/verify')).json.ok, true);
 });
 
@@ -361,7 +363,8 @@ test('blast.resend records each result, and Send now retries the failed ones —
     assert.equal(sent.length, 2);
   }, { fail: (to) => desk2Down && to === 'desk2.resend@news.example' });
 
-  const ev = (await w.get('/api/events?since=0&limit=1000')).json.events.filter((e) => e.action === 'blast.resend');
+  const ev = (await w.get('/api/events?since=0&limit=1000')).json.events
+    .filter((e) => e.action === 'blast.resend' && e.payload.status);
   assert.deepEqual(ev.map((e) => [e.payload.sent, e.payload.failed]), [[1, 1], [0, 1], [1, 0]], 'every real attempt is logged; the no-op is not');
   assert.equal((await w.get('/api/audit/verify')).json.ok, true);
 });

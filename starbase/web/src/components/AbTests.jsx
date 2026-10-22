@@ -3,12 +3,14 @@
 //   AbFields        the quiet "Try two subject lines" reveal in Write
 //   useBlastStat    one send's counts from GET /api/blasts/stats
 //   abState         a test's state as one line ("Testing · A 12% vs B 18%
-//                   opened · winner picked 3:00 p.m.", "Winner B · A 17% vs
+//                   opened · winner at 3:00 p.m.", "Winner B · A 17% vs
 //                   B 50% opened · sent to everyone", "Tie — sent A · …") —
 //                   only what the server counted
-//   abPlanLine      a saved test's plan, before anyone taps ("Two subject
-//                   lines · A to 13, B to 13, winner to 39 after 4 hours")
-//   SendStats       "Opened 42% · Clicked 8%" (of delivered)
+//   abPlanLine      a test's plan, before anyone taps ("Two subject
+//                   lines · A to 13, B to 13, winner to 39 after 4 hours") —
+//                   under the settings while writing, and on the saved card
+//   SendStats       "Opened 42% · Clicked 8%" (of delivered); after a test,
+//                   the whole list's: "All 66: opened 15% · clicked 3%"
 //   TestingList     tests running now, on the tab's first look
 //   OpensNote       the one line on Apple Mail under More
 //   hasLinks        whether a message has a link to click (Winner by clicks)
@@ -94,7 +96,7 @@ const ratesOf = (groups, metric) => {
 export const abState = (ab, stat, counts) => {
   if (!ab || ab.status === 'saved') return null;
   if (ab.status === 'testing') {
-    return { tone: 'queued', line: `Testing${ratesOf(stat?.ab, ab.metric)} · winner picked ${fmtTime(ab.decide_at)}` };
+    return { tone: 'queued', line: `Testing${ratesOf(stat?.ab, ab.metric)} · winner at ${fmtTime(ab.decide_at)}` };
   }
   const result = ab.result || stat?.ab?.result || null;
   const w = (result?.tie ? 'Tie — sent A' : `Winner ${String(ab.winner || 'a').toUpperCase()}`)
@@ -110,14 +112,20 @@ export const abState = (ab, stat, counts) => {
   return { tone: c.sent > 0 ? 'queued' : 'failed', line: `${w} · sent to ${c.sent} of ${c.total}${rest.length ? ` — ${rest.join(' · ')}` : ''}` };
 };
 
-// "Opened 42% · Clicked 8%" — of the emails the service delivered.
+// "Opened 42% · Clicked 8%" — of the emails the service delivered. A send
+// with two subject lines already says how A and B did, so this one says it
+// is everyone's ("All 66: opened 15% · clicked 3%"; "64 sent: …" when some
+// didn't go); while the test runs, its own line is the only one.
 export function SendStats({ stat }) {
   if (!stat || !(stat.delivered > 0)) return null;
-  return (
-    <span className="ab-stats" data-testid="send-stats">
-      Opened {pctOf(stat.opened, stat.delivered)}% · Clicked {pctOf(stat.clicked, stat.delivered)}%
-    </span>
-  );
+  const rates = (o, c) => `${o} ${pctOf(stat.opened, stat.delivered)}% · ${c} ${pctOf(stat.clicked, stat.delivered)}%`;
+  if (stat.ab) {
+    if (stat.ab.status !== 'decided') return null;
+    const total = (stat.ab.a?.total || 0) + (stat.ab.b?.total || 0) + (stat.ab.rest?.total || 0);
+    const who = stat.delivered === total ? `All ${total}` : `${stat.delivered} sent`;
+    return <span className="ab-stats" data-testid="send-stats">{who}: {rates('opened', 'clicked')}</span>;
+  }
+  return <span className="ab-stats" data-testid="send-stats">{rates('Opened', 'Clicked')}</span>;
 }
 
 // Under More: why opens run high. Shown once anything has been delivered.
@@ -176,6 +184,12 @@ export function AbFields({ idPrefix, audienceCount, noun, value, onChange, links
                   </select>
                 </div>
               </div>
+              {/* What these mean, in numbers, as they change. */}
+              {audienceCount != null && (
+                <p className="ot-note ab-plan-now" data-testid="ab-plan-now" aria-live="polite">
+                  {abPlanLine(abPlan(audienceCount, value.pct), value.wait_hours)}
+                </p>
+              )}
             </>
           )}
         </div>

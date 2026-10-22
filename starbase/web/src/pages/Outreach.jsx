@@ -239,7 +239,10 @@ function StatusChip({ status, label }) {
 // note → nothing went out; any other 'queued' → partly sent (how many is
 // unknown). Nothing saved sends by itself: once email is connected a person
 // sends it — "Send now" for a saved one, "Try again" for the ones that
-// failed (blast.resend retries both, never a 'sent' one).
+// failed (blast.resend retries both, never a 'sent' one). A send with a big
+// list goes on in the background after the tap: going_count (counts.going)
+// are on their way — "Sending · 40 of 340" — never "not sent", never tried
+// again, and the list is read again every 2 s until they've gone.
 const noProviderNote = (note) => /no email provider/i.test(note || '');
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const countsOf = (b) => {
@@ -250,13 +253,14 @@ const countsOf = (b) => {
     return {
       total: num(b.counts.total) ?? 0, sent: num(b.counts.sent) ?? 0,
       failed: num(b.counts.failed) ?? 0, queued: num(b.counts.queued) ?? 0, sending: num(b.counts.sending) ?? 0,
+      going: num(b.counts.going) ?? 0,
     };
   }
   const total = num(b.audience_count) ?? 0;
   if (num(b.sent_count) != null) {
     return {
       total, sent: num(b.sent_count), failed: num(b.failed_count) ?? 0, queued: num(b.queued_count) ?? 0,
-      sending: num(b.sending_count) ?? 0, retry: num(b.retry_count),
+      sending: num(b.sending_count) ?? 0, retry: num(b.retry_count), going: num(b.going_count) ?? 0,
     };
   }
   if (b.status === 'sent') return { total, sent: total, failed: 0, queued: 0 };
@@ -267,7 +271,23 @@ const countsOf = (b) => {
 // Saved, and never went out: it waits on the first look under "Not sent".
 const isWaiting = (b) => {
   const c = countsOf(b);
-  return b?.status !== 'sent' && c.sent === 0 && c.failed === 0 && !c.sending && c.queued > 0;
+  return b?.status !== 'sent' && c.sent === 0 && c.failed === 0 && !c.sending && !c.going && c.queued > 0;
+};
+// The send list, read again every 2 s while a send is on its way (and the
+// open/click stats once it has gone, so they match).
+const anyGoing = (d) => (d?.blasts || []).some((b) => Number(b.going_count) > 0);
+const useBlastList = () => {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ['blasts'],
+    queryFn: async () => {
+      const prev = qc.getQueryData(['blasts']);
+      const next = await apiGet('/blasts');
+      if (anyGoing(prev) && !anyGoing(next)) qc.invalidateQueries({ queryKey: ['blasts', 'stats'] });
+      return next;
+    },
+    refetchInterval: (q) => (anyGoing(q.state.data) ? 2000 : false),
+  });
 };
 // Who a retry would reach: the failed ones (and any still saved) — for a
 // newsletter the server leaves out anyone who unsubscribed since (retry_count;
@@ -339,8 +359,13 @@ function ResendButton({ b, n, label, ask, onDone, plainLabel = false }) {
 // The one place a send's outcome is said, counted per recipient:
 // "Sent to 2 subscribers." · "Sent to 1 of 2 subscribers — 1 failed." ·
 // "Failed — 2 subscribers not reached." · "Saved for 2 subscribers — not sent."
-function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried }) {
-  const stat = useBlastStat(blast?.id);
+function BlastResult({ blast: answered, emailConfigured, canWrite, onDismiss, onRetried }) {
+  const stat = useBlastStat(answered?.id);
+  // Still going when the tap answered: the send as the list has it now.
+  const list = useBlastList();
+  const row = answered && list.data?.blasts?.find((b) => b.id === answered.id);
+  const blast = row && (num(answered.counts?.going) > 0 || num(row.going_count) > 0)
+    ? { ...answered, ...row, counts: null } : answered;
   if (!blast) return null;
   const c = countsOf(blast);
   const who = (n) => audienceWords(blast.kind, n);
@@ -362,11 +387,14 @@ function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried })
   const ab = stat?.ab || blast.ab || null;
   const abNow = abState(ab, stat, c);
   if (abNow) { line = /\.$/.test(abNow.line) ? abNow.line : `${abNow.line}.`; tone = abNow.tone; }
-  const held = heldOf(stat?.ab || ab, c.queued);
-  const unsent = c.total > 0 && c.sent === 0 && c.failed === 0 && !c.sending;
+  const held = heldOf(stat?.ab || ab, Math.max(0, c.queued - c.going));
+  // On its way (the rest of a big list): how many have gone so far.
+  const going = c.going > 0;
+  if (going) { line = `Sending · ${c.sent} of ${who(c.total - (ab?.status === 'testing' ? held : 0))}.`; tone = 'queued'; }
+  const unsent = c.total > 0 && c.sent === 0 && c.failed === 0 && !c.sending && !going;
   const saved = ab?.status === 'saved';
   const retry = retryCount(c) - held;
-  const canRetry = canWrite && emailConfigured === true && !unsent && retry > 0 && !!blast.id;
+  const canRetry = canWrite && emailConfigured === true && !unsent && !going && retry > 0 && !!blast.id;
   return (
     <div className="ot-result" data-status={tone} role="status">
       <div className="ot-result-head">
@@ -380,10 +408,10 @@ function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried })
         </strong>
         {onDismiss && <button type="button" className="btn btn-quiet ot-btn-tap" onClick={onDismiss}>OK</button>}
       </div>
-      {ab?.status === 'testing' && <div className="ot-result-why">A and B went to {c.sent} of {who(c.total)}.</div>}
+      {ab?.status === 'testing' && !going && <div className="ot-result-why">A and B went to {c.sent} of {who(c.total)}.</div>}
       {saved && <div className="ot-result-why">{abPlanLine(abPlan(c.total, ab.pct), ab.wait_hours)}</div>}
-      {c.sending > 0 && <div className="ot-result-why">We don’t know if {c.sending} got it.</div>}
-      {!unsent && (c.failed > 0 || c.sent == null) && c.total > 0 && (
+      {c.sending > 0 && !going && <div className="ot-result-why">We don’t know if {c.sending} got it.</div>}
+      {!unsent && !going && (c.failed > 0 || c.sent == null) && c.total > 0 && (
         <div className="ot-result-why">
           {plainReason(blast.provider_note)}
           {emailConfigured === false && <> <Link to={CONNECT_TO}>Connect email</Link>, then try again.</>}
@@ -528,10 +556,14 @@ function PastRow({ b, showKind, emailConfigured, canWrite }) {
   const held = heldOf(ab);
   if (ab?.status === 'testing') { reach = audienceWords(b.kind, c.total); chip = { status: 'queued', label: 'testing' }; }
   else if (held > 0) { reach = audienceWords(b.kind, c.total); chip = { status: 'queued', label: 'sending' }; }
+  // On its way (the rest of a big list): how many have gone so far.
+  const going = c.going > 0;
+  if (going) { reach = `${c.sent} of ${c.total} sent so far`; chip = { status: 'queued', label: 'sending' }; }
   const retry = retryCount(c) - held;
-  const canRetry = canWrite && emailConfigured === true && !allSent && retry > 0 && !result;
+  const canRetry = canWrite && emailConfigured === true && !allSent && !going && retry > 0 && !result;
   let why = null;
-  if (!allSent && c.failed > 0) why = plainReason(b.provider_note);
+  if (going) why = null;
+  else if (!allSent && c.failed > 0) why = plainReason(b.provider_note);
   else if (!allSent && c.sending > 0 && !held) why = `We don’t know if ${c.sending} got it.`;
   else if (!allSent && c.sent === 0 && c.failed === 0) why = 'Everyone on it unsubscribed.';
   return (
@@ -605,6 +637,7 @@ function LastSent({ blasts, kind, skip, emailConfigured, canWrite }) {
 function UnsentRow({ b, emailConfigured, canWrite, onResent }) {
   const n = countsOf(b).queued;
   const canSend = canWrite && emailConfigured === true;
+  const [open, setOpen] = useState(false);
   // A saved A/B send: Send now starts the test — A and B now, the winner later.
   const stat = useBlastStat(b.id);
   const ab = stat?.ab?.status === 'saved' ? stat.ab : null;
@@ -612,19 +645,36 @@ function UnsentRow({ b, emailConfigured, canWrite, onResent }) {
   // The plan, before anyone taps: who gets A, who gets B, who gets the winner.
   const plan = ab ? { a: ab.a.total, b: ab.b.total, rest: ab.rest.total } : null;
   return (
-    <li className="ot-item">
-      <div className="ot-row ot-row--static ot-row--wrap">
-        <span className="ot-row__main">
-          <span className="ot-row__name">{b.subject}</span>
-          <span className="ot-row__sub">
-            <span>{audienceWords(b.kind, n)}</span>
-            <span>saved {fmtWhen(b.created_at)}</span>
+    <li className="ot-item" data-open={ab && open ? '' : undefined}>
+      {ab ? (
+        // Two subject lines: the subject, the plan and where it stands; Subject
+        // B and when it was saved one tap away.
+        <button type="button" className="ot-row" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <span className="ot-row__main">
+            <span className="ot-row__name">{b.subject}</span>
+            <span className="ab-line" data-testid="ab-plan">{abPlanLine(plan, ab.wait_hours)}</span>
+            {!emailConfigured && <span className="ot-row-note">{notSent}</span>}
           </span>
-          {ab && <span className="ab-b">B · {ab.subject_b}</span>}
-          {ab && <span className="ab-line" data-testid="ab-plan">{abPlanLine(plan, ab.wait_hours)}</span>}
-          <span className="ot-row-note">{notSent}</span>
-        </span>
-      </div>
+          {emailConfigured && <StatusChip status="ghost" label="not sent" />}
+        </button>
+      ) : (
+        <div className="ot-row ot-row--static ot-row--wrap">
+          <span className="ot-row__main">
+            <span className="ot-row__name">{b.subject}</span>
+            <span className="ot-row__sub">
+              <span>{audienceWords(b.kind, n)}</span>
+              <span>saved {fmtWhen(b.created_at)}</span>
+            </span>
+            <span className="ot-row-note">{notSent}</span>
+          </span>
+        </div>
+      )}
+      {ab && open && (
+        <div className="ot-body" data-testid="ab-saved-more">
+          <span className="ab-b">B · {ab.subject_b}</span>
+          <span className="ab-b">{audienceWords(b.kind, n)} · saved {fmtWhen(b.created_at)}</span>
+        </div>
+      )}
       {canSend && (
         <div className="ot-body">
           {ab ? (
@@ -669,7 +719,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
   const queryClient = useQueryClient();
   const slug = me.workspace.slug;
   const subs = useQuery({ queryKey: ['subscriptions'], queryFn: () => apiGet('/subscriptions') });
-  const blasts = useQuery({ queryKey: ['blasts'], queryFn: () => apiGet('/blasts') });
+  const blasts = useBlastList();
 
   const [result, setResult] = useState(null);
   const [email, setEmail] = useState('');
@@ -807,7 +857,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
 // PRESS — releases go to everyone tagged 'media' who has an email
 // ─────────────────────────────────────────────────────────────────────────────
 function PressTab({ canWrite, creating, onClose }) {
-  const blasts = useQuery({ queryKey: ['blasts'], queryFn: () => apiGet('/blasts') });
+  const blasts = useBlastList();
   const media = blasts.data?.mediaContacts ?? null;
   const emailConfigured = blasts.data?.emailConfigured;
   const [result, setResult] = useState(null);
