@@ -344,6 +344,20 @@ await page.click('.pp-sheet__head button:has-text("Done")');
 await sleep(500);
 const opposed = (await listed()).length;
 check('Opposed band reaches every code, old and new (Lena, Maya, Tom, Ana)', opposed === 4, opposed);
+// The same list on the manager's phone: the long chip never pushes the page sideways.
+const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'America/Vancouver', storageState: await dctx.storageState() });
+const pp = await pctx.newPage();
+const PP = helpers(pp, pctx, 'mgr-phone-2');
+await PP.go('/people');
+await pp.waitForSelector('.rb-chip', { timeout: 8000 }).catch(() => {});
+m = await measure(pp);
+check('People at 390 with “4 · Locke (off the list)”: no sideways scroll', m.overflow <= 0 && /Locke \(off the list\)/i.test(await PP.text()), m.overflow);
+await PP.go(`/people/${P.lena.id}`);
+await pp.waitForSelector('.pf-meta .rb-chip', { timeout: 8000 }).catch(() => {});
+m = await measure(pp);
+check('Lena’s profile at 390: no sideways scroll', m.overflow <= 0, m.overflow);
+await pctx.close();
+
 // Import: the campaign's codes and words, any case; what isn't on the list is named.
 await D.go('/people/import');
 await page.click('button:has-text("Paste text")');
