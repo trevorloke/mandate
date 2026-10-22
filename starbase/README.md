@@ -53,9 +53,9 @@ On screen the buttons read *1 Strong yes · 2 Lean yes · 3 Undecided ·
 
 | | Starbase today | Next |
 |---|---|---|
-| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, offline door knocks | survey builder, full offline replica |
+| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, survey builder (door and calls), offline field mode | full offline replica |
 | **Action Builder** | assessments (= the rating scale), tags, roles, relational notes, event-logged every touch | custom assessment ladders per campaign, relationship graph |
-| **Action Network** | newsletter list + signup page + unsubscribe, press list + releases, petitions with public pages, volunteer signup page, event RSVP pages, donation pages (Stripe or pledges), website JSON bridge | ladders of engagement, A/B subject lines |
+| **Action Network** | newsletter list + signup page + unsubscribe, press list + releases, petitions with public pages, volunteer signup page, event RSVP pages, donation pages (Stripe or pledges), website JSON bridge, ladders of engagement, A/B subject lines with open/click tracking | — |
 
 ## Website bridge (Imagine Surrey)
 
@@ -89,9 +89,10 @@ own one-click unsubscribe link. Shift messages render in campaign time
 Provider-pluggable, no SDKs: `RESEND_API_KEY` (+ `MAIL_FROM`) for email,
 `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` for SMS. Without
 them, blasts and shift notifications are recorded as **queued** per recipient
-— nothing is lost; connect the provider and resend. In-app calling/texting
-uses `tel:` / `sms:` links (the phone's own dialer and messages) with one-tap
-logging.
+— nothing is lost; connect the provider and resend. Without Twilio, calling
+and texting use `tel:` / `sms:` links (the phone's own dialer and messages)
+with one-tap logging; with it, texts and calls go through the campaign's
+number (setup and the compliance notes are in TESTING.md).
 
 ## Map tiles and offline field mode
 
