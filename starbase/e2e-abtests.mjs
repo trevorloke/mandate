@@ -186,7 +186,18 @@ check('each email: its own pixel, tracked link, untracked unsubscribe',
 const decideAt = new Date(st.ab.decide_at);
 const wait = decideAt.getTime() - Date.now();
 check('API: testing, winner picked in 1 hour', st.ab.status === 'testing' && wait > 55 * 60e3 && wait <= 60 * 60e3, JSON.stringify({ status: st.ab.status, wait }));
-const shownTime = await page.evaluate((iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase(), st.ab.decide_at);
+// The screen's own rule (AbTests.jsx fmtTime): a bare time today, "tomorrow
+// <time>" or "<Mon d>, <time>" otherwise — an hour's wait can cross midnight.
+const shownTime = await page.evaluate((iso) => {
+  const d = new Date(iso);
+  const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return t;
+  const next = new Date(now);
+  next.setDate(now.getDate() + 1);
+  if (d.toDateString() === next.toDateString()) return `tomorrow ${t}`;
+  return `${d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}, ${t}`;
+}, st.ab.decide_at);
 check('result: "Testing · A 0% vs B 0% opened · winner picked <time>"',
   t.includes(`Testing · A 0% vs B 0% opened · winner picked ${shownTime}`) && /A and B went to 24 of 60 subscribers/.test(t), (t.match(/Testing.{0,120}/) || [''])[0]);
 check('no "not sent" or Try again for the held 36', !/36 not sent/.test(t) && !/Try again/.test(t));
