@@ -12,6 +12,11 @@ import { newId } from '../lib/events.js';
 import { emailConfigured, sendEmail, sendText, shiftMessage } from '../lib/notify.js';
 import { httpError } from './util.js';
 import { runHooks, hasHook } from '../lib/hooks.js';
+// The tracked newsletter/press send path and A/B subject lines.
+import {
+  AB_MIN, abInput, abGroups, abOf, blastCounts, blastStatus, composeBlast, deliver,
+  findLinks, newToken, openTest, restReleased, saveLinks, startTest,
+} from '../ext/abtests/send.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
 const DESK_ROLES = ['manager', 'treasurer', 'staff'];
@@ -49,32 +54,9 @@ const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
   return { id, name: person.name };
 };
 
-// One rule for a send's status, shared by blast.send and blast.resend:
-// everyone sent → 'sent'; everyone failed (or no one left on it) → 'failed';
-// anything else — still saved because email wasn't connected, or a mix of
-// sent and failed — → 'queued'. The status alone can't say "partly sent", so
-// both actions also answer with the exact counts:
-//   counts: { total, sent, failed, queued }   (total = sent + failed + queued)
-const blastStatus = ({ total, sent, failed }) =>
-  (total > 0 && sent === total ? 'sent' : failed === total ? 'failed' : 'queued');
-
-const blastCounts = async (tx, workspaceId, blastId) => {
-  const r = (await tx.query(
-    `select count(*)::int as total,
-            (count(*) filter (where status = 'sent'))::int as sent,
-            (count(*) filter (where status = 'failed'))::int as failed,
-            (count(*) filter (where status = 'queued'))::int as queued
-     from blast_recipients where blast_id = $1 and workspace_id = $2`,
-    [blastId, workspaceId],
-  )).rows[0];
-  return { total: r.total, sent: r.sent, failed: r.failed, queued: r.queued };
-};
-
-// Every newsletter identifies the sender and carries the recipient's own
-// one-click unsubscribe link (/u/:subscriptionId); press carries the name.
-const blastText = (ctx, kind, body, subscriptionId) => body + (kind === 'newsletter'
-  ? `\n\n—\nSent by ${ctx.workspace.name}.\nUnsubscribe: ${ctx.publicUrl || ''}/u/${subscriptionId}`
-  : `\n\n—\n${ctx.workspace.name}`);
+// A send's status rule (blastStatus), its counts (blastCounts) and its
+// message (plain text + tracked HTML) live in ext/abtests/send.js, shared
+// with the A/B winner job.
 
 const ACTIVE_SHIFT_STATUSES = ['assigned', 'confirmed'];
 const activeOnShift = async (tx, workspaceId, shiftId) => (await tx.query(
@@ -562,8 +544,12 @@ export const FIELD_ACTIONS = {
       kind: z.enum(['newsletter', 'press']),
       subject: z.string().trim().min(1).max(300),
       body: z.string().trim().min(1).max(50000),
+      // Two subject lines: A and B go to two small groups now; the winner
+      // goes to everyone else when the wait ends (ext/abtests).
+      ab: abInput.nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
+      if (input.ab && input.ab.subject_b === input.subject) throw httpError(400, 'subject B is the same as subject A');
       const audience = input.kind === 'newsletter'
         ? (await tx.query(
             `select id, email, name from subscriptions where workspace_id = $1 and status = 'subscribed'`,
@@ -581,16 +567,32 @@ export const FIELD_ACTIONS = {
           : "no people tagged 'media' with an email address yet");
       }
 
+      // A test needs a list big enough to tell; a smaller one sends normally.
+      const ab = input.ab && audience.length >= AB_MIN ? input.ab : null;
+      const groups = ab ? abGroups(audience.length, ab.pct) : [];
+      const live = emailConfigured();
+      const links = findLinks(input.body);
+
       const id = newId();
       let sent = 0, failed = 0;
       const recipientRows = [];
       // Without email connected sendEmail sends nothing and answers 'queued':
       // the send is saved, and blast.resend sends those rows once it is.
-      for (const r of audience) {
-        const res = await sendEmail({ to: r.email, subject: input.subject, text: blastText(ctx, input.kind, input.body, r.id) });
+      // Each recipient gets its own token for the open pixel and its links.
+      for (const [i, r] of audience.entries()) {
+        const group = groups[i] || null;
+        const token = newToken();
+        // The rest of an A/B send waits for the winner: nothing goes to them now.
+        const res = group === 'rest' && live
+          ? { status: 'queued' }
+          : await sendEmail({
+            to: r.email,
+            subject: group === 'b' ? ab.subject_b : input.subject,
+            ...composeBlast(ctx, { kind: input.kind, body: input.body, subscriptionId: r.id, token, links }),
+          });
         if (res.status === 'sent') sent += 1;
         else if (res.status === 'failed') failed += 1;
-        recipientRows.push({ email: r.email, name: r.name, status: res.status, detail: res.detail });
+        recipientRows.push({ email: r.email, name: r.name, status: res.status, detail: res.detail, token, group });
       }
       const status = blastStatus({ total: audience.length, sent, failed });
       const note = recipientRows.find((r) => r.detail)?.detail || null;
@@ -601,16 +603,26 @@ export const FIELD_ACTIONS = {
       );
       for (const r of recipientRows) {
         await tx.query(
-          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status)
-           values ($1, $2, $3, $4, $5, $6)`,
-          [newId(), ctx.workspaceId, id, r.email, r.name || null, r.status],
+          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [newId(), ctx.workspaceId, id, r.email, r.name || null, r.status, r.token, r.group],
         );
       }
-      emit('blast', id, 'create', { kind: input.kind, subject: input.subject, audience: audience.length, status });
+      await saveLinks(tx, ctx.workspaceId, id, links);
+      // Not connected: the whole test is saved and starts on Send now.
+      const test = ab ? await openTest(tx, ctx, id, ab, live) : null;
+      emit('blast', id, 'create', {
+        kind: input.kind, subject: input.subject, audience: audience.length, status,
+        ...(test ? { ab: { subject_b: ab.subject_b, pct: ab.pct, wait_hours: ab.wait_hours, metric: ab.metric, status: test.status } } : {}),
+      });
       const counts = { total: audience.length, sent, failed, queued: audience.length - sent - failed };
       return {
-        blast: { id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note },
+        blast: {
+          id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note,
+          ...(test ? { ab: test } : {}),
+        },
         counts,
+        ...(input.ab && !ab ? { ab_skipped: `A/B needs at least ${AB_MIN}` } : {}),
       };
     },
   },
@@ -622,6 +634,8 @@ export const FIELD_ACTIONS = {
   // runs. Refused (409) while email isn't connected: nothing pretends to send.
   // A newsletter subscriber who unsubscribed since is taken off the send
   // (never emailed); its status and sent time follow blast.send's rule.
+  // An A/B send saved while email wasn't connected starts its test here: A
+  // and B go out, the rest stay held until the winner job (ext/abtests).
   // Answers { blast, counts: { total, sent, failed, queued } } for the whole
   // send after this run, plus resent: { sent, failed, skipped } for this run.
   'blast.resend': {
@@ -629,48 +643,33 @@ export const FIELD_ACTIONS = {
     input: z.object({ id: uuid() }),
     handler: async (tx, ctx, input, emit) => {
       const blast = (await tx.query(
-        'select id, kind, subject, body, status, provider_note, audience_count, sent_at from blasts where id = $1 and workspace_id = $2',
+        `select id, kind, subject, body, status, provider_note, audience_count, sent_at,
+                ab_status, ab_subject_b, ab_pct, ab_wait_hours, ab_metric, ab_decide_at, ab_winner, ab_decided_at
+         from blasts where id = $1 and workspace_id = $2`,
         [input.id, ctx.workspaceId],
       )).rows[0];
       if (!blast) throw httpError(404, 'send not found');
       if (!emailConfigured()) throw httpError(409, "email isn't connected yet — connect it, then send");
       const waiting = (await tx.query(
-        `select id, email, name from blast_recipients
-         where blast_id = $1 and workspace_id = $2 and status in ('queued', 'failed') order by created_at, id`,
-        [blast.id, ctx.workspaceId],
+        `select id, email, name, token, ab_group from blast_recipients
+         where blast_id = $1 and workspace_id = $2 and status in ('queued', 'failed')
+           and ($3::boolean or ab_group is distinct from 'rest')
+         order by created_at, id`,
+        [blast.id, ctx.workspaceId, restReleased(blast)],
       )).rows;
       const pick = (b) => ({
         id: b.id, kind: b.kind, subject: b.subject, status: b.status,
         audience_count: b.audience_count, provider_note: b.provider_note, sent_at: b.sent_at,
+        ...(b.ab_status ? { ab: abOf(b) } : {}),
       });
-      if (waiting.length === 0) {
+      const starting = blast.ab_status === 'saved';
+      if (waiting.length === 0 && !starting) {
         return { blast: pick(blast), counts: await blastCounts(tx, ctx.workspaceId, blast.id), resent: { sent: 0, failed: 0, skipped: 0 } };
       }
 
-      let sent = 0, failed = 0, skipped = 0, note = null;
-      for (const r of waiting) {
-        let subscriptionId = null;
-        if (blast.kind === 'newsletter') {
-          const sub = (await tx.query(
-            'select id, status from subscriptions where workspace_id = $1 and email = $2',
-            [ctx.workspaceId, String(r.email).toLowerCase()],
-          )).rows[0];
-          if (!sub || sub.status !== 'subscribed') {
-            await tx.query('delete from blast_recipients where id = $1 and workspace_id = $2', [r.id, ctx.workspaceId]);
-            skipped += 1;
-            continue;
-          }
-          subscriptionId = sub.id;
-        }
-        const res = await sendEmail({ to: r.email, subject: blast.subject, text: blastText(ctx, blast.kind, blast.body, subscriptionId) });
-        if (res.status === 'sent') sent += 1;
-        else if (res.status === 'failed') failed += 1;
-        if (!note && res.detail) note = res.detail;
-        await tx.query(
-          'update blast_recipients set status = $3 where id = $1 and workspace_id = $2',
-          [r.id, ctx.workspaceId, res.status],
-        );
-      }
+      const { sent, failed, skipped, note: firstNote } = await deliver(tx, ctx, blast, waiting);
+      let note = firstNote;
+      const test = starting ? await startTest(tx, ctx, blast.id) : null;
       const counts = await blastCounts(tx, ctx.workspaceId, blast.id);
       const status = blastStatus(counts);
       if (counts.total === 0) note = 'everyone on this send has unsubscribed';
@@ -678,10 +677,13 @@ export const FIELD_ACTIONS = {
         `update blasts set status = $3, provider_note = $4, audience_count = $5,
            sent_at = case when $3 = 'sent' then now() else sent_at end
          where id = $1 and workspace_id = $2
-         returning id, kind, subject, status, provider_note, audience_count, sent_at`,
+         returning *`,
         [blast.id, ctx.workspaceId, status, note, counts.total],
       )).rows[0];
-      emit('blast', blast.id, 'update', { resent: waiting.length - skipped, sent, failed, unsubscribed: skipped, status });
+      emit('blast', blast.id, 'update', {
+        resent: waiting.length - skipped, sent, failed, unsubscribed: skipped, status,
+        ...(test ? { ab: test.status } : {}),
+      });
       return { blast: pick(updated), counts, resent: { sent, failed, skipped } };
     },
   },

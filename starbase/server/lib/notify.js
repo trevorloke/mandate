@@ -12,7 +12,8 @@ export const emailConfigured = () => !!process.env.RESEND_API_KEY;
 export const textConfigured = () =>
   !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
 
-export const sendEmail = async ({ to, subject, text }) => {
+// `html` is optional: sent alongside the plain-text part when given.
+export const sendEmail = async ({ to, subject, text, html }) => {
   if (!emailConfigured()) {
     return { sent: false, status: 'queued', detail: 'no email provider configured (set RESEND_API_KEY)' };
   }
@@ -28,6 +29,7 @@ export const sendEmail = async ({ to, subject, text }) => {
         to: [to],
         subject,
         text,
+        ...(html ? { html } : {}),
       }),
     });
     if (!res.ok) {
