@@ -28,6 +28,9 @@ const ReceiptsOne = lazy(() => import('./pages/ReceiptsOne.jsx'));
 const Ladders = lazy(() => import('./pages/Ladders.jsx'));
 const LaddersEdit = lazy(() => import('./pages/LaddersEdit.jsx'));
 const LaddersFollowups = lazy(() => import('./pages/LaddersFollowups.jsx'));
+const Surveys = lazy(() => import('./pages/Surveys.jsx'));
+const SurveysEdit = lazy(() => import('./pages/SurveysEdit.jsx'));
+const SurveysResults = lazy(() => import('./pages/SurveysResults.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -80,6 +83,9 @@ export default function App() {
           <Route path="/ladders" element={<Ladders />} />
           <Route path="/ladders/:id" element={<LaddersEdit />} />
           <Route path="/follow-ups" element={<LaddersFollowups />} />
+          <Route path="/surveys" element={<Surveys />} />
+          <Route path="/surveys/:id" element={<SurveysEdit />} />
+          <Route path="/surveys/:id/results" element={<SurveysResults />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

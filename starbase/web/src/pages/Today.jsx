@@ -804,6 +804,7 @@ function DeskToday({ b, me, toast }) {
         )}
         <ul className="today-rows">
           <LinkRow to="/filings" main="Filings" />
+          <LinkRow to="/surveys" main="Surveys" />
           {isManager && <LinkRow to="/team" main={<>Team <span className="muted">· invite people</span></>} />}
           {b.providers && (!b.providers.email || !b.providers.text) && (
             <LinkRow to="/outreach/website" main="Connect email & texting" />
