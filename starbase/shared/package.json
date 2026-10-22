@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./registry": "./registry.js",
-    "./canvass": "./canvass.js"
+    "./canvass": "./canvass.js",
+    "./scale": "./scale.js"
   }
 }

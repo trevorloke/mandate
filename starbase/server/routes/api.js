@@ -153,9 +153,10 @@ app.get('/persons', async (c) => {
   if (tag && vol && isMoneyTag(tag)) where += ' and false';
   else if (tag) { params.push(JSON.stringify(tag)); where += ` and p.tags @> $${params.length}::jsonb`; }
   // rating: one code (4B), a comma list for a band (1,2 · 4,4D,4B,4F,4N,4C),
-  // and/or "unrated" (no rating yet).
+  // and/or "unrated" (no rating yet). A band reaches every code on the
+  // campaign's scale, those off the list too (ext/scale: up to 64).
   if (rating) {
-    const codes = [...new Set(rating.split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 20);
+    const codes = [...new Set(rating.split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 80);
     const ors = [];
     for (const code of codes) {
       if (code === 'unrated') { ors.push('p.rating is null'); continue; }

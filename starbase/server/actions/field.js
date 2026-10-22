@@ -4,9 +4,12 @@
 // events emitted for the log.
 import { z } from 'zod';
 import {
-  RATING_CODES, CHANNELS, OUTCOMES, SIGN_KIND_CODES, SIGN_STATUSES,
+  CHANNELS, OUTCOMES, SIGN_KIND_CODES, SIGN_STATUSES,
   VOLUNTEER_ROLE_CODES, SOCIAL_PLATFORMS, SHIFT_STATUSES,
 } from '@starbase/shared/canvass';
+import { RATING_CODE_RE } from '@starbase/shared/scale';
+// The campaign's own scale (ext/scale): which codes a new rating may use.
+import { checkRating } from '../ext/scale/rules.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { newId } from '../lib/events.js';
 import { emailConfigured, sendEmail, sendText, shiftMessage } from '../lib/notify.js';
@@ -86,7 +89,8 @@ export const FIELD_ACTIONS = {
       person_id: uuid(),
       channel: z.enum(CHANNELS),
       outcome: z.enum(OUTCOMES),
-      rating: z.enum(RATING_CODES).nullish(),
+      // A code on the campaign's scale (checked in the handler, ext/scale).
+      rating: z.string().regex(RATING_CODE_RE, 'not a rating on the scale').nullish(),
       note: z.string().max(2000).nullish(),
       // Offline outbox key: a knock replayed after reconnecting is the same
       // knock, never a second one.
@@ -115,6 +119,11 @@ export const FIELD_ACTIONS = {
         )).rows[0];
         if (dup) return { contact: dup, duplicate: true };
       }
+      // A rating must be on the campaign's scale; one taken off the list is
+      // still taken from a phone's knock for a while (ext/scale/rules.js).
+      // Checked where it would be written, after the replay checks: a replay
+      // of a knock already in is the same knock, whatever the list says now.
+      const rated = () => input.rating && checkRating(tx, ctx.workspaceId, input.rating, { fromPhone: Boolean(input.client_id) });
       // A hook (surveys) may add to the reply: answers it had to leave out.
       const reply = {};
       if (input.visit_of && input.visit_of !== input.client_id) {
@@ -130,6 +139,7 @@ export const FIELD_ACTIONS = {
           return { contact: { id: first.id, person_id: first.person_id, channel: first.channel, outcome: first.outcome, rating: first.rating, note: first.note }, duplicate: true };
         }
         if (mine && first.outcome === 'contacted' && first.rating == null) {
+          await rated();
           const note = [first.note, input.note].filter(Boolean).join('\n') || null;
           await tx.query(
             `update contacts set outcome = $3, rating = $4, note = $5, merged_client_ids = $6 where id = $1 and workspace_id = $2`,
@@ -148,6 +158,7 @@ export const FIELD_ACTIONS = {
           return { contact: payload, amended: true, ...reply };
         }
       }
+      await rated();
       const id = newId();
       await tx.query(
         `insert into contacts (id, workspace_id, person_id, channel, outcome, rating, note, client_id, created_by)

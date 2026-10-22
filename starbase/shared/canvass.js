@@ -1,16 +1,16 @@
 // Canvass + field constants — one shared vocabulary for server validation
-// and web rendering. The rating scale is the campaign's own doorstep scale.
+// and web rendering.
+//
+// The rating scale is the campaign's own (shared/scale.js: the steps' words
+// and the "Voting for?" list come from workspace settings.scale, edited on
+// the manager's Rating scale screen). RATINGS here is the DEFAULT scale —
+// what a campaign has until it changes anything, and what seeds and tests
+// use. Validate and display through scale.js with the campaign's scale.
+import { DEFAULT_SCALE } from './scale.js';
 
 export const RATINGS = [
-  { code: '1',  label: 'Strong support',   short: '1',  band: 'support' },
-  { code: '2',  label: 'Lean support',     short: '2',  band: 'support' },
-  { code: '3',  label: 'Undecided',        short: '3',  band: 'undecided' },
-  { code: '4',  label: 'Opposed — support unknown',                      short: '4',  band: 'opposed' },
-  { code: '4D', label: 'Opposed — Doug McCallum supporter',              short: '4D', band: 'opposed' },
-  { code: '4B', label: 'Opposed — Surrey Connect / Brenda Locke',        short: '4B', band: 'opposed' },
-  { code: '4F', label: 'Opposed — Surrey First / Linda Annis',           short: '4F', band: 'opposed' },
-  { code: '4N', label: 'Opposed — SurreyNow / Troy van Vliet',           short: '4N', band: 'opposed' },
-  { code: '4C', label: 'Opposed — Surrey Conservatives / Honveer Randhawa', short: '4C', band: 'opposed' },
+  ...DEFAULT_SCALE.steps.map((s) => ({ code: s.code, label: s.label, short: s.code, band: s.band })),
+  ...DEFAULT_SCALE.candidates.map((c) => ({ code: c.code, label: c.label, short: c.code, band: 'opposed' })),
 ];
 export const RATING_CODES = RATINGS.map((r) => r.code);
 export const ratingByCode = (c) => RATINGS.find((r) => r.code === c) || null;

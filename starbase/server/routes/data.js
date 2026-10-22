@@ -2,7 +2,8 @@
 // Imagine Surrey sample dataset. Mounted under /api/data, after auth.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { RATING_CODES } from '@starbase/shared/canvass';
+import { matchRating, offeredCodes } from '@starbase/shared/scale';
+import { loadScale } from '../ext/scale/rules.js';
 import { runAction, newId } from '../lib/events.js';
 import { geocodeAddress } from '../lib/geocode.js';
 import { buildSample } from '../lib/sample.js';
@@ -42,7 +43,7 @@ const rowSchema = z.object({
   city: z.string().max(120).nullish(),
   postal: z.string().max(20).nullish(),
   tags: z.union([z.string().max(2000), z.array(z.string().max(40)).max(50)]).nullish(),
-  rating: z.string().max(4).nullish(),
+  rating: z.string().max(80).nullish(), // a code or the scale's words: "4B", "Locke", "Strong yes"
 });
 const importInput = z.object({
   rows: z.array(z.record(z.string(), z.unknown())).min(1).max(2000),
@@ -50,7 +51,9 @@ const importInput = z.object({
   dryRun: z.boolean().default(false),
 });
 
-const cleanRow = (raw, i) => {
+// scale: the campaign's (ext/scale). A rating is a code or its words, any
+// case; a new rating must be on the list (one taken off it is refused).
+const cleanRow = (raw, i, scale) => {
   const r = rowSchema.safeParse(raw);
   if (!r.success) return { error: `row ${i + 1}: ${r.error.issues[0].path.join('.')} ${r.error.issues[0].message}` };
   const v = r.data;
@@ -58,8 +61,11 @@ const cleanRow = (raw, i) => {
   if (!name) return { error: `row ${i + 1}: no name` };
   const email = lower(v.email) || null;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: `row ${i + 1}: invalid email “${v.email}”` };
-  const rating = norm(v.rating).toUpperCase() || null;
-  if (rating && !RATING_CODES.includes(rating)) return { error: `row ${i + 1}: rating “${v.rating}” is not on the scale` };
+  const said = norm(v.rating);
+  const hit = said ? matchRating(scale, said) : null;
+  if (said && !hit) return { error: `row ${i + 1}: rating “${v.rating}” is not on the scale` };
+  if (hit?.off) return { error: `row ${i + 1}: rating “${v.rating}” is off the list` };
+  const rating = hit?.code || null;
   const tags = Array.isArray(v.tags) ? v.tags : norm(v.tags).split(/[;,|]/);
   return {
     row: {
@@ -82,8 +88,9 @@ app.post('/import', async (c) => {
 
   const errors = [];
   const clean = [];
+  const scale = await loadScale(c.get('db'), ctx.workspaceId);
   rows.forEach((raw, i) => {
-    const r = cleanRow(raw, i);
+    const r = cleanRow(raw, i, scale);
     if (r.error) errors.push(r.error);
     else clean.push({ ...r.row, tags: tag ? [...new Set([...r.row.tags, tag])] : r.row.tags, index: i });
   });
@@ -258,7 +265,11 @@ app.post('/sample', async (c) => {
 
     const ids = idLists();
     const id = {};
-    for (const p of [...S.people, ...S.media.map((m) => ({ ...m, key: m.name }))]) {
+    // Made-up ratings use only what this campaign's scale offers: a candidate
+    // it took off the list becomes plain 4 (Not sure).
+    const offered = new Set(offeredCodes(await loadScale(tx, W)));
+    for (const s0 of [...S.people, ...S.media.map((m) => ({ ...m, key: m.name }))]) {
+      const p = s0.rating && !offered.has(s0.rating) ? { ...s0, rating: '4' } : s0;
       const pid = newId();
       id[p.key] = pid;
       ids.persons.push(pid);
