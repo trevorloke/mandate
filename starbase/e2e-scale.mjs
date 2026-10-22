@@ -344,6 +344,28 @@ await page.click('.pp-sheet__head button:has-text("Done")');
 await sleep(500);
 const opposed = (await listed()).length;
 check('Opposed band reaches every code, old and new (Lena, Maya, Tom, Ana)', opposed === 4, opposed);
+// Import: the campaign's codes and words, any case; what isn't on the list is named.
+await D.go('/people/import');
+await page.click('button:has-text("Paste text")');
+await page.fill('#imp-paste', [
+  'Name,Phone,Support',
+  'Rae Example,604-555-0151,definitely',
+  'Sol Example,604-555-0152,BAINS',
+  'Kit Example,604-555-0153,locke',
+  'Ola Example,604-555-0154,7',
+  'Ida Example,604-555-0155,4ba',
+].join('\n'));
+await page.click('button:has-text("Use this text")');
+await page.waitForSelector('#imp-col-2', { timeout: 6000 }).catch(() => {});
+// 2 of 5 off the scale is too many to guess "Rating" from: pick it.
+if (await page.inputValue('#imp-col-2') !== 'rating') await page.selectOption('#imp-col-2', 'rating');
+await page.waitForSelector('.imp-map__note.is-warn', { timeout: 6000 }).catch(() => {});
+t = await page.innerText('.imp-map__note.is-warn').catch(() => '');
+check('import: “2 ratings aren’t on the scale (“locke” (off the list), “7”)”', /2 ratings aren’t on the scale \(“locke” \(off the list\), “7”\) — they come in unrated/.test(t), t);
+await page.click('button.disclose:has-text("Preview")').catch(() => {});
+await page.waitForSelector('.imp-preview__table', { timeout: 4000 }).catch(() => {});
+const chips = await page.$$eval('.imp-preview__table .rb-chip', (els) => els.map((e) => e.innerText.trim().toLowerCase()));
+check('…the rest read in the campaign’s words: 1, 4 · Bains, 4 · Bains', chips.join(' | ') === '1 | 4 · bains | 4 · bains', chips.join(' | '));
 await D.go('/');
 await page.click('button.today-num[aria-controls]').catch(() => {});
 await sleep(400);

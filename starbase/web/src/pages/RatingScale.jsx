@@ -56,9 +56,14 @@ function Editor() {
   const addId = useId();
   const yesRef = useRef(null);
   const online = useOnline();
+  // The screen may open on the phone's copy: the server's answer replaces
+  // it when it comes — unless editing has begun.
   useEffect(() => {
-    if (saved && !draft) { const d = draftOf(saved); setDraft(d); setBase(d); }
-  }, [saved, draft]);
+    if (!saved || (draft && !same(draft, base))) return;
+    const d = draftOf(saved);
+    setDraft(d);
+    setBase(d);
+  }, [saved]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (confirm) yesRef.current?.focus(); }, [confirm]);
 
   // The buttons as volunteers will see them: the words and the list on screen.
