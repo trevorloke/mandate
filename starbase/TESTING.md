@@ -47,13 +47,18 @@ Postgres database (backups included).
 |---|---|---|
 | `STARBASE_PUBLIC_URL` | your address, e.g. `https://starbase.imaginesurrey.ca` — used in invite, unsubscribe, and payment links | **yes** |
 | `RESEND_API_KEY`, `MAIL_FROM` | real email (invites, newsletters, press, shift alerts) | optional — without it, sends are saved as *queued* and invite links are shown to copy |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | real SMS shift alerts | optional |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | SMS shift alerts; texting and calling from the app through the campaign's number | optional — without it, Calls opens the phone's own Messages and dialer |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | card donations | optional — without it the donate page takes **pledges** |
 
 For Stripe, add a webhook in the Stripe dashboard pointing at
 `https://<your address>/api/public/stripe/webhook` with events
 `checkout.session.completed` and `invoice.paid`. Use **test mode** keys
 (`sk_test_…`) and card `4242 4242 4242 4242` while testing.
+
+For Twilio, set the number's incoming messages webhook to
+`https://<your address>/api/public/twilio/sms` (HTTP POST). Calls through the
+campaign also need `STARBASE_PUBLIC_URL`; `TWILIO_VOICE=off` keeps texting
+and turns calling off.
 
 Any Docker host works too: `docker build -t starbase starbase/` then run with
 either `DATABASE_URL=postgres://…` or a volume at `/data`.
@@ -94,6 +99,10 @@ one tap away under **More**.
   lawn / large sign or billboard (with Undo), add a person at the door.
 - **Calls** — one person at a time: Call or Text, then rate; *No answer*,
   *Refused*, *Skip*.
+- **Texts** (Twilio connected) — Calls → Text: the message is filled in; edit
+  it, *Send*. Replies show as *Replies · N* → **Inbox**; answer from there.
+  **Call** rings your own phone first (enter it once): answer, press 1, and
+  you're connected — they see the campaign's number.
 - **Shifts** — *Count me in* on an open shift; *Can't make it* to drop out.
 - **Signs** (from Today when there are signs to put up) — *Put up ✓*.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved
@@ -107,7 +116,7 @@ one tap away under **More**.
 - **People** — search; **Filter** by rating, tag (media, VIP…), or volunteer
   role (incl. *Hi-rise building captain*); open a profile; add tags, roles,
   social handles. **More → Call list / Text list** opens Calls with the same
-  filter.
+  filter; **More → Inbox** has every text conversation.
 - **Shifts** — **New shift** (what, when, where, how many; role,
   instructions and link under *More details*), **Add volunteer**, then
   **Notify everyone** (email + text). Without email/text connected the
@@ -157,5 +166,21 @@ the same file never creates duplicates.
 - The BC municipal contribution limit is seeded at the 2022 figure
   ($1,250) — **confirm the current indexed amount with Elections BC** and set
   it before relying on cap checks.
-- Calls and texts use the phone's own dialer and messages (no
-  auto-dialer).
+- Without Twilio, calls and texts use the phone's own dialer and messages
+  (no auto-dialer).
+
+### Texting and calls — confirm with counsel
+
+Built conservatively; the campaign should confirm these rules with counsel
+(CRTC rules, the Voter Contact Registry) before texting or calling voters:
+
+- Every text is one person tapping *Send* for one person — no bulk or
+  scheduled sends, no auto-dialer.
+- The first text to someone names the campaign and ends "Reply STOP to opt
+  out".
+- STOP, STOPALL, UNSUBSCRIBE, CANCEL, END or QUIT opts that number out at
+  once and for good (tagged *do-not-text*); START or UNSTOP opts it back in.
+- Quiet hours: texts and calls go out only 9 am–9 pm Surrey time by
+  default; managers change them under **Inbox → More → Texting settings**.
+  The server refuses anything outside them.
+- Calls show the campaign's number, never the caller's own.

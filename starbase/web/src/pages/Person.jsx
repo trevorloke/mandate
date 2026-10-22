@@ -22,6 +22,7 @@ import {
   canDesk, invalidatePersonData, isDnc, tagWord, RatingTag,
 } from './People.jsx';
 import './people.css';
+import { TextingPersonLink } from '../components/TextingCard.jsx';
 
 const TIER_LABEL = {
   superstar: DONOR_TIERS.superstar.label,
@@ -824,6 +825,8 @@ export default function Person() {
             <History contacts={contacts} />
           </Section>
         )}
+        {/* Texts through the campaign's number with this person (desk). */}
+        {desk && <TextingPersonLink personId={person.id} />}
       </div>
     </div>
   );
