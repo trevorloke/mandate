@@ -14,6 +14,7 @@ import { RECORD_TYPES } from '@starbase/shared/registry';
 import dataRoutes from './data.js';
 import { pointInPolygon, groupDoors, walkOrder } from '../lib/geo.js';
 import { checkCap } from '../lib/cap.js';
+import { EXTENSIONS } from '../ext.js';
 
 // A date column as YYYY-MM-DD (both backends hand back a Date at UTC midnight).
 const dateOnly = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
@@ -32,6 +33,10 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// '/surveys/:id/results' → /^\/api\/surveys\/[^/]+\/results$/ (a RegExp passes through).
+const pathPattern = (p) => (p instanceof RegExp ? p : new RegExp(`^/api${p
+  .split('/').map((seg) => (seg.startsWith(':') ? '[^/]+' : seg.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&'))).join('/')}$`));
+
 // Volunteers canvass, phone, and place signs; they never see money, the
 // subscriber/signature lists, the raw event log, the campaign-wide contact
 // feed (who knocked whom, with notes), or bulk exports.
@@ -40,6 +45,8 @@ const DESK_ONLY_READS = [
   /^\/api\/subscriptions$/, /^\/api\/blasts$/, /^\/api\/petitions\/[^/]+\/signatures$/,
   /^\/api\/pledges$/, /^\/api\/campaign-events\/[^/]+\/rsvps$/, /^\/api\/members$/,
   /^\/api\/contacts$/,
+  // Feature modules name their own desk-only reads (paths under /api).
+  ...EXTENSIONS.flatMap((e) => (e.deskOnlyReads || []).map(pathPattern)),
 ];
 
 // What a volunteer's browser may receive about a person: phone and address
@@ -730,6 +737,9 @@ app.get('/export', async (c) => {
   c.header('Content-Disposition', 'attachment; filename="starbase-export.json"');
   return c.json(out);
 });
+
+// Feature modules' signed-in routes, behind the same auth and volunteer guard.
+for (const e of EXTENSIONS) if (e.api) app.route('/', e.api);
 
 export default app;
 export { httpError };

@@ -10,6 +10,7 @@ import { logGift, voidGift, restoreGift } from '../lib/gifts.js';
 import { FIELD_ACTIONS, personFieldExtensions } from './field.js';
 import { ORGANIZE_ACTIONS } from './organize.js';
 import { httpError } from './util.js';
+import { extActions } from '../ext.js';
 export { httpError };
 
 const MONEY_ROLES = ['manager', 'treasurer', 'staff'];
@@ -151,6 +152,7 @@ export const ACTIONS = {
 
   ...FIELD_ACTIONS,
   ...ORGANIZE_ACTIONS,
+  ...extActions(),
 };
 
 const isoDate = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));

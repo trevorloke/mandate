@@ -3,6 +3,7 @@
 // and the hash chain advance commit together or not at all. The events table
 // IS the audit trail — there is no dual write to drift.
 import { createHash, randomUUID } from 'node:crypto';
+import { runHooks } from './hooks.js';
 
 // Canonical JSON: object keys sorted recursively, so the same payload always
 // hashes the same regardless of construction order.
@@ -36,6 +37,9 @@ export const runAction = async (db, { workspaceId, actorId, action, clientTs }, 
       pending.push({ entityType, entityId, op, payload });
 
     const result = await handler(tx, emit);
+    // Feature modules see this write's events before they are chained (a
+    // ladder enrolling a petition signer, say); what they emit joins them.
+    if (pending.length) await runHooks('events', tx, { workspaceId, actorId, action, emit }, [...pending]);
 
     let seq = Number(ws.event_seq);
     let prev = ws.last_event_hash;

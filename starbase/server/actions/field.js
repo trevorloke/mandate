@@ -11,6 +11,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { newId } from '../lib/events.js';
 import { emailConfigured, sendEmail, sendText, shiftMessage } from '../lib/notify.js';
 import { httpError } from './util.js';
+import { runHooks, hasHook } from '../lib/hooks.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
 const DESK_ROLES = ['manager', 'treasurer', 'staff'];
@@ -95,9 +96,16 @@ export const FIELD_ACTIONS = {
       // Offline outbox key: a knock replayed after reconnecting is the same
       // knock, never a second one.
       client_id: uuid().nullish(),
+      // Survey answers given in the same conversation; a feature module
+      // (contactLogged hook) stores them with this contact.
+      answers: z.array(z.object({
+        question_id: uuid(),
+        value: z.union([z.string().max(2000), z.number(), z.boolean(), z.array(z.string().max(200)).max(50)]),
+      })).max(50).nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
       await requirePerson(tx, ctx.workspaceId, input.person_id);
+      if (input.answers?.length && !hasHook('contactLogged')) throw httpError(400, 'surveys are not available');
       if (input.client_id) {
         const dup = (await tx.query(
           'select id, person_id, channel, outcome, rating, note from contacts where workspace_id = $1 and client_id = $2',
@@ -120,6 +128,7 @@ export const FIELD_ACTIONS = {
       }
       const payload = { id, ...input };
       emit('contact', id, 'create', payload);
+      await runHooks('contactLogged', tx, ctx, { contact: { id, ...input }, input }, emit);
       return { contact: payload };
     },
   },

@@ -1,0 +1,24 @@
+// Extension points the core calls and feature modules (server/ext/*) fill.
+// Kept free of imports so any module can use it without import cycles.
+//
+//   events(tx, meta, events)        every runAction, just before its events
+//                                   are chained — meta { workspaceId,
+//                                   actorId, action }, events [{ entityType,
+//                                   entityId, op, payload }]. A hook may emit
+//                                   more events with meta.emit(...) and they
+//                                   join the same transaction and chain.
+//   contactLogged(tx, ctx, { contact, input }, emit)
+//                                   after contact.log stores a contact; input
+//                                   carries any extras such as survey answers.
+const registry = { events: [], contactLogged: [] };
+
+export const onHook = (name, fn) => {
+  if (!registry[name]) throw new Error(`unknown hook ${name}`);
+  registry[name].push(fn);
+};
+
+export const hasHook = (name) => (registry[name] || []).length > 0;
+
+export const runHooks = async (name, ...args) => {
+  for (const fn of registry[name] || []) await fn(...args);
+};

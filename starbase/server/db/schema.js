@@ -363,6 +363,23 @@ alter table pledges add column if not exists last_received_on date;
 -- the pledge and a restore can close it again.
 alter table gifts add column if not exists pledge_id uuid;
 create index if not exists gifts_pledge_idx on gifts (workspace_id, pledge_id) where pledge_id is not null;
+-- Background jobs (lib/jobs.js): ladder steps, A/B winners, retries.
+create table if not exists jobs (
+  id uuid primary key,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  kind text not null,
+  run_at timestamptz not null default now(),
+  payload jsonb not null default '{}',
+  key text,
+  status text not null default 'pending' check (status in ('pending', 'running', 'done', 'failed', 'cancelled')),
+  attempts int not null default 0,
+  last_error text,
+  started_at timestamptz,
+  done_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists jobs_due_idx on jobs (status, run_at);
+create unique index if not exists jobs_key_idx on jobs (workspace_id, key) where key is not null;
 `;
 
 export const bootstrap = async (db) => {
@@ -373,6 +390,10 @@ export const bootstrap = async (db) => {
     await db.exec(CORE);
     for (const key of recordTypeKeys()) await db.exec(ddlFor(key));
     await db.exec(ALTERS);
+    // Feature modules' tables (server/ext/*). Imported here, not at the top,
+    // because feature modules may import the db client, which imports this.
+    const { EXTENSIONS } = await import('../ext.js');
+    for (const e of EXTENSIONS) if (e.sql) await db.exec(e.sql);
     await db.exec(SEED);
   } finally {
     if (lock) await db.query('select pg_advisory_unlock(7271989)');

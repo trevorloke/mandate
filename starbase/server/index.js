@@ -9,12 +9,15 @@ import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
 import publicRoutes from './routes/public.js';
 import { getDb } from './db/client.js';
+import { EXTENSIONS } from './ext.js';
+import { startJobRunner, stopJobRunner } from './lib/jobs.js';
 
 export const app = new Hono();
 
 app.get('/api/health', (c) => c.json({ ok: true, service: 'starbase' }));
 app.route('/api/auth', authRoutes);
 app.route('/', publicRoutes); // /p, /n, /v, /u, /api/public — no auth
+for (const e of EXTENSIONS) if (e.publicRoutes) app.route('/', e.publicRoutes);
 app.route('/api', apiRoutes);
 
 // Static web build (SPA fallback to index.html for URL routing). Resolved
@@ -29,11 +32,16 @@ if (isMain) {
   const server = serve({ fetch: app.fetch, port }, () => {
     console.log(`starbase on :${port}`);
   });
+  // Background jobs (ladder steps, A/B winners). STARBASE_JOBS=off disables.
+  if (process.env.STARBASE_JOBS !== 'off') {
+    getDb().then((db) => startJobRunner(db, { everyMs: Number(process.env.STARBASE_JOBS_EVERY_MS) || 30_000 }));
+  }
   // Deploys send SIGTERM: stop accepting requests, then close the database so
   // the embedded store flushes cleanly.
   const shutdown = async (sig) => {
     console.log(`${sig}: shutting down`);
     server.close();
+    stopJobRunner();
     try { await (await getDb()).close(); } catch { /* already closed */ }
     process.exit(0);
   };
