@@ -15,7 +15,10 @@
  *               nothing is ever fetched ahead (tile servers' usage rules).
  *   Never       /api/* (live data and every write — the outbox in
  *               src/offline.js handles knocks), public form pages
- *               (/p /n /v /u /e /d) and /join links, or any non-GET.
+ *               (/p /n /v /u /e /d), feature pages served to people
+ *               outside the app (/r receipts, /lu ladder unsubscribe,
+ *               /o and /c email open and click tracking) and /join links,
+ *               or any non-GET.
  *
  * Bump VERSION to throw every cache away on the next activate.
  */
@@ -34,7 +37,7 @@ const TILE_MAX = 1500;
 const TILE_FRESH_MS = 7 * 24 * 3600 * 1000; // re-check a cached tile after a week
 const TILE_AT = 'x-starbase-cached-at';
 
-const NEVER = /^\/(?:api|p|n|v|u|e|d|join)(?:\/|$)/;
+const NEVER = /^\/(?:api|p|n|v|u|e|d|r|lu|o|c|join)(?:\/|$)/;
 const isTileHost = (host) => host === 'tile.openstreetmap.org' || host.endsWith('.tile.openstreetmap.org');
 
 // The configured provider, from a template like
