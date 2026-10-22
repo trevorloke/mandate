@@ -298,9 +298,11 @@ check('settings: a {…} that won\'t fill in is flagged and Save stays off', /\{
 await tpl.fill('Hi [first name], from [campaign]. ');
 await tpl.press('End');
 await page.getByRole('button', { name: '+ Your name' }).click();
+await sleep(150); // the caret moves on the next frame — let it land before typing over
 const tplIns = await tpl.inputValue().catch(() => '');
 check('settings: + Your name goes where the cursor was', tplIns === 'Hi [first name], from [campaign]. [your name]', tplIns);
 await tpl.fill("Hi [first name], it's [your name] with [campaign]. Can we count on your support?");
+check('settings: typing over the box replaces it', await tpl.inputValue().catch(() => '') === "Hi [first name], it's [your name] with [campaign]. Can we count on your support?");
 for (const days of ['Mon–Fri', 'Sat–Sun']) {
   await page.getByLabel(`${days} from`).selectOption(String(qFrom));
   await page.getByLabel(`${days} until`).selectOption(String(qUntil));
@@ -315,7 +317,7 @@ await D.go('/calls?channel=text&q=Harjit');
 await page.waitForSelector('.tx-send', { timeout: 8000 }).catch(() => {});
 t = await D.text();
 const sendBtn = page.locator('.tx-send button.tx-go');
-check('quiet hours: the card says when sending opens, and Send is off', /Quiet hours — sending opens at \d/.test(t) && await sendBtn.isDisabled().catch(() => false), t.slice(0, 220));
+check('quiet hours: the card says when sending opens, and Send is off', /Quiet hours — sending opens at (\d|noon|midnight)/.test(t) && await sendBtn.isDisabled().catch(() => false), t.slice(0, 220));
 const n0 = twilio.length;
 const quiet = await D.api('/actions/text.send', { person_id: P.harjit.id, body: `Hi Harjit, it's Riley with ${CAMPAIGN}.` });
 check('quiet hours: the server refuses, nothing reaches Twilio', quiet.status === 409 && /Quiet hours/.test(quiet.json?.error) && twilio.length === n0,
