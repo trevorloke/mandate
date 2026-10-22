@@ -23,6 +23,8 @@ const Filings = lazy(() => import('./pages/Filings.jsx'));
 const Team = lazy(() => import('./pages/Team.jsx'));
 const ImportPeople = lazy(() => import('./pages/ImportPeople.jsx'));
 const Turfs = lazy(() => import('./pages/Turfs.jsx'));
+const Receipts = lazy(() => import('./pages/Receipts.jsx'));
+const ReceiptsOne = lazy(() => import('./pages/ReceiptsOne.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -66,6 +68,8 @@ export default function App() {
         <Route element={<DeskOnly />}>
           <Route path="/people/import" element={<ImportPeople />} />
           <Route path="/money" element={<Money />} />
+          <Route path="/money/receipts" element={<Receipts />} />
+          <Route path="/money/receipts/:id" element={<ReceiptsOne />} />
           <Route path="/outreach" element={<Outreach />} />
           <Route path="/outreach/:tab" element={<Outreach />} />
           <Route path="/filings" element={<Filings />} />

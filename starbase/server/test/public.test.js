@@ -341,7 +341,8 @@ test('stripe: checkout link and every payment are logged; the thank-you says Str
     assert.equal(paid.status, 200);
     assert.ok(paid.json.gift_id);
     ev = await fresh();
-    const pay = of(ev, 'stripe.payment');
+    // (A contribution receipt, when that feature is on, rides on the same write.)
+    const pay = of(ev, 'stripe.payment').filter((e) => e.entity_type !== 'receipt');
     assert.deepEqual(pay.map((e) => [e.entity_type, e.op]), [['gift', 'create'], ['pledge', 'update']]);
     assert.equal(pay[0].payload.amount_cents, 10000);
     assert.equal(pay[0].payload.pledge_id, pledgeId, 'the gift names its pledge');

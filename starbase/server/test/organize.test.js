@@ -351,7 +351,7 @@ test('voiding a pledge’s gift reopens a one-time pledge; restoring closes it a
   const db = await getDb();
   const evs = (await db.query(
     `select seq, entity_type, op, payload from events where workspace_id = $1 and action = 'gift.void' order by seq`, [w2],
-  )).rows;
+  )).rows.filter((e) => e.entity_type !== 'receipt'); // a receipt, when that feature is on, is voided with its gift
   assert.deepEqual(evs.map((e) => [e.entity_type, e.op]), [['gift', 'void'], ['pledge', 'update']]);
   assert.equal(evs[1].payload.status, 'pledged');
   assert.equal(evs[1].payload.voided_gift, g1);

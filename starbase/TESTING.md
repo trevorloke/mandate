@@ -127,6 +127,15 @@ one tap away under **More**.
   real pledge → it appears under **Money → Needs you** → *Mark paid* turns it
   into a gift (cap-checked). Voiding that gift reopens the pledge; a monthly
   pledge stays open and is marked paid month by month.
+- **Money → More → Receipts** — every gift gets a numbered receipt
+  (`2026-0001`, no gaps) the moment it's logged, marked paid, or paid by card;
+  open a gift on Money to see *Receipt 2026-0007 · Sent*. Without email
+  connected each one says *Not sent — email isn't connected* (or *No email on
+  file*) — tap it, then **Print**. With email connected it goes to the donor
+  once by itself; *Send again* resends; **Send all not sent** sends the rest.
+  Voiding a gift marks its receipt **VOID** (the number is kept). Set the
+  financial agent, the minimum gift and the footer under **More → Settings**;
+  **More → Disclosure** downloads contributors over $100.
 - **Today → More → Verify my books** replays the tamper-evident log;
   **Export all data** downloads everything.
 
@@ -159,3 +168,8 @@ the same file never creates duplicates.
   it before relying on cap checks.
 - Calls and texts use the phone's own dialer and messages (no
   auto-dialer).
+- Contribution receipts: the wording (including the *not tax-deductible*
+  line), what a receipt must show, the minimum gift that gets one and the
+  $100 disclosure amount are all settings — **the financial agent must
+  confirm receipt contents and thresholds with Elections BC** before
+  receipts go to donors or the disclosure is filed.
