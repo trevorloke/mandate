@@ -32,6 +32,7 @@ import './people.css';
 import {
   TextingPersonLink, callsCard, noTexts, textingOn, useTextingPerson, useTextingStatus,
 } from '../components/TextingCard.jsx';
+import { KnowsNudge, PersonKnows, usePersonKnows } from '../components/RelationshipsBits.jsx';
 
 const TIER_LABEL = {
   superstar: DONOR_TIERS.superstar.label,
@@ -45,7 +46,7 @@ const TIER_CLASS = { superstar: 'chip pf-tier pf-tier--super', star: 'chip pf-ti
 const OUTCOME_LABEL = {
   contacted: 'Talked', no_answer: 'No answer', refused: 'Refused', moved: 'Moved', inaccessible: 'No access',
 };
-const CHANNEL_LABEL = { door: 'Door', phone: 'Phone', text: 'Text' };
+const CHANNEL_LABEL = { door: 'Door', phone: 'Phone', text: 'Text', in_person: 'In person' };
 // "Rated 2 · Lean yes", "Rated 4 · Locke" or "No answer" — the field's own words.
 const contactWord = (scale, c) => (c.rating ? `Rated ${ratingText(scale, c.rating)}` : OUTCOME_LABEL[c.outcome] || c.outcome);
 
@@ -791,6 +792,7 @@ export default function Person() {
   const ladders = usePersonLadders(id, desk); // engagement level + ladders (desk only)
   const answers = usePersonAnswers(id, desk); // survey answers (desk only)
   const fields = usePersonFields(id); // profile fields (a volunteer gets only theirs)
+  const knows = usePersonKnows(id, desk); // who they know (desk only)
 
   // Awaited by useAction so controls stay disabled until the profile refetches.
   // Covers the map (['doors']: pins, ratings, unlocated count after an address
@@ -840,6 +842,8 @@ export default function Person() {
       <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} contacted={contacts.length > 0} level={ladders.data?.level} />
 
       <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
+      {/* Undecided or not rated: a supporter who knows them (desk). */}
+      {desk && <KnowsNudge query={knows} person={person} />}
 
       {/* Volunteers get one line instead of the full history. */}
       {!desk && last && (
@@ -856,6 +860,11 @@ export default function Person() {
         {fields.data?.fields?.length > 0 && (
           <Section title="More details" count={filledCount(fields) || ''} open={!!open.more} onToggle={toggle('more')}>
             <PersonFields query={fields} personId={person.id} />
+          </Section>
+        )}
+        {desk && (
+          <Section title="Knows" count={knows.data?.knows?.length || ''} open={!!open.knows} onToggle={toggle('knows')}>
+            <PersonKnows person={person} query={knows} />
           </Section>
         )}
         {/* Tags and roles are desk work: volunteers can't change them (person.update / volunteer.* are desk-only). */}

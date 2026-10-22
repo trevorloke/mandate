@@ -5,7 +5,8 @@
 //     shift" only when they're on it, otherwise the next open shift with
 //     "5 spots left" (→ that shift, where they join it). Signs waiting to go
 //     up get one row (→ Signs to put up), new replies to their texts another
-//     ("2 replies" → the Inbox). One line of numbers, theirs first:
+//     ("2 replies" → the Inbox), and a quiet "My people · 6" (→ the people
+//     they know). One line of numbers, theirs first:
 //     "You 6 · Team 38 doors this week" (brief field.mine: contacts they
 //     logged; field: everyone's). Calls and texts in the same shape, a quiet
 //     "Signs" row (always — the sign crew's way to /signs and "Add a sign"),
@@ -731,6 +732,9 @@ function VolunteerToday({ b, me }) {
         {replies > 0 && (
           <LinkRow to="/inbox" state={FROM_TODAY} main={<><strong className="mono">{replies}</strong> {plural(replies, 'reply', 'replies')}</>} />
         )}
+        {/* The people they know (brief.myPeople), to reach in person, by call or text. */}
+        <LinkRow to="/my-people" state={FROM_TODAY}
+          main={<>My people{b.myPeople ? <> · <strong className="mono">{b.myPeople}</strong></> : null}</>} />
       </ul>
 
       <MineLine you={mine.doors} team={f.doors} noun="door" />
@@ -738,6 +742,7 @@ function VolunteerToday({ b, me }) {
       <More>
         <MineLine you={mine.calls} team={f.calls} noun="call" small />
         <MineLine you={mine.texts} team={f.texts} noun="text" small />
+        {Number(b.inPerson?.week) > 0 && <MineLine you={b.inPerson.mine} team={b.inPerson.week} noun="in-person talk" small />}
         {/* Always here, signs waiting or not: the sign crew's way to Add a sign. */}
         <ul className="today-rows">
           <LinkRow to="/signs" main="Signs" />
@@ -811,6 +816,7 @@ function DeskToday({ b, me, toast }) {
       <More>
         <p className="today-fieldline mono">
           This week: {num(f.calls)} {plural(Number(f.calls) || 0, 'call')} · {num(f.texts)} {plural(Number(f.texts) || 0, 'text')}
+          {Number(b.inPerson?.week) > 0 && <> · {num(b.inPerson.week)} in person</>}
           {b.money && <> · {fmtMoney(b.money.weekCents)} raised</>}
         </p>
         <p className="today-fieldline mono">

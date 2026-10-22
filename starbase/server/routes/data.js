@@ -242,14 +242,14 @@ app.post('/geocode', async (c) => {
 // POST /sample records every row it creates, by id, in settings.sample.ids;
 // DELETE /sample removes exactly those rows and nothing else. What you made
 // yourself stays, even when it hangs on a sample row — a gift, sign, knock,
-// role or booking on a sample voter keeps that voter (no longer marked
-// sample), and a booking you made on the sample shift, an RSVP to the sample
+// role, booking or link to someone they know on a sample voter keeps that
+// voter (no longer marked sample), and a booking you made on the sample shift, an RSVP to the sample
 // town hall or a signature on the sample petition keeps that shift, event or
 // petition. Sample gifts are voided (an event on the books, never a silent
 // delete); everything else sample-made is deleted with a 'void' event.
 const SAMPLE_TAG = 'sample';
 const SAMPLE_KEYS = ['persons', 'contacts', 'roles', 'gifts', 'signs', 'shifts', 'assignments',
-  'petitions', 'events', 'subscriptions', 'turfs'];
+  'petitions', 'events', 'subscriptions', 'turfs', 'relationships'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const idLists = (src = {}) => Object.fromEntries(SAMPLE_KEYS.map((k) => [
   k, Array.isArray(src[k]) ? [...new Set(src[k].filter((v) => UUID_RE.test(String(v))))] : [],
@@ -319,6 +319,18 @@ app.post('/sample', async (c) => {
         [rid, W, id[who], role, detail || null]);
       ids.roles.push(rid);
       emit('volunteer_role', rid, 'create', { person_id: id[who], role, sample: true });
+    }
+    // Who knows whom (ext/relationships): each pair kept in order, once.
+    for (const [a, b, kind, note, broughtIn] of S.relationships) {
+      const lid = newId();
+      const link = (await tx.query(
+        `insert into relationships (id, workspace_id, person_a, person_b, kind, note, brought_in, from_person, created_by)
+         values ($1, $2, least($3::uuid, $4::uuid), greatest($3::uuid, $4::uuid), $5, $6, $7, $3, $8)
+         returning person_a, person_b`,
+        [lid, W, id[a], id[b], kind, note || null, broughtIn ? id[b] : null, ctx.user.id],
+      )).rows[0];
+      ids.relationships.push(lid);
+      emit('relationship', lid, 'create', { ...link, kind, sample: true });
     }
     // Dates relative to today: monthly gifts are current (last week), one-time
     // gifts spread back through the year — never in the future, never before Jan 1.
@@ -427,6 +439,7 @@ const legacySampleIds = async (tx, W, marks) => {
     gifts: await created('gifts'),
     assignments: await created('shift_assignments'),
     subscriptions: await created('subscriptions', ` and source = 'sample'`),
+    relationships: await created('relationships'),
     signs: marks.signIds,
     shifts: marks.shiftIds,
     petitions: marks.petitionIds,
@@ -440,6 +453,7 @@ const nOf = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const KINDS = [
   ['gift', 'gift', 'gifts'], ['pledge', 'pledge', 'pledges'], ['sign', 'sign', 'signs'],
   ['door', 'door knock', 'door knocks'], ['phone', 'call', 'calls'], ['text', 'text', 'texts'],
+  ['in_person', 'talk in person', 'talks in person'], ['connection', 'connection', 'connections'],
   ['role', 'volunteer role', 'volunteer roles'], ['booking', 'shift booking', 'shift bookings'],
   ['rsvp', 'RSVP', 'RSVPs'], ['signature', 'signature', 'signatures'],
 ];
@@ -478,6 +492,19 @@ const clearSample = async (tx, W, emit) => {
   await onPerson('role', `select id, person_id from volunteer_roles where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.roles);
   await onPerson('booking', `select id, person_id from shift_assignments where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.assignments);
   await onPerson('rsvp', `select id, person_id from event_rsvps where workspace_id = $1 and person_id = any($2::uuid[])`);
+  // A link you made (ext/relationships) keeps the sample people at both ends.
+  for (const r of await rows(
+    `select id, person_a, person_b from relationships where workspace_id = $1 and removed_at is null
+       and (person_a = any($2::uuid[]) or person_b = any($2::uuid[])) and not (id = any($3::uuid[]))`,
+    [W, P, ids.relationships],
+  )) {
+    note('connection', r.id);
+    [r.person_a, r.person_b].filter((pid) => P.includes(pid)).forEach((pid, i) => {
+      const by = keptPeople.get(pid) || {};
+      if (i === 0) by.connection = (by.connection || 0) + 1; // counted once per link
+      keptPeople.set(pid, by);
+    });
+  }
 
   // Sample shifts, events and petitions with your bookings, RSVPs or signatures on them.
   const keepHosts = async (kind, hostSql, childSql, hostIds, exclude = null) => {
@@ -518,6 +545,9 @@ const clearSample = async (tx, W, emit) => {
   };
   await drop('contacts', 'contact', 'delete from contacts where workspace_id = $1 and id = any($2::uuid[]) returning id, person_id',
     ids.contacts, (r) => ({ person_id: r.person_id }));
+  await drop('relationships', 'relationship',
+    'delete from relationships where workspace_id = $1 and id = any($2::uuid[]) returning id, person_a, person_b',
+    ids.relationships, (r) => ({ person_a: r.person_a, person_b: r.person_b }));
   await drop('roles', 'volunteer_role', 'delete from volunteer_roles where workspace_id = $1 and id = any($2::uuid[]) returning id, person_id',
     ids.roles, (r) => ({ person_id: r.person_id }));
   await drop('signs', 'sign', 'delete from signs where workspace_id = $1 and id = any($2::uuid[]) returning id, kind, status, person_id, address',
