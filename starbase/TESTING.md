@@ -107,6 +107,22 @@ one tap away under **More**.
   (`/n/imagine-surrey`), petition, event, and donate (`/d/imagine-surrey`)
   links; *For your web developer* has the embed code for the site.
 - **Team** — invite a volunteer and a staff member; change a role.
+- **Rating scale** (your initials → *Rating scale*) — change the words on 1
+  (e.g. *Definitely*), rename a candidate, **Add** one, move it with ↑ ↓,
+  **Take off** one (*Take Locke off the list? Yes · No*). The preview shows
+  the buttons as volunteers will see them; **Save**. Locke now sits under
+  *Off the list* with how many people have that rating and *Put back*;
+  people already rated Locke read *4 · Locke (off the list)* on People,
+  profiles and the *Voting for…* filter, and still count on Today. Staff,
+  treasurers and volunteers have no Rating scale (typing `/rating-scale`
+  lands on Today).
+- **People → More → Profile fields** → **Add a field**: a name, a type (Text ·
+  Yes/No · Pick one · Number · Date), its choices, and *Volunteers can see
+  this* (off by default). Tap a field to rename it, add a choice or *Move
+  up*; once something is filled in its type can only become Text (the screen
+  says so). **Take off** keeps everything filled in (still in *Export all
+  data*); *Taken off → Bring back* restores it. The sample adds *Language at
+  home*, *Strata council member* and *Union local*.
 
 ### Volunteer (on a phone)
 - Open the invite link → set a password → lands on the **Map**. Tabs:
@@ -114,7 +130,16 @@ one tap away under **More**.
 - **Today → Start canvassing** opens your walk list (doors in walking order:
   odd side up, even side back). Tap a door → **1 · 2 · 3 · 4** (each says what
   it means). **4** asks *Voting for?* — McCallum · Locke · Annis · van Vliet ·
-  Randhawa · Not sure. A toast confirms; *Change* fixes a mis-tap.
+  Randhawa · Not sure (or the list your manager set; *Not sure* is always
+  last). A toast confirms; *Change* fixes a mis-tap.
+- **My people** (a quiet row on Today, *My people · 6*, and on Calls) — the
+  people you know. **Add someone**: a name, a phone or an email, and how you
+  know them; someone already on the list is linked, not added twice, and
+  someone new is *Brought in by* you. Tap a person → *Phone · Text · In
+  person* (Phone and Text are the Calls card; In person is a talk away from
+  their door) → one tap on 1–4 logs it (*✓ In person · Rated 1 · Strong
+  yes*). The sample volunteer *Priya Nair* (invite `priya.nair@example.org`)
+  already knows six people.
 - **More** on a door: note, Call / Text (the phone's own dialer; with Twilio
   connected, the person's card on Calls), request a lawn / large sign or
   billboard (with Undo), add a person at the door.
@@ -136,8 +161,11 @@ one tap away under **More**.
 - **Signs** (from Today when there are signs to put up) — *Put up ✓*.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved
   offline*), *Count me in* on a shift (*Take back* undoes it before it
-  sends), turn it off — they send once, never twice, and the strip says
-  *4 sent*. The strip's *saved on this phone* chip lists what's waiting.
+  sends), add someone to *My people*, turn it off — they send once, never
+  twice, and the strip says *5 sent*. The strip's *saved on this phone* chip
+  lists what's waiting. Reload with no signal: the campaign's own rating
+  buttons still show, and Today, Calls, Shifts and any profile you opened
+  read from the phone (never with money or anyone else's email).
 - Confirm a volunteer **never sees money or the supporter list**: no Money,
   People or Outreach; typing those addresses lands back on Today. (The
   server enforces this too: their browser never receives other people's
@@ -157,6 +185,26 @@ one tap away under **More**.
   (it needs an address); a request that never went up can be *Cancelled*.
 - **Map → filter button → Draw turf** — tap the corners, name it, assign a
   canvasser.
+- **A profile → More details** — tap Yes/No or a choice, type the rest,
+  **Save** → *✓ Saved*. **People → Filter → More filters** → e.g. *Language
+  at home: Punjabi*; *More → Call list* keeps it. Volunteers see only the
+  fields marked for them, read-only.
+- **Who knows whom** — **People → More → Most connected**: the sample's
+  *Priya Nair* is first (*knows 6 · 1 supporter*). Open *Jasmine Wong*
+  (undecided): under the rating, *Ask Priya Nair — they know each other*.
+  **Knows** lists who someone knows; **+ Someone they know** → search → *how
+  do they know each other?* links them both ways; *Remove? Yes · No* takes
+  it off. *Sofia Petrova → Knows* says *Brought in by Priya Nair*.
+- **Desk with no signal** — with wifi, open Today, People, a profile,
+  Shifts, Signs, Money and the Inbox. Turn wifi off and reload: each shows
+  what it had and the strip says *No signal · from 2:14 pm*. Search People —
+  it searches what this computer kept. A profile never opened says *No
+  signal — this profile loads when you're back online*. On a profile, add a
+  note and tap a rating, add a tag, remove one: *Saved on this device —
+  sends when you're back online*, and History shows *Not sent yet*. *Add
+  person*, *Log a gift*, *Add a sign*, *New shift* and *Edit details* say
+  they need signal. Wifi back: each is sent once. Sign out: nothing stays —
+  the next person on that computer sees none of it.
 
 ### Treasurer
 - **Money** — **Log a gift**; log enough to one donor to cross the annual
@@ -188,6 +236,9 @@ one tap away under **More**.
   column. Sample gifts are never in it.
 - **Today → More → Verify my books** replays the tamper-evident log;
   **Export all data** downloads everything.
+- **Money with no signal** reads only in the same browser tab (anything with
+  money in it is never kept past the tab): close the tab, reopen with no
+  signal, and Money says *No signal*.
 
 ### Public volunteer page
 - `/v/imagine-surrey` in a private window: tick *Hi-rise building captain* —
@@ -197,8 +248,12 @@ one tap away under **More**.
 ### Import your own lists
 **People → More → Import.** Try `starbase/samples/surrey-import-test.csv` first —
 fictional people at *public building* addresses (City Hall, rec centres). The
-check step should report **8 new, 1 merged** (Jordan Lee appears twice with
-the same email), and **2 refused** (one row has no name, one has rating "7").
+check step should report **9 new, 1 merged** (Jordan Lee appears twice with
+the same email) and **1 refused** (the row with no name); Robin Kaur's rating
+"7" isn't on the scale, so she comes in unrated and the check step says so.
+Ratings import as codes, words or candidate names in any case (*definitely*,
+*Locke*, *4b*). A column named like a profile field (any case) fills it; a
+bad cell (e.g. *Klingon* for *Language at home*) is refused by row number.
 Then **Place on map** looks the addresses up with the BC Address
 Geocoder (needs internet).
 
@@ -211,8 +266,10 @@ the same file never creates duplicates.
 
 - Map tiles come from OpenStreetMap; very large teams should switch to a paid
   tile provider before election week (`STARBASE_TILE_URL`, see the README).
-- Offline mode covers **field work** (knocks, new people and doors, pins,
-  sign requests, shift sign-ups). Gifts, imports and outreach need signal.
+- Offline covers **field work** (knocks, new people and doors, pins, sign
+  requests, shift sign-ups, *My people*) and **reading the desk**; on a
+  profile, ratings, notes and tags save offline. Gifts, imports, outreach
+  and other edits need signal. Receipts and Filings aren't kept offline.
 - The BC municipal contribution limit is seeded at Elections BC's 2026
   figure, **$1,429.70** per contributor for the calendar year — one limit
   shared by an elector organization and its endorsed candidates (2022:

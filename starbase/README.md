@@ -14,7 +14,7 @@ button, no paragraphs, everything else one tap away.
 |---|---|
 | **Today** | Desk: three big numbers (doors · support · raised) and *Needs you*. Volunteers: one big *Start canvassing* and their next shift |
 | **Map** | Field mode. Houses as clickable pins; tap a door → rate, log, request a sign, call/text. Turfs and walk lists |
-| **People** | Everyone, filterable by rating / tag / role; profiles with socials, roles, gifts, history; **Calls** works a list one person at a time |
+| **People** | Everyone, filterable by rating / tag / role / the campaign's own fields; profiles with socials, roles, gifts, history, *More details* and who they know; **Calls** works a list one person at a time; **My people** is each volunteer's own circle |
 | **Shifts** | Schedule volunteers, assign by role, notify by email + text with instructions and a link; volunteers tap *Count me in* |
 | **Money** | Gifts (one-time / monthly) with the entity-keyed cap engine; donor tiers; filings |
 | **Signs** | Billboards (4×8), large (4×4), lawn — requested → installed → removed |
@@ -26,6 +26,8 @@ put up* for sign crews; desk-only addresses send them back to Today.
 Managers reach **Team** from the account menu (their initials): invite volunteers and staff by email
 (or copy the join link and text it), set roles, see pending invites. Invitees
 open `/join/:token`, set a password, and land on the map (volunteers) or Today.
+The same menu has **Rating scale** (below); People → More has **Profile
+fields** (managers) and **Most connected** (desk).
 
 ### The rating scale (door, phone, text)
 
@@ -35,6 +37,15 @@ open `/join/:token`, set a password, and land on the map (volunteers) or Today.
 (`shared/canvass.js` — one vocabulary for server validation and the UI).
 On screen the buttons read *1 Strong yes · 2 Lean yes · 3 Undecided ·
 4 Opposed*; tapping 4 asks *Voting for?* with the five surnames or *Not sure*.
+
+These are the defaults. A manager changes the words on each step and the
+*Voting for?* list under **Rating scale** (account menu) — add, rename,
+reorder, take off, put back — with a preview of the buttons volunteers will
+see. The four steps never change, so counts, filters, ladders and the map
+read the same. A code keeps its meaning forever: someone taken off the list
+keeps their old ratings ("4 · Locke (off the list)") and is never offered
+again; a knock saved on a phone before they came off still counts if it
+arrives within a week. Contacts are door, phone, text or **in person**.
 
 ### What's tracked
 
@@ -48,13 +59,22 @@ On screen the buttons read *1 Strong yes · 2 Lean yes · 3 Undecided ·
 - **Tags**: free-form, seeded with media, VIP, endorser, host, …
 - **Socials**: per-person handles for Facebook, Instagram, X, TikTok, YouTube,
   LinkedIn, Bluesky.
+- **Profile fields**: the campaign's own — Text · Yes/No · Pick one · Number ·
+  Date (*Language at home*, *Strata council member*, …) — set up by a manager,
+  filled in by the desk under *More details*, filtered, imported and exported;
+  volunteers see only the ones marked for them, read-only.
+- **Relationships**: who knows whom (Family · Friend · Neighbour · Work ·
+  Community · Other), *brought in by*, and each volunteer's **My people** —
+  add someone you know, call, text, or rate a talk in person. A profile's
+  *Knows* nudges the desk ("Ask Priya Nair — they know each other") and
+  *Most connected* finds the connectors.
 
 ## Coverage vs. the tools it replaces
 
 | | Starbase today | Next |
 |---|---|---|
-| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, survey builder (door and calls), offline field mode | full offline replica |
-| **Action Builder** | assessments (= the rating scale), tags, roles, relational notes, event-logged every touch | custom assessment ladders per campaign, relationship graph |
+| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, survey builder (door and calls), custom person fields, offline field mode, offline desk (each sign-in's last copy of every screen; ratings, notes and tags queued) | — |
+| **Action Builder** | assessments (= the rating scale, its words and Voting-for list edited per campaign), tags, roles, relational notes, relationship graph (My people, Knows with a nudge, Most connected, brought in by), event-logged every touch | — |
 | **Action Network** | newsletter list + signup page + unsubscribe, press list + releases, petitions with public pages, volunteer signup page, event RSVP pages, donation pages (Stripe or pledges), website JSON bridge, ladders of engagement, A/B subject lines with open/click tracking | — |
 
 ## Website bridge (Imagine Surrey)
@@ -134,9 +154,17 @@ the Calls list, shifts and walk lists keep their last loaded copy on the
 phone for a day ("Offline copy"); sign-out forgets them. Anything the server
 refuses on the way is kept and listed under the strip's "saved on this phone"
 chip ("this device" on a computer) with the reason — *Try again* or
-*Dismiss*. Gifts, imports and outreach need signal: with none, their sends
-are off (*Needs signal — nothing sent*) and a desk screen not loaded yet says
-*No signal — this loads when you're back online.*
+*Dismiss*.
+
+Desk screens keep the last copy each sign-in loaded — Today, People and its
+search, profiles opened, Shifts, Signs, Calls, Money (desk roles), the Inbox —
+and the strip says when it's from (*No signal · from 2:14 pm*). On a profile,
+a rating with its note and tags put on or taken off save on this device and
+send once; every other write says it needs signal (*Adding people needs
+signal*). Copies are keyed to the person and campaign, a day old at most,
+forgotten at sign-out; anything with money in it is kept for that browser tab
+only. A screen never loaded on this device says *No signal — this loads when
+you're back online.*
 
 ## Architecture
 
@@ -158,8 +186,9 @@ Database: PGlite (embedded, real Postgres) — in-memory for tests, file-backed
 via `STARBASE_DATA=./data`; hosted Postgres via `DATABASE_URL` in v0.3.
 Tenancy is a membership (`user × workspace × role`: manager / treasurer /
 staff / volunteer). **Volunteers** can rate doors, log calls and texts, drop
-pins, request signs, and add a new housemate (name and phone) at a door in
-their turf. The server never shows them money (profiles return no
+pins, request signs, add a new housemate (name and phone) at a door in
+their turf, and keep *My people* (the people they know: add, call or text,
+or rate a talk in person). The server never shows them money (profiles return no
 gifts, totals, or donor tier; Today has no money), and refuses them the gift
 ledger, exports, the raw event log, the audit replay, and the subscriber,
 signature, and blast lists.
@@ -186,5 +215,7 @@ server/routes/         auth · api (reads) · public (pages + website bridge)
 web/                   Vite + React 19 + react-router + TanStack Query + Leaflet
 ```
 
-⚠️ `cap_rules` seed values must be verified against Elections BC's current
-indexed amounts (LECFA for Surrey) before a filing year relies on them.
+⚠️ `cap_rules` is seeded with Elections BC's 2026 local-elections limit,
+$1,429.70 per contributor for the calendar year (one limit for an elector
+organization and its endorsed candidates together), and 2022's $1,250.
+Confirm the figures with Elections BC before a filing relies on them.
