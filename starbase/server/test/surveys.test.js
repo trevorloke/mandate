@@ -471,6 +471,87 @@ test('"Save answers", then a rating: one contact for the visit, not two', async 
   ok(await desk.action('survey.archive', { id: sv.id }));
 });
 
+test('"Save answers", change an answer, "Save answers" again: the answer is replaced, not doubled', async () => {
+  const db = await getDb();
+  const sv = ok(await desk.action('survey.create', { name: `Change ${tag}` })).survey;
+  const top = ok(await desk.action('survey.question.add', { survey_id: sv.id, kind: 'choice', text: 'Top issue?', options: ['Housing', 'Transit'] })).question;
+  const vote = ok(await desk.action('survey.question.add', { survey_id: sv.id, kind: 'yesno', text: 'Voting early?' })).question;
+  const maya = await desk.createPerson('Maya Example', { phone: '604-555-0121' });
+  const cid = (n) => `b1b1b1b1-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+  const first = ok(await vol.action('contact.log', {
+    person_id: maya.id, channel: 'door', outcome: 'contacted', client_id: cid(1),
+    answers: [{ question_id: top.id, value: 'Housing' }, { question_id: vote.id, value: true }],
+  }));
+  const again = ok(await vol.action('contact.log', {
+    person_id: maya.id, channel: 'door', outcome: 'contacted', client_id: cid(2), visit_of: cid(1),
+    answers: [{ question_id: top.id, value: 'Transit' }],
+  }));
+  assert.equal(again.amended, true);
+  assert.equal(again.contact.id, first.contact.id, 'one contact for the visit');
+  assert.equal(again.answers_saved, 1);
+
+  // The profile, Results and the CSV all say the same: Transit, once.
+  const answers = ok(await desk.get(`/api/persons/${maya.id}/answers`)).answers;
+  assert.deepEqual(answers.filter((a) => a.question_id === top.id).map((a) => a.says), ['Transit'], 'one answer to Top issue');
+  assert.deepEqual(answers.filter((a) => a.question_id === vote.id).map((a) => a.says), ['Yes'], 'the other answer is kept');
+  const res = ok(await desk.get(`/api/surveys/${sv.id}/results`));
+  const bars = Object.fromEntries(res.questions.find((q) => q.id === top.id).options.map((o) => [o.label, o.count]));
+  assert.deepEqual(bars, { Housing: 0, Transit: 1 });
+  const csv = await (await (await import('../index.js')).app.request(`/api/surveys/${sv.id}/results.csv`, { headers: { cookie: desk.cookie } })).text();
+  assert.match(csv, /\r\nMaya Example,.*,Transit,Yes\r\n/);
+  const stored = (await db.query(
+    'select id, value from survey_responses where workspace_id = $1 and contact_id = $2 and question_id = $3', [ws, first.contact.id, top.id],
+  )).rows;
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].value, 'Transit');
+
+  // On the hash chain: the first answer, then an update of that same answer.
+  const ev = (await db.query(
+    `select action, op, payload from events where workspace_id = $1 and entity_type = 'survey_response' and entity_id = $2 order by seq`,
+    [ws, stored[0].id],
+  )).rows;
+  assert.deepEqual(ev.map((e) => [e.action, e.op]), [['contact.log', 'create'], ['contact.log', 'update']]);
+  assert.equal(ev[0].payload.value, 'Housing');
+  assert.deepEqual([ev[1].payload.value, ev[1].payload.was], ['Transit', 'Housing']);
+
+  // The same tap replayed from the outbox changes nothing; a later visit is its own answer.
+  assert.equal(ok(await vol.action('contact.log', {
+    person_id: maya.id, channel: 'door', outcome: 'contacted', client_id: cid(2), visit_of: cid(1),
+    answers: [{ question_id: top.id, value: 'Transit' }],
+  })).duplicate, true);
+  ok(await vol.action('contact.log', { person_id: maya.id, channel: 'door', outcome: 'contacted', rating: '1', client_id: cid(3), visit_of: cid(1) }));
+  ok(await vol.action('contact.log', {
+    person_id: maya.id, channel: 'door', outcome: 'contacted', client_id: cid(4), answers: [{ question_id: top.id, value: 'Housing' }],
+  }));
+  const later = ok(await desk.get(`/api/persons/${maya.id}/answers`)).answers.filter((a) => a.question_id === top.id);
+  assert.deepEqual(later.map((a) => a.says), ['Housing', 'Transit'], 'a new visit keeps the old one on record');
+
+  // Two answers to one question on one visit, stored before answers were
+  // replaced: the next change of answer leaves one, and says so on the chain.
+  const visit2 = (await db.query('select id from contacts where workspace_id = $1 and client_id = $2', [ws, cid(4)])).rows[0].id;
+  await db.query(
+    `insert into survey_responses (id, workspace_id, survey_id, question_id, contact_id, person_id, value, created_at)
+     values (gen_random_uuid(), $1, $2, $3, $4, $5, '"Transit"', now() + interval '1 second')`,
+    [ws, sv.id, top.id, visit2, maya.id],
+  );
+  ok(await vol.action('contact.log', {
+    person_id: maya.id, channel: 'door', outcome: 'contacted', client_id: cid(5), visit_of: cid(4),
+    answers: [{ question_id: top.id, value: 'Housing' }],
+  }));
+  const onVisit2 = (await db.query(
+    'select id, value from survey_responses where workspace_id = $1 and contact_id = $2 and question_id = $3', [ws, visit2, top.id],
+  )).rows;
+  assert.deepEqual(onVisit2.map((r) => r.value), ['Housing'], 'one answer left on that visit');
+  const voided = (await db.query(
+    `select count(*)::int as n from events where workspace_id = $1 and entity_type = 'survey_response' and op = 'void' and payload->>'replaced_by' = $2`,
+    [ws, onVisit2[0].id],
+  )).rows[0].n;
+  assert.equal(voided, 1);
+  assert.equal(ok(await desk.get('/api/audit/verify')).ok, true);
+  ok(await desk.action('survey.archive', { id: sv.id }));
+});
+
 test('every survey write is on the hash chain', async () => {
   const events = ok(await desk.get('/api/events?limit=1000')).events;
   const types = new Set(events.map((e) => e.entity_type));

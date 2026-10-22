@@ -1,12 +1,13 @@
 // One survey's builder (/surveys/:id). Title = the survey's name; one yellow
-// "Add question". Under it: "Asking now" on/off, where it's asked (Door ·
-// Calls · Both) and "Results · N". The questions in the order they're
-// asked; tap one to edit it, move it up or down, or remove it ("Remove this
-// question? Yes · No" — its answers are kept). Once someone has answered a
-// question its words and kind are fixed ("Add a new question" starts one
-// from it); while the survey is asked its kind is fixed too (phones keep the
-// questions a day). Under "More": only in some turfs, rename, archive
-// (answers kept; "Bring back" undoes it).
+// "Add question". Under it: the on/off switch ("Asking now" / "Not asking"),
+// where it's asked (Door · Calls · Both) and "Results · N". The questions in
+// the order they're asked; tap one to edit it, move it up or down, or remove
+// it ("Remove this question? Yes · No" — its answers are kept). Once someone
+// has answered a question its words and kind are fixed ("Has answers — words
+// can't change"; "Copy as a new question" starts one from it); while the
+// survey is asked its kind is fixed too (phones keep the questions a day).
+// Under "More": only in some turfs, rename, archive (answers kept; "Bring
+// back" undoes it).
 import { useId, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -49,6 +50,7 @@ function QuestionForm({ initial = null, answered = false, asking = false, submit
           <>
             <span className="sv-label">Question</span>
             <p className="sv-locked">{text}</p>
+            <p className="sv-locked__why muted">Has answers — words can't change</p>
           </>
         ) : (
           <>
@@ -62,7 +64,7 @@ function QuestionForm({ initial = null, answered = false, asking = false, submit
         <span className="sv-label" id={`${uid}-kind`}>Answer</span>
         {kindFixed ? (
           <p className="sv-locked">
-            {KIND_LABEL[kind]} <span className="muted">· {answered ? 'has answers' : 'turn off Asking now to change'}</span>
+            {KIND_LABEL[kind]} <span className="muted">· {answered ? "can't change" : 'turn off Asking now to change'}</span>
           </p>
         ) : (
           <div className="sv-kinds" role="group" aria-labelledby={`${uid}-kind`}>
@@ -98,7 +100,7 @@ function QuestionForm({ initial = null, answered = false, asking = false, submit
       <div className="ops-actions">
         {editable && <button type="submit" className={`btn ops-tap ${primary ? 'btn-primary' : 'ops-solid'}`} disabled={busy}>{submitLabel}</button>}
         {answered && onAskNew && (
-          <button type="button" className="btn ops-tap" disabled={busy} onClick={onAskNew}>Add a new question</button>
+          <button type="button" className="btn ops-tap" disabled={busy} onClick={onAskNew}>Copy as a new question</button>
         )}
         <button type="button" className="btn btn-quiet ops-tap" onClick={onCancel}>Cancel</button>
       </div>
@@ -205,7 +207,7 @@ export default function SurveysEdit() {
   const adding = params.get('add') === '1';
   const refresh = useSurveyRefresh();
   const [openQ, setOpenQ] = useState(null);
-  // "Add a new question" from an answered one: the add form starts from it.
+  // "Copy as a new question" from an answered one: the add form starts from it.
   const [start, setStart] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -290,7 +292,7 @@ export default function SurveysEdit() {
           <button type="button" role="switch" aria-checked={survey.active} className="sv-switch" disabled={busy}
             onClick={() => run('survey.update', { id, active: !survey.active })}>
             <span className="sv-switch__track" aria-hidden="true"><span className="sv-switch__dot" /></span>
-            <span className="sv-switch__label">Asking now</span>
+            <span className="sv-switch__label">{survey.active ? 'Asking now' : 'Not asking'}</span>
           </button>
         )}
         <Link className="btn ops-tap sv-results-link" to={`/surveys/${id}/results`}>Results · {survey.people}</Link>

@@ -17,6 +17,11 @@
 // off or archived, are still kept: the person really said it (a knock saved
 // offline can arrive after the desk's edit). Choice labels taken off a
 // question stay valid for the same reason (retired_options).
+//
+// One answer per question per contact: a later tap of the same visit
+// (contact.log visit_of — "Save answers", the answer changed, "Save answers"
+// again) replaces that contact's earlier answer to the question (an 'update'
+// on the hash chain) instead of storing a second one.
 import { newId } from '../../lib/events.js';
 import { httpError } from '../../actions/util.js';
 
@@ -82,8 +87,37 @@ export const storeAnswers = async (tx, ctx, { contact, input, reply = {} }, emit
   const skipped = checked.filter((a) => a.value === undefined);
   reply.answers_saved = checked.length - skipped.length;
   reply.answers_skipped = skipped.map(({ q }) => ({ question_id: q.id, question: q.text }));
+  // This contact's answers so far (a later tap of the same visit, visit_of):
+  // a new answer to one of those questions replaces it — one answer per
+  // question per visit, newest last in each list.
+  const prior = new Map();
+  for (const r of (await tx.query(
+    `select id, question_id, value from survey_responses
+     where workspace_id = $1 and contact_id = $2 and question_id in (select (jsonb_array_elements_text($3::jsonb))::uuid)
+     order by created_at, id for update`,
+    [ctx.workspaceId, contact.id, JSON.stringify(ids)],
+  )).rows) {
+    if (!prior.has(r.question_id)) prior.set(r.question_id, []);
+    prior.get(r.question_id).push(r);
+  }
   for (const { q, value } of checked) {
     if (value === undefined) continue;
+    const earlier = prior.get(q.id) || [];
+    if (earlier.length) {
+      const [keep] = earlier.slice(-1);
+      await tx.query(
+        'update survey_responses set value = $3, created_by = $4 where id = $1 and workspace_id = $2',
+        [keep.id, ctx.workspaceId, JSON.stringify(value), ctx.user?.id || null],
+      );
+      emit('survey_response', keep.id, 'update', { contact_id: contact.id, question_id: q.id, value, was: keep.value });
+      // Two answers to one question on one visit (stored before answers were
+      // replaced): only the newest stays.
+      for (const extra of earlier.slice(0, -1)) {
+        await tx.query('delete from survey_responses where id = $1 and workspace_id = $2', [extra.id, ctx.workspaceId]);
+        emit('survey_response', extra.id, 'void', { contact_id: contact.id, question_id: q.id, value: extra.value, replaced_by: keep.id });
+      }
+      continue;
+    }
     const id = newId();
     await tx.query(
       `insert into survey_responses (id, workspace_id, survey_id, question_id, contact_id, person_id, value, created_by)

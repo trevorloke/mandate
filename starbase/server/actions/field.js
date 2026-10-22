@@ -99,7 +99,8 @@ export const FIELD_ACTIONS = {
       })).max(50).nullish(),
       // The same visit: the client_id of this caller's earlier talked tap on
       // this person with no rating yet ("Save answers"). That contact gets
-      // this tap's outcome, rating and note — one record per visit, not two.
+      // this tap's outcome, rating and note — one record per visit, not two;
+      // a new answer to a question it already has replaces that answer.
       // If it isn't there (refused, someone else's, already rated), this tap
       // is logged on its own as usual.
       visit_of: uuid().nullish(),

@@ -181,12 +181,13 @@ await page.click('.sv-switch');
 await sleep(700);
 let s = (await D.api(`/surveys/${surveyId}`)).json.survey;
 check('switch off → survey off', s.active === false && (await page.getAttribute('.sv-switch', 'aria-checked')) === 'false');
+check('…and its words say so: "Not asking"', (await page.innerText('.sv-switch')).trim() === 'Not asking', await page.innerText('.sv-switch'));
 let active = (await D.api('/surveys/active?context=door')).json.surveys;
 check('an off survey is not asked in the field', active.length === 0);
 await page.click('.sv-switch');
 await sleep(700);
 s = (await D.api(`/surveys/${surveyId}`)).json.survey;
-check('switch on → asking now', s.active === true);
+check('switch on → asking now', s.active === true && (await page.innerText('.sv-switch')).trim() === 'Asking now', await page.innerText('.sv-switch'));
 
 // ── 4. The map's door card: Questions under the outcomes ──
 await D.go(`/map?person=${P.harjit.id}`);
@@ -399,17 +400,20 @@ await ppage.click('.sv-qlist .ops-row:has-text("What matters most to you?")');
 await sleep(300);
 const mq = await measure(ppage, '.sv-qitem[data-open] .sv-kind, .sv-qitem[data-open] .input, .sv-qitem[data-open] .btn');
 check('question editor on a phone: fields ≥ 48px, no sideways scroll', mq.minTap >= 48 && mq.overflow <= 0, JSON.stringify(mq));
-check('a question with answers keeps its kind', /has answers/.test(await ppage.innerText('.sv-qitem[data-open]')));
+check('a question with answers keeps its kind', /· can't change/.test(await ppage.innerText('.sv-qitem[data-open]')));
+check('…and says why its words are fixed', (await ppage.innerText('.sv-qitem[data-open] .sv-locked__why')).trim() === "Has answers — words can't change");
 check('…and its words: no box to retype them', !(await ppage.$('.sv-qitem[data-open] input[placeholder="What matters most to you?"]'))
   && /What matters most to you\?/.test(await ppage.innerText('.sv-qitem[data-open] .sv-locked')));
 const firstQ = built.questions.find((q) => q.text === 'What matters most to you?');
 const reword = await PH.api('/actions/survey.question.update', { id: firstQ.id, text: 'What worries you least?' });
 check('the server refuses rewording an answered question', reword.status === 409 && /add a new question/.test(reword.json.error), reword.raw);
 await PH.full('15-question-editor-phone');
-await ppage.click('.sv-qitem[data-open] button:has-text("Add a new question")');
+check('one add button in the open question: "Copy as a new question"', !(await ppage.$('.sv-qitem[data-open] button:has-text("Add a new question")'))
+  && !!(await ppage.$('.sv-qitem[data-open] button:has-text("Copy as a new question")')));
+await ppage.click('.sv-qitem[data-open] button:has-text("Copy as a new question")');
 await sleep(300);
 const startVal = await ppage.inputValue('form[aria-label="Add question"] input[placeholder="What matters most to you?"]').catch(() => '');
-check('"Add a new question" starts one from it (one yellow)', startVal === 'What matters most to you?' && (await measure(ppage)).yellow === 1, startVal);
+check('"Copy as a new question" starts one from it (one yellow)', startVal === 'What matters most to you?' && (await measure(ppage)).yellow === 1, startVal);
 await ppage.click('form[aria-label="Add question"] button:has-text("Cancel")');
 await dphone.close();
 

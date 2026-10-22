@@ -88,6 +88,7 @@
 .sv-kind[aria-pressed='true'] { background: var(--ink); color: var(--paper-0); border-color: var(--ink); font-weight: 600; }
 .sv-kind:focus-visible { outline: 2px solid var(--mark-deep); outline-offset: 2px; }
 .sv-locked { margin: 0; font-size: 15px; }
+.sv-locked__why { margin: 2px 0 0; font-size: 13px; }
 .sv-choices { gap: 6px; }
 .sv-choice { display: flex; gap: 6px; align-items: center; }
 .sv-choice .input { flex: 1 1 auto; min-width: 0; }
