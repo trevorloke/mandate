@@ -81,6 +81,7 @@
 .rel-needs { align-self: center; }
 /* My people: a link's note wraps rather than pushing the row wide */
 .rel-note { overflow-wrap: anywhere; }
+.rel-phone { white-space: nowrap; }
 .rel-knows { list-style: none; margin: 0; padding: 0; }
 .rel-knows li {
   display: flex;

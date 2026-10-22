@@ -33,7 +33,7 @@ const NO_ANSWER = { phone: 'No answer', text: 'No reply' };
 
 // Looks like an email (the server checks it properly): "typo@" is caught here,
 // before it's saved on the phone and refused later.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
 
 // A server refusal in plain words: "person: add a phone…" → "Add a phone…".
 const say = (msg) => {
@@ -322,7 +322,7 @@ export default function MyPeople() {
                   <span className="ops-row__main">
                     <span className="ops-row__name">{p.name}</span>
                     <span className="ops-row__sub">
-                      <span className="rel-note">{[linkWords(link), p.phone].filter(Boolean).join(' · ')}</span>
+                      <span className="rel-note">{linkWords(link)}{p.phone ? ' ·' : ''}</span>{p.phone ? <span className="rel-phone">{p.phone}</span> : null}
                     </span>
                   </span>
                   <span className="ops-row__end">
