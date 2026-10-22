@@ -5,13 +5,19 @@
 // every label whole at 390px, never cut off ("OUTREACH", not "OUTRE…").
 // One account menu (the avatar) holds the name, the campaign, Team (managers)
 // and Sign out. Keyboard: 'n' anywhere → log a gift (desk roles).
-// Under the nav, a slim strip says when the phone is offline or knocks are
-// still waiting in the outbox (src/offline.js), with a "Send now" button.
+// Under the nav, a slim strip says when the phone is offline or field work
+// is still waiting in the outbox (src/offline.js): a "3 saved on this phone"
+// chip opens the list (refused ones with the server's reason, Try again /
+// Dismiss), with a "Send now" button when there's signal.
 import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, initials } from './api.js';
-import { pendingCount, useOutbox, useOutboxAutoFlush, clearOutbox } from './offline.js';
+import {
+  pendingCount, unsentCount, useOutbox, useOutboxAutoFlush, clearOutbox, dismissItem, retryItem, onOutboxSent, setOutboxOwner,
+} from './offline.js';
+import OfflineSheet from './components/OfflineSheet.jsx';
+import { forgetPhoneCopies, keepOnlyMine } from './components/OfflineCache.js';
 import './pages/offline.css';
 
 // Staff, treasurers and managers. App.jsx guards the desk-only routes with it.
@@ -55,8 +61,9 @@ const NAV_VOLUNTEER = [
   { to: '/shifts', label: 'Shifts', icon: 'shifts' },
 ];
 
-// Everything a sent knock can change (ratings, doors left, the brief).
-const FLUSHED_KEYS = [['doors'], ['brief'], ['turfs'], ['turf'], ['person'], ['persons'], ['contacts']];
+// Everything sent field work can change (ratings, doors left, new people,
+// pins, signs, shift spots, the brief).
+const FLUSHED_KEYS = [['doors'], ['brief'], ['turfs'], ['turf'], ['person'], ['persons'], ['contacts'], ['signs'], ['shifts'], ['shift']];
 
 function useOnline() {
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
@@ -73,27 +80,37 @@ function useOnline() {
   return online;
 }
 
-const knocks = (n) => `${n} ${n === 1 ? 'knock' : 'knocks'}`;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function OfflineBanner({ online, outbox, onSend, notice, onDismissNotice }) {
-  const { pending, flushing, lastError } = outbox;
-  const [hiddenError, setHiddenError] = useState(null);
-  // "Still offline" is the outbox's retry note; a refusal is worth showing
-  // (once) even after the queue has emptied.
-  const refused = lastError && !/still offline/i.test(lastError) ? lastError : null;
-  const showRefused = Boolean(refused && refused !== hiddenError);
-  if (online && pending === 0 && !showRefused && !notice) return null;
-
-  let text;
-  if (!online) text = pending > 0 ? `Offline — ${knocks(pending)} saved` : 'Offline — knocks save on this phone';
-  else if (pending > 0) text = flushing ? `Sending ${knocks(pending)}…` : `${knocks(pending)} waiting to send`;
+function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice }) {
+  const { pending, refused, flushing, lastError } = outbox;
+  const [open, setOpen] = useState(false);
+  const chipRef = useRef(null);
+  const close = useCallback(() => {
+    setOpen(false);
+    requestAnimationFrame(() => chipRef.current?.focus({ preventScroll: true }));
+  }, []);
+  const items = pending + refused;
+  // Everything sent or dismissed: nothing left to list.
+  useEffect(() => { if (!items) setOpen(false); }, [items]);
+  // "Still offline" is the outbox's retry note (the chip already says it's
+  // saved); a lapsed sign-in is worth saying.
+  const stuck = lastError && !/still offline/i.test(lastError) ? lastError : null;
+  if (online && items === 0 && !notice) return null;
 
   return (
-    <div className={`offline-strip${online ? '' : ' is-offline'}${text ? '' : ' is-refused'}`} role="status" aria-live="polite">
+    <div className={`offline-strip${online ? '' : ' is-offline'}${online && !pending && refused ? ' is-refused' : ''}`} role="status" aria-live="polite">
       <div className="offline-strip__inner">
         <span className="offline-strip__dot" aria-hidden="true" />
-        {text && <span className="offline-strip__text">{text}</span>}
+        {!online && <span className="offline-strip__text">{items ? 'Offline' : 'Offline — field work saves on this phone'}</span>}
+        {items > 0 && (
+          <button type="button" ref={chipRef} className="offline-strip__chip" aria-haspopup="dialog" aria-expanded={open}
+            onClick={() => (open ? close() : setOpen(true))}>
+            {pending > 0 && <span>{pending} saved on this phone</span>}
+            {pending > 0 && refused > 0 && <span aria-hidden="true">·</span>}
+            {refused > 0 && <span className="is-refused">{refused} refused</span>}
+          </button>
+        )}
         {!online && pending > 0 && <span className="offline-strip__hint">Sends when you're back online</span>}
         {/* Not yellow: the screen under the strip keeps its one primary button. */}
         {online && pending > 0 && (
@@ -101,14 +118,7 @@ function OfflineBanner({ online, outbox, onSend, notice, onDismissNotice }) {
             {flushing ? 'Sending…' : 'Send now'}
           </button>
         )}
-        {showRefused && (
-          <span className="offline-strip__error">
-            {refused}
-            <button type="button" className="btn btn-quiet offline-strip__btn" onClick={() => setHiddenError(refused)}>
-              Dismiss
-            </button>
-          </span>
-        )}
+        {stuck && pending > 0 && <span className="offline-strip__error">{stuck}</span>}
         {notice && (
           <span className="offline-strip__error">
             {notice}
@@ -118,6 +128,10 @@ function OfflineBanner({ online, outbox, onSend, notice, onDismissNotice }) {
           </span>
         )}
       </div>
+      {open && items > 0 && (
+        <OfflineSheet outbox={outbox} online={online} nameOf={nameOf} onSend={onSend} onRetry={onRetry}
+          onDismiss={dismissItem} onClose={close} />
+      )}
     </div>
   );
 }
@@ -127,13 +141,13 @@ function OfflineBanner({ online, outbox, onSend, notice, onDismissNotice }) {
 // is no user yet: say so instead of crashing. It resumes by itself when the
 // signal comes back — then the app opens, or a dead session goes to login.
 function WaitingForSignal() {
-  const { pending } = useOutbox();
+  const { pending, refused } = useOutbox();
   return (
     <main className="page offline-gate">
       <span className="eyebrow">Offline</span>
       <h1 className="offline-gate__title">Waiting for signal</h1>
       <p>Opens by itself when you&rsquo;re back online.</p>
-      {pending > 0 && <p className="offline-gate__saved">{knocks(pending)} saved on this phone</p>}
+      {pending + refused > 0 && <p className="offline-gate__saved">{pending + refused} saved on this phone</p>}
     </main>
   );
 }
@@ -184,7 +198,7 @@ function AccountMenu({ me, signingOut, confirmLeft, onSignOut, onCancelSignOut }
         {me.role === 'manager' && <NavLink to="/team" ref={firstRef} className="acct-item">Team</NavLink>}
         {confirmLeft > 0 ? (
           <div className="acct-confirm" role="group" aria-label="Sign out">
-            <p>{knocks(confirmLeft)} not sent. Sign out and delete {confirmLeft === 1 ? 'it' : 'them'}?</p>
+            <p>{confirmLeft} not sent yet. Sign out and delete {confirmLeft === 1 ? 'it' : 'them'}?</p>
             <div className="acct-confirm__row">
               <button type="button" className="btn acct-danger" onClick={() => onSignOut(true)} disabled={signingOut}>
                 {signingOut ? 'Signing out…' : 'Sign out'}
@@ -209,6 +223,10 @@ export default function Shell({ me }) {
 }
 
 function SignedInShell({ me }) {
+  // What this phone saved belongs to whoever saved it: only their own items
+  // are listed and sent while they're signed in (idempotent, so here, before
+  // any screen reads the outbox).
+  setOutboxOwner(me);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -226,8 +244,14 @@ function SignedInShell({ me }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate, desk]);
 
-  // Offline outbox: send queued knocks on reconnect / focus / every 30s, then
-  // refresh every screen that shows what they changed.
+  // Phone copies (components/OfflineCache.js) of anyone else who signed in
+  // on this phone go; this person's stay for the field screens.
+  const userId = me.user.id;
+  const workspaceId = me.workspace.id;
+  useEffect(() => { keepOnlyMine({ user: { id: userId }, workspace: { id: workspaceId } }); }, [userId, workspaceId]);
+
+  // Offline outbox: send queued field work on reconnect / focus / every 30s,
+  // then refresh every screen that shows what it changed.
   const online = useOnline();
   const outbox = useOutbox();
   const outboxRef = useRef(outbox);
@@ -249,10 +273,47 @@ function SignedInShell({ me }) {
     const r = await outbox.flush();
     if (r.sent) onFlushed(r);
   };
+  const retry = async (cid) => {
+    const r = await retryItem(cid);
+    if (r.sent) onFlushed(r);
+  };
+  // A person added offline has just reached the server: keep their pin on
+  // the map (the outbox no longer lays it over) until the refetch lands.
+  useEffect(() => onOutboxSent(({ name, result }) => {
+    const p = name === 'person.create' ? result?.person : null;
+    if (!p?.id || p.lat == null || p.lng == null) return;
+    queryClient.setQueryData(['doors'], (d) => (d && !d.persons.some((x) => x.id === p.id) ? {
+      ...d,
+      persons: [...d.persons, {
+        id: p.id, name: p.name, phone: p.phone ?? null, email: p.email ?? null, address: p.address ?? null,
+        unit: p.unit ?? null, lat: p.lat, lng: p.lng, rating: null, rated_at: null, tags: p.tags || [],
+      }],
+    } : d));
+  }), [queryClient]);
+  // The sheet names people from what this phone already loaded, for items
+  // that didn't keep a name (a knock logged from a profile, say).
+  const nameOf = useCallback((id) => {
+    const fromDoors = queryClient.getQueryData(['doors'])?.persons?.find((p) => p.id === id);
+    if (fromDoors) return fromDoors.name;
+    const profile = queryClient.getQueryData(['person', id])?.person;
+    if (profile?.name) return profile.name;
+    for (const [, data] of queryClient.getQueriesData({ queryKey: ['persons'] })) {
+      const p = data?.persons?.find?.((x) => x.id === id);
+      if (p) return p.name;
+    }
+    for (const [, data] of queryClient.getQueriesData({ queryKey: ['turf'] })) {
+      for (const d of data?.doors || []) {
+        const p = d.persons?.find((x) => x.id === id);
+        if (p) return p.name;
+      }
+    }
+    return '';
+  }, [queryClient]);
 
-  // Queued knocks are sent under whoever is signed in when they go out, so
-  // they must leave before this person signs out — never with the next one.
-  // Any still stuck: ask in place ("2 knocks not sent. Sign out? · Stay").
+  // Queued field work is sent under whoever is signed in when it goes out,
+  // so it must leave before this person signs out — never with the next one.
+  // Any still stuck (or refused): ask in place ("2 not sent yet. Sign out
+  // and delete them? · Stay").
   const signOut = async (force) => {
     if (signingOut) return;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -268,13 +329,15 @@ function SignedInShell({ me }) {
         const r = await outbox.flush();
         if (r.sent) onFlushed(r);
       }
-      const left = pendingCount();
+      const left = unsentCount();
       if (left > 0 && !force) {
         setConfirmLeft(left);
         return;
       }
       await apiPost('/auth/logout');
       queryClient.clear();
+      // What this phone kept for them (doors, calls, shifts, walk lists) goes too.
+      forgetPhoneCopies();
       if (left > 0) clearOutbox(); // the next person on this phone must not send them as theirs
       setConfirmLeft(0);
       navigate('/login');
@@ -319,6 +382,8 @@ function SignedInShell({ me }) {
           online={online}
           outbox={outbox}
           onSend={sendNow}
+          onRetry={retry}
+          nameOf={nameOf}
           notice={notice}
           onDismissNotice={() => setNotice(null)}
         />

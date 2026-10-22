@@ -16,6 +16,7 @@ import RatingButtons, { RatingChip, ratingSay, ratingText, ratingWho } from '../
 import { logContact } from '../offline.js';
 import SurveyQuestions, { answersTail, answersWord, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
+import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import { apiGet, action, ApiError } from '../api.js';
 import './people.css';
 import { TextingCallButton, TextingRepliesLink, noTexts } from '../components/TextingCard.jsx';
@@ -151,15 +152,16 @@ export function Icon({ name, size = 20 }) {
 }
 
 // Run an action with busy/error state; `onDone` gets the result (invalidate here).
+// meta: { who } names a knock in the shell's "saved on this phone" list.
 export function useAction(onDone) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const run = async (name, input) => {
+  const run = async (name, input, meta) => {
     setBusy(true);
     setError(null);
     try {
       // Knocks always go through the offline outbox (saved, sent once).
-      const res = name === 'contact.log' ? await logContact(input) : await action(name, input);
+      const res = name === 'contact.log' ? await logContact(input, meta) : await action(name, input);
       await onDone?.(res, name, input);
       return res;
     } catch (e) {
@@ -835,11 +837,16 @@ function CallsScreen() {
   if (f.tag) qs.set('tag', f.tag);
   if (f.rating) qs.set('rating', f.rating);
   if (f.role) qs.set('role', f.role);
+  // The list is kept on this phone, so losing signal mid-list loses nothing.
+  const copyName = `calls:${qs}`;
   const persons = useQuery({
     queryKey: ['persons', 'list', qs.toString()],
     queryFn: () => apiGet(`/persons?${qs}`),
     placeholderData: keepPreviousData,
+    ...phoneCopy(me, copyName),
   });
+  useKeepCopy(me, copyName, persons);
+  const listCopy = showingCopy(persons);
   const seed = me?.user?.id || '';
   const list = persons.data?.persons;
   const rows = useMemo(
@@ -915,7 +922,7 @@ function CallsScreen() {
     if (!p) return;
     const inCard = focusInCard(); // read before the buttons disable for the save
     const answers = outcome === 'contacted' ? survey.take() : [];
-    const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined, answers: answers.length ? answers : undefined });
+    const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined, answers: answers.length ? answers : undefined }, { who: p.name });
     if (!res) { survey.restore(answers); return; }
     const next = after(at);
     refocus.current = inCard;
@@ -968,7 +975,8 @@ function CallsScreen() {
       {filterChips}
       <TextingRepliesLink />
 
-      {persons.isError && !offline && <p className="error">{persons.error.message}</p>}
+      {listCopy && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
+      {persons.isError && !offline && !listCopy && <p className="error">{persons.error.message}</p>}
 
       {offline ? (
         <p className="pp-offline" role="status">No signal — your list loads when you’re back online.</p>

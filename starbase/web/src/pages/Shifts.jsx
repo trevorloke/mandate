@@ -25,6 +25,12 @@
 //                  no email or phone on file. "Notify again" only once
 //                  someone was actually reached.
 //
+// Offline: the list and each shift opened are kept on this phone (with
+// "Offline copy" when there's no signal), and "Count me in" / "Can't make
+// it" go through the outbox (src/offline.js) — saved here, sent once when
+// the signal is back; until then the screen says "Not sent yet", never
+// "You're on".
+//
 // Also exports two small building blocks:
 //   <PersonPicker onPick={(person) => …} />   type-ahead over /api/persons?q= (Signs uses it)
 //   <FillBar filled={n} capacity={m} />       filled / capacity meter
@@ -33,7 +39,13 @@ import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { VOLUNTEER_ROLES, SHIFT_STATUSES } from '@starbase/shared/canvass';
 import { apiGet, action } from '../api.js';
+import { queueAction, useOutbox } from '../offline.js';
+import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import './shifts.css';
+
+// This phone's own "Count me in" / "Can't make it" still waiting to send, by shift.
+const waitingSelf = (items, shiftId) => [...items].reverse().find((i) => i.state === 'pending'
+  && (i.name === 'shift.join' || i.name === 'shift.leave') && i.input?.shift_id === shiftId) || null;
 
 const roleLabel = (code) => VOLUNTEER_ROLES.find((r) => r.code === code)?.label ?? code;
 // One set of words for a volunteer's spot (select, chip, hints).
@@ -514,7 +526,7 @@ function useLegacyMyShifts(me, enabled) {
 }
 
 // ── List ──
-function ShiftRow({ s, now, past = false, mine = false }) {
+function ShiftRow({ s, now, past = false, mine = false, waiting = false }) {
   const full = s.capacity && Number(s.filled) >= s.capacity;
   return (
     <li className="ops-item" data-tone={past ? 'past' : undefined}>
@@ -524,9 +536,11 @@ function ShiftRow({ s, now, past = false, mine = false }) {
           <span className="ops-row__sub">{whenLine(s, now)}</span>
         </span>
         <span className="ops-row__end">
-          {mine
-            ? <span className="chip chip-ok ops-chip-lg">You’re on ✓</span>
-            : <span className={`chip ops-chip-lg${full ? ' chip-ok' : ''}`}>{spotsText(s.filled, s.capacity)}</span>}
+          {waiting
+            ? <span className="chip obx-chip ops-chip-lg">Not sent yet</span>
+            : mine
+              ? <span className="chip chip-ok ops-chip-lg">You’re on ✓</span>
+              : <span className={`chip ops-chip-lg${full ? ' chip-ok' : ''}`}>{spotsText(s.filled, s.capacity)}</span>}
         </span>
       </Link>
       {!past && <SpotsBar filled={s.filled} capacity={s.capacity} />}
@@ -538,7 +552,10 @@ function ShiftList({ canDesk, me }) {
   const [params, setParams] = useSearchParams();
   const showNew = canDesk && params.get('new') === '1';
   const [showPast, setShowPast] = useState(false);
-  const shifts = useQuery({ queryKey: ['shifts'], queryFn: () => apiGet('/shifts') });
+  const shifts = useQuery({ queryKey: ['shifts'], queryFn: () => apiGet('/shifts'), ...phoneCopy(me, 'shifts') });
+  useKeepCopy(me, 'shifts', shifts);
+  const listCopy = showingCopy(shifts);
+  const outbox = useOutbox();
   const all = shifts.data?.shifts ?? [];
   // s.mine is the answer; the email lookup runs only for a server without it.
   const legacy = !canDesk && shifts.isSuccess && all.some((s) => typeof s.mine !== 'boolean');
@@ -565,19 +582,20 @@ function ShiftList({ canDesk, me }) {
 
       {showNew && <ShiftForm onClose={() => setParams({})} />}
 
-      {shifts.isPending && <p className="muted">Loading…</p>}
-      {shifts.isError && <p className="error">{shifts.error.message}</p>}
+      {listCopy && <p className="ops-copy"><span className="chip obx-copy">Offline copy</span></p>}
+      {shifts.isPending && <p className="muted">{shifts.fetchStatus === 'paused' ? 'Offline — loads with signal' : 'Loading…'}</p>}
+      {shifts.isError && !listCopy && <p className="error">{shifts.error.message}</p>}
       {shifts.isSuccess && upcoming.length === 0 && <p className="ops-empty">No shifts coming up.</p>}
 
       {yours.length > 0 && (
         <>
           <span className="eyebrow ops-label">Your shifts</span>
-          <ul className="ops-rows">{yours.map((s) => <ShiftRow key={s.id} s={s} now={now} mine />)}</ul>
+          <ul className="ops-rows">{yours.map((s) => <ShiftRow key={s.id} s={s} now={now} mine waiting={!!waitingSelf(outbox.items, s.id)} />)}</ul>
           {others.length > 0 && <span className="eyebrow ops-label">Open shifts</span>}
         </>
       )}
       {others.length > 0 && (
-        <ul className="ops-rows">{others.map((s) => <ShiftRow key={s.id} s={s} now={now} />)}</ul>
+        <ul className="ops-rows">{others.map((s) => <ShiftRow key={s.id} s={s} now={now} waiting={!!waitingSelf(outbox.items, s.id)} />)}</ul>
       )}
 
       {past.length > 0 && (
@@ -676,7 +694,11 @@ function NameRow({ a, isMe }) {
 function ShiftDetail({ id, canDesk, me }) {
   const queryClient = useQueryClient();
   const validId = isUuid(id);
-  const shiftQ = useQuery({ queryKey: ['shift', id], queryFn: () => apiGet(`/shifts/${id}`), enabled: validId });
+  // Each shift opened is kept on this phone, with what this sign-in may do.
+  const shiftQ = useQuery({ queryKey: ['shift', id], queryFn: () => apiGet(`/shifts/${id}`), enabled: validId, ...phoneCopy(me, `shift:${id}`) });
+  useKeepCopy(me, `shift:${id}`, shiftQ);
+  const outbox = useOutbox();
+  const waiting = waitingSelf(outbox.items, id);
   // Providers are read once; the brief is shared with Today so it is usually cached.
   const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity });
   // Which actions this login may run. A volunteer gets "Count me in" only
@@ -686,7 +708,9 @@ function ShiftDetail({ id, canDesk, me }) {
     queryFn: () => apiGet('/actions'),
     enabled: !canDesk,
     staleTime: Infinity,
+    ...phoneCopy(me, 'actions'),
   });
+  useKeepCopy(me, 'actions', allowed);
 
   const [openId, setOpenId] = useState(null);
   const [rowBusy, setRowBusy] = useState(null);
@@ -709,16 +733,18 @@ function ShiftDetail({ id, canDesk, me }) {
     queryClient.invalidateQueries({ queryKey: ['brief'] });
     queryClient.invalidateQueries({ queryKey: ['person'] });
   };
-  // Volunteer books or drops their own spot (shift.join / shift.leave).
+  // Volunteer books or drops their own spot (shift.join / shift.leave),
+  // through the outbox: no signal, it waits on the phone ("Not sent yet").
   const selfAction = async (name) => {
     setJoinError(null);
     setJoining(true);
     try {
-      await action(name, { shift_id: id });
+      const r = await queueAction(name, { shift_id: id }, { who: shiftQ.data?.shift?.title });
+      setLeaving(false);
+      if (r.queued) return;
       // Joining may create the volunteer's supporter record; an older
       // server's "Your shifts" lookup searches persons, so refresh that too.
       queryClient.invalidateQueries({ queryKey: ['persons'] });
-      setLeaving(false);
       refresh();
     } catch (e) {
       setJoinError(e.message);
@@ -727,7 +753,9 @@ function ShiftDetail({ id, canDesk, me }) {
     }
   };
 
-  if (!validId || shiftQ.isError) {
+  // A copy kept on the phone still opens when the signal is gone; a shift
+  // the server says is gone is gone.
+  if (!validId || (shiftQ.isError && (!shiftQ.data || shiftQ.error?.status))) {
     return (
       <div className="ops-page">
         <Link to="/shifts" className="ops-back">← Shifts</Link>
@@ -739,7 +767,14 @@ function ShiftDetail({ id, canDesk, me }) {
   }
   // isPending, not isLoading: a query paused offline is pending but not
   // fetching, and reading shiftQ.data below would throw.
-  if (shiftQ.isPending) return <p className="muted">Loading…</p>;
+  if (shiftQ.isPending) {
+    return shiftQ.fetchStatus === 'paused' ? (
+      <div className="ops-page">
+        <Link to="/shifts" className="ops-back">← Shifts</Link>
+        <p className="ops-empty">Offline — open this shift once with signal.</p>
+      </div>
+    ) : <p className="muted">Loading…</p>;
+  }
 
   const { shift, assignees } = shiftQ.data;
   const active = assignees.filter((a) => a.status === 'assigned' || a.status === 'confirmed');
@@ -950,12 +985,18 @@ function ShiftDetail({ id, canDesk, me }) {
         <SpotsBar filled={active.length} capacity={shift.capacity} />
       </div>
 
+      {showingCopy(shiftQ) && <p className="ops-copy"><span className="chip obx-copy">Offline copy</span></p>}
+
       {!canDesk && (
         <section className="ops-notify" aria-label="Your spot">
-          {onIt ? (
+          {waiting?.name === 'shift.join' && !onIt ? (
+            <p className="ops-pending" role="status">Count me in <span className="chip obx-chip">Not sent yet</span></p>
+          ) : onIt ? (
             <>
               <span className="ops-onit" role="status"><span aria-hidden="true">✓</span> You’re on this shift</span>
-              {canLeave && !over && (!leaving ? (
+              {waiting?.name === 'shift.leave' ? (
+                <p className="ops-pending" role="status">Can’t make it <span className="chip obx-chip">Not sent yet</span></p>
+              ) : canLeave && !over && (!leaving ? (
                 <button type="button" className="btn btn-quiet ops-tap" disabled={joining}
                   onClick={() => { setLeaving(true); setJoinError(null); }}>
                   Can’t make it

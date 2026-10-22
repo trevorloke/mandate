@@ -6,8 +6,13 @@
  *               install, and whenever a newer index.html arrives, the whole
  *               build graph is fetched so lazy screens (Map, People…) open
  *               offline too, and files from older builds are dropped.
- *   Map tiles   OpenStreetMap tiles in their own capped cache (oldest out
- *               first) so streets you've looked at recently still draw.
+ *   Map tiles   Tiles you've already looked at, in their own capped cache
+ *               (~1500 tiles, oldest out first), so a turf seen with signal
+ *               still draws offline. OpenStreetMap by default; the map tells
+ *               this worker its provider (GET /api/map/config →
+ *               postMessage { type: 'starbase:tiles', url }), kept across
+ *               restarts. Only tiles the map itself asked for are kept —
+ *               nothing is ever fetched ahead (tile servers' usage rules).
  *   Never       /api/* (live data and every write — the outbox in
  *               src/offline.js handles knocks), public form pages
  *               (/p /n /v /u /e /d) and /join links, or any non-GET.
@@ -18,18 +23,52 @@ const VERSION = 'v1';
 const SHELL = `starbase-shell-${VERSION}`;
 const ASSETS = `starbase-assets-${VERSION}`;
 const TILES = `starbase-tiles-${VERSION}`;
-const KEEP = [SHELL, ASSETS, TILES];
+const META = `starbase-meta-${VERSION}`; // the map's tile provider
+const KEEP = [SHELL, ASSETS, TILES, META];
 
 const INDEX = '/index.html';
 const SHELL_EXTRAS = ['/manifest.webmanifest', '/icon.svg'];
 const NAV_TIMEOUT_MS = 4000;  // then show the cached app, let the network finish in the background
 const TILE_TIMEOUT_MS = 5000;
-const TILE_MAX = 2000;
+const TILE_MAX = 1500;
 const TILE_FRESH_MS = 7 * 24 * 3600 * 1000; // re-check a cached tile after a week
 const TILE_AT = 'x-starbase-cached-at';
 
 const NEVER = /^\/(?:api|p|n|v|u|e|d|join)(?:\/|$)/;
 const isTileHost = (host) => host === 'tile.openstreetmap.org' || host.endsWith('.tile.openstreetmap.org');
+
+// The configured provider, from a template like
+// https://{s}.tiles.example/streets/{z}/{x}/{y}.png?key=… → its host ({s} any
+// subdomain) and the path before the first {…}.
+const TILE_CONFIG_KEY = '/__starbase/tiles';
+const matcherFor = (template) => {
+  const m = /^https?:\/\/([^/]+)(\/[^{]*)/i.exec(String(template || ''));
+  if (!m) return null;
+  const esc = (t) => t.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+  const host = new RegExp(`^${m[1].toLowerCase().split('{s}').map(esc).join('[a-z0-9-]+')}$`);
+  return { host, path: m[2] };
+};
+let tileMatcher; // undefined: not read yet; null: OpenStreetMap only
+const loadMatcher = () => {
+  if (tileMatcher !== undefined) return Promise.resolve(tileMatcher);
+  return caches.open(META)
+    .then((c) => c.match(TILE_CONFIG_KEY))
+    .then((r) => (r ? r.json() : null))
+    .then((cfg) => { tileMatcher = cfg?.url ? matcherFor(cfg.url) : null; return tileMatcher; })
+    .catch(() => { tileMatcher = null; return null; });
+};
+const isConfiguredTile = (url, m) => Boolean(m && m.host.test(url.hostname) && url.pathname.startsWith(m.path));
+
+self.addEventListener('message', (event) => {
+  const d = event.data;
+  if (!d || d.type !== 'starbase:tiles' || typeof d.url !== 'string' || d.url.length > 1000) return;
+  const m = matcherFor(d.url);
+  if (!m) return;
+  tileMatcher = m;
+  event.waitUntil?.(caches.open(META).then((c) => c.put(TILE_CONFIG_KEY, new Response(JSON.stringify({ url: d.url }), {
+    headers: { 'content-type': 'application/json' },
+  }))).catch(() => {}));
+});
 // The server's SPA fallback answers a missing /assets file with index.html
 // (200, text/html) — never store that under a .js/.css name.
 const isHtml = (res) => (res.headers.get('content-type') || '').includes('text/html');
@@ -69,7 +108,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(tile(event, url));
     return;
   }
-  if (url.origin !== self.location.origin) return;
+  // Another provider's tiles: images from elsewhere are checked against the
+  // map's provider (read from the cache when the worker has just woken up);
+  // anything else goes straight through, untouched.
+  if (url.origin !== self.location.origin) {
+    if (req.destination !== 'image') return;
+    if (tileMatcher === null) return;
+    if (tileMatcher && !isConfiguredTile(url, tileMatcher)) return;
+    event.respondWith(loadMatcher().then((m) => (isConfiguredTile(url, m) ? tile(event, url) : fetch(req))));
+    return;
+  }
   if (NEVER.test(url.pathname)) return; // straight to the network, untouched
 
   if (req.mode === 'navigate') {

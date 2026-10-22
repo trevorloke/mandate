@@ -37,9 +37,17 @@ const rowToPerson = (r) => ({
 export const ACTIONS = {
   'person.create': {
     roles: PEOPLE_ROLES,
-    input: personInput,
-    handler: async (tx, ctx, input, emit) => {
-      const id = newId();
+    // id: optional, made on the phone (the offline outbox) so a person added
+    // with no signal can be knocked before they reach the server, and a
+    // replay after a lost response is the same person, never a second one.
+    input: personInput.extend({ id: z.uuid().nullish() }),
+    handler: async (tx, ctx, { id: clientId, ...input }, emit) => {
+      if (clientId) {
+        const cur = (await tx.query('select * from persons where id = $1', [clientId])).rows[0];
+        if (cur && cur.workspace_id !== ctx.workspaceId) throw httpError(409, 'that id is already taken');
+        if (cur) return { person: rowToPerson(cur), duplicate: true };
+      }
+      const id = clientId || newId();
       await tx.query(
         `insert into persons (id, workspace_id, kind, name, email, phone, address, unit, city, postal, lat, lng, tags, socials)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,

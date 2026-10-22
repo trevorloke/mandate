@@ -140,8 +140,19 @@ export const FIELD_ACTIONS = {
       lat: z.number().min(-90).max(90).nullish(),
       lng: z.number().min(-180).max(180).nullish(),
       note: z.string().max(1000).nullish(),
+      // Offline outbox key (the column comes from server/ext/offline): a
+      // request replayed after reconnecting is the same request, never a
+      // second sign.
+      client_id: uuid().nullish(),
     }).refine((v) => v.person_id || v.address, { message: 'person_id or address required' }),
     handler: async (tx, ctx, input, emit) => {
+      if (input.client_id) {
+        const dup = (await tx.query(
+          'select id, kind, status, person_id, address from signs where workspace_id = $1 and client_id = $2',
+          [ctx.workspaceId, input.client_id],
+        )).rows[0];
+        if (dup) return { sign: { ...dup, person_id: dup.person_id || null }, duplicate: true };
+      }
       let { address, lat, lng } = input;
       if (input.person_id) {
         const p = await requirePerson(tx, ctx.workspaceId, input.person_id);
@@ -153,14 +164,16 @@ export const FIELD_ACTIONS = {
         throw httpError(400, 'add an address first — the sign crew needs to know where it goes');
       }
       const id = newId();
+      // client_id only when given, so sign.place never needs the column otherwise.
+      const withClient = Boolean(input.client_id);
       await tx.query(
-        `insert into signs (id, workspace_id, person_id, address, lat, lng, kind, status, note)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `insert into signs (id, workspace_id, person_id, address, lat, lng, kind, status, note${withClient ? ', client_id' : ''})
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9${withClient ? ', $10' : ''})`,
         [id, ctx.workspaceId, input.person_id || null, address || null, lat ?? null, lng ?? null,
-         input.kind, input.status, input.note || null],
+         input.kind, input.status, input.note || null, ...(withClient ? [input.client_id] : [])],
       );
       const payload = { id, kind: input.kind, status: input.status, person_id: input.person_id || null, address };
-      emit('sign', id, 'create', payload);
+      emit('sign', id, 'create', { ...payload, client_id: input.client_id || undefined });
       return { sign: payload };
     },
   },

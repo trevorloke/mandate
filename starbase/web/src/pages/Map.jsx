@@ -20,12 +20,22 @@
 // point, and ?turf=<id> fits the map to (and selects) a turf. ?draw=1 opens
 // straight into drawing. Plain Leaflet in a ref'd div; divIcon pins so no
 // marker-image paths are involved.
+// Offline: the doors are kept on the phone (components/OfflineCache.js) and
+// shown with "Offline copy" when there's no signal; what the outbox still
+// holds (src/offline.js) is laid over them — a person added here, a dropped
+// pin, a sign request, a rating — so it shows at once, marked "Not sent yet".
+// Pins go through the outbox too. Tiles come from GET /api/map/config
+// (OpenStreetMap unless STARBASE_TILE_* say otherwise); the service worker
+// keeps the ones already looked at, so a turf seen with signal still draws.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiGet, action } from '../api.js';
+import { applyOutbox, queueAction, useOutbox } from '../offline.js';
+import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
+import { queuedText } from '../components/queued.js';
 import { ratingByCode } from '@starbase/shared/canvass';
 import DoorCard, { AddDoorForm, SIGN_LABEL, doorTitle, patchDoors } from '../components/DoorCard.jsx';
 import { More, ratingWho } from '../components/RatingButtons.jsx';
@@ -181,7 +191,45 @@ const CLUSTER_PX = 36;
 // A volunteer's turf opens as close as its doors allow: just room for the
 // edge pins (half a 48px hit box), so neighbours land far enough apart.
 const PIN_INSET = 20;
-const CLUSTER_OFF_ZOOM = 19; // the tile layer's max zoom: everything apart
+const CLUSTER_OFF_ZOOM = 19; // everything apart (or the tiles' max zoom, if lower)
+
+// The map's tiles when the server hasn't said (no signal, an older server).
+const DEFAULT_TILES = {
+  url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxZoom: 19,
+};
+// The provider's credit line, kept to text and http(s) links.
+function safeAttribution(html) {
+  if (!html || typeof DOMParser === 'undefined') return '';
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+  const out = document.createElement('span');
+  const walk = (node, into) => {
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) into.append(n.textContent);
+      else if (n.nodeType === 1 && /^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(n.tagName)) continue;
+      else if (n.nodeType === 1 && n.tagName === 'A' && /^https?:\/\//i.test(n.getAttribute('href') || '')) {
+        const a = document.createElement('a');
+        a.href = n.getAttribute('href');
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = n.textContent;
+        into.append(a);
+      } else if (n.nodeType === 1) walk(n, into);
+    }
+  };
+  walk(doc.body.firstChild || doc.body, out);
+  return out.innerHTML;
+}
+// The service worker keeps tiles from this provider once they've been seen
+// (never fetched ahead — tile servers' rules).
+function tellServiceWorker(url) {
+  const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker : null;
+  if (!sw) return;
+  const msg = { type: 'starbase:tiles', url };
+  sw.controller?.postMessage(msg);
+  sw.ready?.then((reg) => reg.active?.postMessage(msg)).catch(() => {});
+}
 const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: 'Removed' };
 const HOUSE_SVG = '<svg viewBox="0 0 12 10" aria-hidden="true"><path d="M6 0 0 5h1.6v5h3.2V7h2.4v3h3.2V5H12z"/></svg>';
 const PEOPLE_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1"/><path d="M1.8 15.5c0-3.6 2.8-6.2 6.2-6.2s6.2 2.6 6.2 6.2z"/></svg>';
@@ -240,9 +288,9 @@ function signIcon(status) {
 // Group doors whose pins would sit closer than CLUSTER_PX at this zoom.
 // Projection math only (no map instance needed); offsets are the stacked
 // units' fan-out, in pixels.
-function clusterDoors(doors, zoom) {
+function clusterDoors(doors, zoom, offZoom = CLUSTER_OFF_ZOOM) {
   if (zoom == null) return EMPTY_LIST;
-  if (zoom >= CLUSTER_OFF_ZOOM) return doors.map((d) => [d]);
+  if (zoom >= offZoom) return doors.map((d) => [d]);
   const R2 = CLUSTER_PX * CLUSTER_PX;
   const cells = new Map();
   const groups = [];
@@ -853,17 +901,38 @@ export default function MapPage() {
   }, [queryClient]);
 
   // ── Data ──
-  const doorsQ = useQuery({ queryKey: ['doors'], queryFn: () => apiGet('/map/doors'), placeholderData: keepPreviousData });
-  const { doors, byPerson, orphanSigns } = useMemo(() => (doorsQ.data ? buildDoors(doorsQ.data) : EMPTY_MODEL), [doorsQ.data]);
-  const unlocated = doorsQ.data?.unlocated ?? 0;
+  // The doors last loaded are kept on this phone; what the outbox still holds
+  // is laid over them (new people, pins, sign requests, ratings).
+  const doorsQ = useQuery({
+    queryKey: ['doors'], queryFn: () => apiGet('/map/doors'), placeholderData: keepPreviousData, ...phoneCopy(me, 'doors'),
+  });
+  useKeepCopy(me, 'doors', doorsQ);
+  const outbox = useOutbox();
+  const doorsData = useMemo(() => applyOutbox(doorsQ.data, outbox.items), [doorsQ.data, outbox.items]);
+  const { doors, byPerson, orphanSigns } = useMemo(() => (doorsData ? buildDoors(doorsData) : EMPTY_MODEL), [doorsData]);
+  const unlocated = doorsData?.unlocated ?? 0;
+  const doorsCopy = showingCopy(doorsQ);
+
+  // Which tiles to draw (kept on the phone too, so offline asks for the same
+  // tiles the service worker kept).
+  const tilesQ = useQuery({
+    queryKey: ['mapConfig'], queryFn: () => apiGet('/map/config'), staleTime: 10 * 60_000, retry: 1, ...phoneCopy(me, 'mapConfig'),
+  });
+  useKeepCopy(me, 'mapConfig', tilesQ);
+  const tiles = tilesQ.data?.tiles || (tilesQ.isError || tilesQ.fetchStatus === 'paused' ? DEFAULT_TILES : null);
+  const offZoom = Math.min(CLUSTER_OFF_ZOOM, tiles?.maxZoom || CLUSTER_OFF_ZOOM);
+  const offZoomRef = useRef(offZoom);
+  offZoomRef.current = offZoom;
 
   const selectedDoor = personParam ? byPerson.get(personParam) || null : null;
   const selectedKey = selectedDoor?.key || null;
   // Declared before the marker effects so Leaflet handlers see the current key.
   useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
 
-  // Turfs (volunteers get only the ones assigned to them).
-  const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs') });
+  // Turfs (volunteers get only the ones assigned to them), kept on the phone
+  // too: offline, a volunteer still opens on "My turf".
+  const turfsQ = useQuery({ queryKey: ['turfs'], queryFn: () => apiGet('/turfs'), ...phoneCopy(me, 'turfs') });
+  useKeepCopy(me, 'turfs', turfsQ);
   const turfs = turfsQ.data?.turfs ?? EMPTY_LIST;
   // A volunteer's own turf outline always shows (the switch is desk-only).
   const turfsOn = canCreate ? showTurfs : true;
@@ -1014,8 +1083,22 @@ export default function MapPage() {
 
   const locatePerson = async (person, latlng) => {
     try {
-      await action('person.locate', { id: person.id, lat: latlng.lat, lng: latlng.lng });
-      toast(`Placed ${person.name}`);
+      // Through the outbox: no signal, the pin waits on the phone (and shows).
+      const r = await queueAction('person.locate', { id: person.id, lat: latlng.lat, lng: latlng.lng }, {
+        who: person.name,
+        person: {
+          name: person.name, phone: person.phone ?? null, address: person.address ?? null, unit: person.unit ?? null,
+          rating: person.rating ?? null, rated_at: person.rated_at ?? null, tags: person.tags || [],
+        },
+      });
+      toast(r.queued ? queuedText(r, 'Pin') : `Placed ${person.name}`);
+      // Saved on the phone: the outbox lays the pin over the map until it goes.
+      if (r.queued) {
+        cancelMode();
+        centeredOnRef.current = person.id;
+        select(person.id);
+        return;
+      }
       // Drop the pin now; the refetch below confirms it.
       patchDoors(queryClient, (d) => ({
         ...d,
@@ -1100,7 +1183,7 @@ export default function MapPage() {
       if (!map) return;
       if (!mode && (personParam || turfParam || signSel)) select(null);
       const b = L.latLngBounds(group.map((d) => [d.lat, d.lng]));
-      const z = Math.min(CLUSTER_OFF_ZOOM, Math.max(map.getZoom() + 2, map.getBoundsZoom(b.pad(0.5))));
+      const z = Math.min(offZoomRef.current, Math.max(map.getZoom() + 2, map.getBoundsZoom(b.pad(0.5))));
       map.setView(b.getCenter(), z, { animate: !reducedMotion() });
     };
     onSignClickRef.current = (sign) => {
@@ -1168,10 +1251,7 @@ export default function MapPage() {
     const map = L.map(canvasRef.current, { center: SURREY, zoom: 12, zoomSnap: 0.25, zoomControl: false, attributionControl: false });
     L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+    // Tiles: added below once GET /api/map/config (or the phone's copy) says which.
     // Turf polygons sit under everything else; a turf being drawn sits over
     // the other vectors (pins and its corner dots are in the marker pane).
     map.createPane('turfs').style.zIndex = 350;
@@ -1202,6 +1282,20 @@ export default function MapPage() {
       focusedTurfRef.current = null;
     };
   }, []);
+
+  // The tile layer, from the map settings. The service worker is told which
+  // provider's tiles to keep (the ones already seen, never fetched ahead).
+  const tileUrl = tiles?.url;
+  const tileMax = tiles?.maxZoom;
+  const tileCredit = tiles?.attribution;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !tileUrl) return undefined;
+    tellServiceWorker(tileUrl); // first, so the first tiles are kept too
+    const layer = L.tileLayer(tileUrl, { maxZoom: tileMax || 19, attribution: safeAttribution(tileCredit) }).addTo(map);
+    map.setMaxZoom(tileMax || 19);
+    return () => { layer.remove(); };
+  }, [tileUrl, tileMax, tileCredit]);
 
   // Turf polygons. Hidden by the Turfs chip, except a selected turf always shows.
   useEffect(() => {
@@ -1287,7 +1381,7 @@ export default function MapPage() {
 
   // Pins (or count bubbles) for the filtered doors, at this zoom. A selected
   // door inside a bubble is pulled out so its pin always shows.
-  const groups = useMemo(() => clusterDoors(visible, zoom), [visible, zoom]);
+  const groups = useMemo(() => clusterDoors(visible, zoom, offZoom), [visible, zoom, offZoom]);
   const pulledKey = useMemo(
     () => (selectedKey && groups.some((g) => g.length > 1 && g.some((d) => d.key === selectedKey)) ? selectedKey : null),
     [groups, selectedKey],
@@ -1554,6 +1648,8 @@ export default function MapPage() {
             )}
           </div>
         )}
+        {/* No signal: these are the doors this phone kept, not live ones. */}
+        {doorsCopy && !mode && <span className="chip obx-copy map-copy" role="status">Offline copy</span>}
         {showHint && (
           <div className="map-hint" role="status">
             <span className="map-hint__text">Tap a house to start</span>

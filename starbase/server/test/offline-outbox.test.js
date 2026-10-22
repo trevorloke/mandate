@@ -1,0 +1,290 @@
+// The phone's outbox (web/src/offline.js) against the real server, in
+// process: a stand-in localStorage, a navigator whose signal we switch off,
+// and a fetch that can lose an answer after the server already did the write.
+// Proves one FIFO queue (a person added offline, then knocked, lands in that
+// order), exactly-once replays for every field action, "already on it"
+// replays read as done, refusals kept with the server's reason (never
+// dropped), Dismiss / Try again, and Undo on a sign request still on the phone.
+import { test, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { freshDb, Client } from './helpers.js';
+import { app } from '../index.js';
+
+const tag = Math.random().toString(36).slice(2, 8);
+let c; let vol; let ob;
+const net = { offline: false, loseNext: 0, cookie: '' };
+
+const store = new Map();
+const nav = { onLine: true };
+// Browser stand-ins, installed only once the database is up (PGlite looks
+// for a browser when it boots). Only the app's own /api calls go to the
+// in-process server; anything absolute uses the real fetch.
+const realFetch = globalThis.fetch;
+const installBrowser = () => {
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: (k) => { store.delete(k); },
+    key: (i) => [...store.keys()][i] ?? null,
+    get length() { return store.size; },
+  };
+  Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true, writable: true });
+  globalThis.fetch = async (url, init = {}) => {
+    if (!String(url).startsWith('/')) return realFetch(url, init);
+    if (net.offline || nav.onLine === false) throw new TypeError('fetch failed');
+    const res = await app.request(url, { ...init, headers: { ...(init.headers || {}), cookie: net.cookie } });
+    if (net.loseNext > 0) { net.loseNext -= 1; throw new TypeError('network connection was lost'); }
+    return res;
+  };
+};
+
+before(async () => {
+  await freshDb();
+  c = new Client();
+  assert.equal((await c.signup({ workspaceName: 'Outbox Field', email: `outbox.mgr+${tag}@example.org` })).status, 201);
+  const inv = await c.action('member.invite', { email: `outbox.vol+${tag}@example.org`, role: 'volunteer' });
+  vol = new Client();
+  const j = await vol.post('/api/auth/join', { token: inv.json.joinUrl.split('/join/')[1], name: 'Outbox Volunteer', password: 'knock-knock-2026' });
+  assert.equal(j.status, 200, JSON.stringify(j.json));
+  // An old phone still holding a v1 knock: it moves into the new outbox.
+  const old = await c.createPerson('Old Knock', { address: '7101 124 St', lat: 49.131, lng: -122.852 });
+  installBrowser();
+  store.set('starbase:outbox:v1', JSON.stringify([{ person_id: old.id, channel: 'door', outcome: 'no_answer', client_id: '6a1b7e0c-2f43-4e7a-9a59-6c6f2b9d7a10', queued_at: new Date().toISOString() }]));
+  net.cookie = c.cookie;
+  ob = await import('../../web/src/offline.js');
+});
+
+const persons = async (q) => (await c.get(`/api/persons?q=${encodeURIComponent(q)}`)).json.persons;
+const contactsOf = async (id) => (await c.get(`/api/persons/${id}`)).json.contacts;
+
+test('a v1 knock left on the phone moves into the outbox and sends once', async () => {
+  assert.equal(ob.pendingCount(), 1);
+  assert.equal(store.has('starbase:outbox:v1'), false, 'the old key is gone');
+  const item = JSON.parse(store.get('starbase:outbox:v2'))[0];
+  assert.equal(item.name, 'contact.log');
+  assert.equal(item.input.client_id, '6a1b7e0c-2f43-4e7a-9a59-6c6f2b9d7a10');
+  const r = await ob.flushOutbox();
+  assert.equal(r.sent, 1);
+  const [p] = await persons('Old Knock');
+  assert.equal((await contactsOf(p.id)).length, 1);
+});
+
+test('offline: a new person, then a knock on them, then a sign — sent in order, each once', async () => {
+  nav.onLine = false;
+  const made = await ob.queueAction('person.create', { name: 'Ana Souza', address: '7155 124 St', lat: 49.1316, lng: -122.8521 }, { who: 'Ana Souza' });
+  assert.equal(made.queued, true);
+  const id = made.client_id;
+  const knock = await ob.logContact({ person_id: id, channel: 'door', outcome: 'contacted', rating: '2' }, { who: 'Ana Souza' });
+  assert.equal(knock.queued, true);
+  const sign = await ob.queueAction('sign.place', { person_id: id, kind: 'lawn', lat: 49.1316, lng: -122.8521 }, { who: 'Ana Souza' });
+  assert.equal(sign.queued, true);
+  assert.equal(ob.pendingCount(), 3);
+
+  // The map sees all three before any of them is sent.
+  const over = ob.applyOutbox({ persons: [], signs: [], unlocated: 0 });
+  assert.equal(over.persons.length, 1);
+  assert.equal(over.persons[0].id, id);
+  assert.equal(over.persons[0].pending, true);
+  assert.equal(over.persons[0].rating, '2', 'the queued rating shows on the pin');
+  assert.equal(over.signs.length, 1);
+  assert.equal(over.signs[0].pending, true);
+  // And the sheet says what each one is, in plain words.
+  const words = JSON.parse(store.get('starbase:outbox:v2')).map((i) => ob.itemText(i));
+  assert.match(words[0], /^New person · Ana Souza · \d{1,2}:\d{2} (am|pm)$/);
+  assert.match(words[1], /^Knock · Ana Souza · /);
+  assert.match(words[2], /^Lawn sign · Ana Souza · /);
+  assert.equal(ob.pendingPeopleIn([[49.13, -122.86], [49.14, -122.86], [49.14, -122.84], [49.13, -122.84]]).length, 1, 'inside the turf');
+  assert.equal(ob.pendingPeopleIn([[49.0, -122.0], [49.01, -122.0], [49.01, -121.99]]).length, 0, 'outside it');
+
+  // Signal back, but the first answer is lost after the server wrote it.
+  nav.onLine = true;
+  net.loseNext = 1;
+  let r = await ob.flushOutbox();
+  assert.equal(r.sent, 0, 'the lost answer keeps it on the phone');
+  assert.equal(ob.pendingCount(), 3);
+  r = await ob.flushOutbox();
+  assert.equal(r.sent, 3);
+  assert.equal(ob.pendingCount(), 0);
+
+  const found = await persons('Ana Souza');
+  assert.equal(found.length, 1, 'one Ana, not two');
+  assert.equal(found[0].id, id);
+  assert.equal(found[0].rating, '2');
+  assert.equal((await contactsOf(id)).length, 1, 'one knock');
+  const signs = (await c.get('/api/signs')).json.signs.filter((s) => s.person_id === id);
+  assert.equal(signs.length, 1, 'one sign');
+  assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+});
+
+test('with something still waiting, a new item goes behind it even with signal', async () => {
+  nav.onLine = false;
+  const made = await ob.queueAction('person.create', { name: 'Behind Me', address: '7160 124 St', lat: 49.1317, lng: -122.8522 });
+  nav.onLine = true;
+  // Knocked straight away with signal: it must not overtake the create.
+  const k = await ob.logContact({ person_id: made.client_id, channel: 'door', outcome: 'contacted', rating: '1' });
+  assert.equal(k.queued, false, 'sent in the same flush, after the create');
+  assert.equal(k.result.contact.person_id, made.client_id);
+  assert.equal(ob.pendingCount(), 0);
+});
+
+test('a lost answer on a direct send queues it; the replay is the same write', async () => {
+  const p = await c.createPerson('Lost Answer', { address: '7170 124 St', lat: 49.1318, lng: -122.8523 });
+  net.loseNext = 1;
+  const r = await ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', rating: '3' });
+  assert.equal(r.queued, true);
+  assert.equal((await contactsOf(p.id)).length, 1, 'the server already has it');
+  await ob.flushOutbox();
+  assert.equal((await contactsOf(p.id)).length, 1, 'and still only once after the replay');
+
+  net.loseNext = 1;
+  const pin = await ob.queueAction('person.locate', { id: p.id, lat: 49.2, lng: -122.8 }, { who: p.name });
+  assert.equal(pin.queued, true);
+  await ob.flushOutbox();
+  const evs = (await c.get('/api/events?since=0&limit=5000')).json.events.filter((e) => e.action === 'person.locate' && e.entity_id === p.id);
+  assert.equal(evs.length, 2, 'a pin replay moves it to the same spot (no harm)');
+  const after = (await c.get(`/api/persons/${p.id}`)).json.person;
+  assert.equal(Number(after.lat), 49.2);
+});
+
+test('a refusal on replay is kept with the reason; Try again and Dismiss', async () => {
+  const p = await c.createPerson('Up Already', { address: '7180 124 St', lat: 49.1319, lng: -122.8524 });
+  const placed = await ob.queueAction('sign.place', { person_id: p.id, kind: 'lawn' });
+  assert.equal(placed.queued, false);
+  const signId = placed.result.sign.id;
+  nav.onLine = false;
+  const undo = await ob.queueAction('sign.cancel', { id: signId }, { who: p.name });
+  assert.equal(undo.queued, true);
+  // Meanwhile the crew puts it up.
+  assert.equal((await c.action('sign.update', { id: signId, status: 'installed' })).status, 200);
+  nav.onLine = true;
+  const r = await ob.flushOutbox();
+  assert.equal(r.sent, 0);
+  const [item] = JSON.parse(store.get('starbase:outbox:v2'));
+  assert.equal(item.state, 'refused');
+  assert.equal(item.error.status, 409);
+  assert.match(item.error.message, /already up/);
+  assert.equal(ob.pendingCount(), 0, 'not waiting');
+  assert.equal(ob.unsentCount(), 1, 'but still on the phone, never silently dropped');
+
+  // A refused item doesn't hold up the ones after it.
+  const q = await c.createPerson('Next In Line', { address: '7190 124 St', lat: 49.132, lng: -122.8525 });
+  const k = await ob.logContact({ person_id: q.id, channel: 'door', outcome: 'no_answer' });
+  assert.equal(k.queued, false);
+
+  // Try again: refused again (it's still up), reason kept.
+  await ob.retryItem(item.cid);
+  assert.equal(JSON.parse(store.get('starbase:outbox:v2'))[0].state, 'refused');
+  // Taken down → a cancel is refused differently; Dismiss drops it.
+  ob.dismissItem(item.cid);
+  assert.equal(ob.unsentCount(), 0);
+  assert.equal((await c.get('/api/signs')).json.signs.find((s) => s.id === signId).status, 'installed', 'left as it was');
+});
+
+test('Undo on a sign request still on the phone', async () => {
+  const p = await c.createPerson('Undo Host', { address: '7200 124 St', lat: 49.1321, lng: -122.8526 });
+  // Never sent: it just goes.
+  nav.onLine = false;
+  const a = await ob.queueAction('sign.place', { person_id: p.id, kind: 'large' });
+  assert.equal(ob.undoQueued(a.client_id), 'removed');
+  assert.equal(ob.unsentCount(), 0);
+  // Maybe sent (the answer was lost): its cancel follows it.
+  nav.onLine = true;
+  net.loseNext = 1;
+  const b = await ob.queueAction('sign.place', { person_id: p.id, kind: 'lawn' });
+  assert.equal(b.queued, true);
+  assert.equal(ob.undoQueued(b.client_id), 'queued');
+  await ob.flushOutbox();
+  assert.equal(ob.unsentCount(), 0);
+  const left = (await c.get('/api/signs')).json.signs.filter((s) => s.person_id === p.id);
+  assert.equal(left.length, 0, 'placed once, then cancelled');
+  const evs = (await c.get('/api/events?since=0&limit=5000')).json.events;
+  assert.equal(evs.filter((e) => e.action === 'sign.place' && e.payload.person_id === p.id).length, 1);
+  assert.equal(evs.filter((e) => e.action === 'sign.cancel' && e.payload.person_id === p.id).length, 1);
+  // Already sent: Undo hands back the sign to cancel.
+  const s = await ob.queueAction('sign.place', { person_id: p.id, kind: 'billboard' });
+  assert.equal(s.queued, false);
+  assert.equal(ob.undoQueued(s.client_id), null, 'a direct send is the caller’s to cancel');
+});
+
+test('a volunteer’s shift sign-up replays as done; a full shift is refused, with the reason', async () => {
+  net.cookie = vol.cookie;
+  const shift = (await c.action('shift.create', { title: 'Phone bank', starts_at: new Date(Date.now() + 86400_000).toISOString(), capacity: 1 })).json.shift;
+  net.loseNext = 1;
+  const j = await ob.queueAction('shift.join', { shift_id: shift.id }, { who: 'Phone bank' });
+  assert.equal(j.queued, true);
+  const r = await ob.flushOutbox();
+  assert.equal(r.sent, 1, '"already on this shift" is done, not refused');
+  assert.equal(ob.unsentCount(), 0);
+  const detail = (await c.get(`/api/shifts/${shift.id}`)).json;
+  assert.equal(detail.assignees.filter((a) => a.status === 'confirmed').length, 1);
+
+  net.loseNext = 1;
+  assert.equal((await ob.queueAction('shift.leave', { shift_id: shift.id })).queued, true);
+  assert.equal((await ob.flushOutbox()).sent, 1, '"not on this shift" is done');
+
+  // Full while offline: refused, kept.
+  nav.onLine = false;
+  await ob.queueAction('shift.join', { shift_id: shift.id }, { who: 'Phone bank' });
+  const other = await c.createPerson('Took The Spot');
+  assert.equal((await c.action('shift.assign', { shift_id: shift.id, person_id: other.id })).status, 200);
+  nav.onLine = true;
+  await ob.flushOutbox();
+  const [item] = JSON.parse(store.get('starbase:outbox:v2'));
+  assert.equal(item.state, 'refused');
+  assert.match(item.error.message, /full/);
+  assert.match(ob.itemText(item), /^Count me in · Phone bank · /);
+
+  // Volunteers can't add people: refused on the first try, nothing queued.
+  await assert.rejects(ob.queueAction('person.create', { name: 'Not Mine' }), (e) => e.status === 403);
+  ob.clearOutbox();
+  assert.equal(ob.unsentCount(), 0);
+  net.cookie = c.cookie;
+  assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+});
+
+test('signed out: kept on the phone, sent after signing back in', async () => {
+  const p = await c.createPerson('After Sign In', { address: '7210 124 St', lat: 49.1322, lng: -122.8527 });
+  net.cookie = 'starbase_session=nope';
+  const r = await ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', rating: '1' });
+  assert.equal(r.queued, true);
+  assert.equal(r.signedOut, true);
+  const f = await ob.flushOutbox();
+  assert.equal(f.sent, 0);
+  assert.equal(ob.pendingCount(), 1);
+  net.cookie = c.cookie;
+  assert.equal((await ob.flushOutbox()).sent, 1);
+  assert.equal((await contactsOf(p.id)).length, 1);
+  await assert.rejects(ob.queueAction('gift.log', {}), /can't be saved offline/);
+});
+
+test('each item belongs to the sign-in that saved it: never sent or shown as someone else’s', async () => {
+  const meA = (await c.get('/api/auth/me')).json;
+  const meB = (await vol.get('/api/auth/me')).json;
+  const p = await c.createPerson('Owned Knock', { address: '7220 124 St', lat: 49.1323, lng: -122.8528 });
+  ob.setOutboxOwner(meA);
+  nav.onLine = false;
+  await ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', rating: '3' }, { who: p.name });
+  assert.equal(JSON.parse(store.get('starbase:outbox:v2')).at(-1).owner, `${meA.workspace.id}:${meA.user.id}`);
+  nav.onLine = true;
+
+  // The session lapses and the volunteer signs in on this phone.
+  ob.setOutboxOwner(meB);
+  net.cookie = vol.cookie;
+  assert.equal(ob.pendingCount(), 0, 'not theirs to see');
+  assert.equal(ob.unsentCount(), 0);
+  assert.equal(ob.applyOutbox({ persons: [{ id: p.id, name: p.name, lat: 49.1, lng: -122.8 }], signs: [] }).persons[0].rating, undefined, 'not laid over their map');
+  assert.equal((await ob.flushOutbox()).sent, 0, 'not theirs to send');
+  ob.clearOutbox(); // they sign out: only their own items go
+  assert.equal(JSON.parse(store.get('starbase:outbox:v2')).length, 1, 'the first person’s knock is still on the phone');
+  assert.equal((await contactsOf(p.id)).length, 0);
+
+  // The first person signs back in: it goes, as theirs.
+  ob.setOutboxOwner(meA);
+  net.cookie = c.cookie;
+  assert.equal(ob.pendingCount(), 1);
+  assert.equal((await ob.flushOutbox()).sent, 1);
+  const contacts = await contactsOf(p.id);
+  assert.equal(contacts.length, 1);
+  assert.equal(contacts[0].by_name, meA.user.name, 'recorded as the person who knocked');
+  ob.setOutboxOwner(null);
+});
