@@ -14,7 +14,7 @@ import { emailConfigured } from '../../lib/notify.js';
 import { capFor } from '../../lib/cap.js';
 import {
   MONEY_ROLES, AGENT_ROLES, loadSettings, statusOf, docOf, campaignName, linkFor, addressOf, isoDay, methodWord,
-  canSendOf, canSendVoidOf, wasEmailed, periodOf,
+  canSendOf, canSendVoidOf, wasEmailed, periodOf, SEND_ALL_MAX, NOT_FOR_SEND_ALL,
 } from './core.js';
 
 export const api = new Hono();
@@ -87,8 +87,8 @@ api.get('/receipts', async (c) => {
     [ctx.workspaceId],
   )).rows;
   // Not sent yet and ready to go: an email and a home address on file, and
-  // not already on its way.
-  const unsent = rows.filter((r) => live(r) && r.has_email && hasAddressOf(r) && !['sent', 'sending'].includes(r.email_status));
+  // not already on its way (one that says Sending is left to go by itself).
+  const unsent = rows.filter((r) => live(r) && r.has_email && hasAddressOf(r) && !NOT_FOR_SEND_ALL.includes(r.email_status));
   const years = (await db.query(
     `select distinct extract(year from date)::int as y from gifts
      where workspace_id = $1 and deleted_at is null and not (id = any($2::uuid[])) order by 1 desc`,
@@ -99,7 +99,8 @@ api.get('/receipts', async (c) => {
     settings,
     emailConfigured: emailConfigured(),
     canManage: AGENT_ROLES.includes(ctx.role),
-    counts: { total: rows.length, unsent: unsent.length, sendable: emailConfigured() ? unsent.length : 0 },
+    // sendable: what one Send all emails now (its button says this number).
+    counts: { total: rows.length, unsent: unsent.length, sendable: emailConfigured() ? Math.min(unsent.length, SEND_ALL_MAX) : 0 },
     // The disclosure's periods: the campaign's, then each calendar year with gifts.
     periods: [periodOf('campaign', settings, tzOf(ctx)), ...years.map((y) => periodOf(y, settings, tzOf(ctx)))],
     sampleLoaded: !!ctx.workspace?.settings?.sample,

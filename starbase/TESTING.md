@@ -168,7 +168,8 @@ one tap away under **More**.
   file*) — tap it, then **Print**. With email connected it goes to the donor
   once by itself a minute after the gift (the toast says *receipt emails in a
   minute*; Undo before then and nothing is sent); *Send again* resends;
-  **Send all not sent** sends the rest. A donor with no street address: Log
+  **Email 3 receipts** (the yellow button) sends the *Not sent* ones with an
+  email, never one already *Sending*. A donor with no street address: Log
   a gift asks for it under *More details*; left blank, the receipt says
   **Needs address**, shows under **Money → Needs you** (type it right there)
   and its email waits until the address is saved. Voiding a gift marks its

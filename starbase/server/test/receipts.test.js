@@ -391,6 +391,57 @@ test('email not connected: nothing pretends to send; no email on file says so; S
   await verified(c);
 });
 
+test('Send all counts only Not sent receipts it can email: one already Sending is left to go by itself; the count is one tap’s worth', async () => {
+  const { c, ws } = await campaign(`Send all ${tag}`);
+  await withEmail(async (sent) => {
+    // Right after a gift from a donor with an email: "Sending" (the automatic
+    // email is due in a minute). A donor with no email: "Not sent".
+    const a = await c.createPerson('Ari Auto', { email: mail('ari'), address: '1 Auto Ave' });
+    const b = await c.createPerson('Bea NoEmail', { address: '2 Auto Ave' });
+    const ra = await receiptFor(c, (await gift(c, a, 5000)).id);
+    const rb = await receiptFor(c, (await gift(c, b, 5000)).id);
+    assert.deepEqual([ra.status.code, ra.status.word], ['queued', 'Sending']);
+    assert.deepEqual([rb.status.word, rb.status.line], ['Not sent', 'No email on file']);
+    let list = (await c.get('/api/receipts')).json;
+    assert.deepEqual([list.counts.sendable, list.counts.unsent], [0, 0], 'nothing for the yellow button: one is Sending, one has no email');
+    let all = await c.action('receipt.sendAll', {});
+    assert.equal(all.status, 200);
+    assert.deepEqual([all.json.tried, all.json.sent, sent.length], [0, 0, 0], 'Send all never sends a Sending receipt early');
+    assert.equal((await statusRow(ra.id)).email_status, 'queued', 'still waiting for its own email');
+
+    // A Not sent receipt with an email: the count is 1, and Send all sends that one only.
+    const cy = await c.createPerson('Cy Later', { address: '3 Auto Ave' });
+    const rc = await receiptFor(c, (await gift(c, cy, 5000)).id);
+    assert.equal((await c.action('person.update', { id: cy.id, email: mail('cylater') })).status, 200);
+    assert.deepEqual([(await one(c, rc.id)).receipt.status.word, (await one(c, rc.id)).receipt.status.line], ['Not sent', 'Not sent']);
+    list = (await c.get('/api/receipts')).json;
+    assert.equal(list.counts.sendable, 1);
+    all = await c.action('receipt.sendAll', {});
+    assert.deepEqual([all.json.tried, all.json.sent], [1, 1]);
+    assert.deepEqual(sent.map((m) => m.to[0]), [mail('cylater')]);
+
+    // Ari's goes by itself when it is due — once.
+    await db.query(`update jobs set run_at = now() where workspace_id = $1 and kind = 'receipt.email' and status = 'pending'`, [ws]);
+    await runDueJobs(db, { workspaceId: ws });
+    assert.deepEqual(sent.map((m) => m.to[0]), [mail('cylater'), mail('ari')]);
+    assert.equal((await one(c, ra.id)).receipt.status.word, 'Sent');
+    assert.equal((await c.get('/api/receipts')).json.counts.sendable, 0);
+
+    // More waiting than one tap sends: the count is what one tap sends.
+    const many = await c.createPerson('Mo Many', { email: mail('mo'), address: '4 Auto Ave' });
+    await db.query(
+      `insert into receipts (id, workspace_id, gift_id, person_id, series, seq, number, token, donor_name, donor_address,
+                             amount_cents, received_on)
+       select gen_random_uuid(), $1, gen_random_uuid(), $2, '2026', 1000 + i, '2026-' || (1000 + i), md5(random()::text || i),
+              'Mo Many', '4 Auto Ave', 1000, '2026-10-01'
+       from generate_series(1, 101) as i`,
+      [ws, many.id],
+    );
+    list = (await c.get('/api/receipts')).json;
+    assert.deepEqual([list.counts.unsent, list.counts.sendable], [101, 100], 'the button never says more than one tap sends');
+  });
+});
+
 test('the donor link shows that one receipt and nothing else', async () => {
   const d = await mgr.createPerson('Lena Link', { address: '44 Link Ave', email: mail('lena') });
   const other = await mgr.createPerson('Otto Other', { address: '55 Other Ave' });

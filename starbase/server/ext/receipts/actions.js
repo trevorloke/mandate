@@ -1,6 +1,7 @@
 // receipt.* actions — the only writes this feature makes from the desk.
 //   receipt.send       email one receipt (Send / Send again)
-//   receipt.sendAll    email every receipt not sent yet that can be
+//   receipt.sendAll    email the receipts not sent yet that can be (up to
+//                      SEND_ALL_MAX; never one already saying Sending)
 //   receipt.sendVoid   email "this receipt is void" for a voided receipt the
 //                      donor was already emailed
 //   receipt.settings   financial agent, threshold, tax line, footer,
@@ -15,9 +16,9 @@ import { emailConfigured } from '../../lib/notify.js';
 import { httpError } from '../../actions/util.js';
 import {
   MONEY_ROLES, AGENT_ROLES, DEFAULTS, deliver, deliverVoid, donorEmail, currentAddress, canSendOf, wasEmailed,
+  SEND_ALL_MAX, NOT_FOR_SEND_ALL,
 } from './core.js';
 
-const SEND_ALL_MAX = 100;
 const text = (max) => z.string().max(max).nullish();
 const cents = () => z.number().int().min(0).max(100_000_000).optional();
 const day = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD').nullish();
@@ -79,11 +80,11 @@ export const actions = {
       const todo = (await tx.query(
         `select r.*, nullif(trim(p.email), '') as email from receipts r join persons p on p.id = r.person_id
          where r.workspace_id = $1 and r.voided_at is null and not r.sample
-           and r.email_status is distinct from 'sent' and r.email_status is distinct from 'sending'
+           and not (coalesce(r.email_status, '') = any($3::text[]))
            and nullif(trim(p.email), '') is not null
            and (nullif(trim(r.donor_address), '') is not null or nullif(trim(p.address), '') is not null)
          order by r.series, r.seq limit $2 for update of r`,
-        [ctx.workspaceId, SEND_ALL_MAX + 1],
+        [ctx.workspaceId, SEND_ALL_MAX + 1, NOT_FOR_SEND_ALL],
       )).rows;
       let sent = 0; let failed = 0;
       for (const r of todo.slice(0, SEND_ALL_MAX)) {

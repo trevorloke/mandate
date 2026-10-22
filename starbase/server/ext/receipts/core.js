@@ -39,6 +39,12 @@ export const sendDelaySeconds = () => {
 // A send still 'sending' after this long never heard back from the provider.
 const STALE_SENDING_MS = 2 * 60 * 1000;
 
+// Send all: the most one tap emails (the button says how many it will).
+export const SEND_ALL_MAX = 100;
+// Send all leaves these alone: sent, with the provider ('sending'), and the
+// automatic email that is due ('queued') — the last two say Sending.
+export const NOT_FOR_SEND_ALL = ['sent', 'sending', 'queued'];
+
 export const isoDay = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d ?? '').slice(0, 10));
 const trimmed = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
 const dayOrNull = (d) => (d ? isoDay(d) : null);

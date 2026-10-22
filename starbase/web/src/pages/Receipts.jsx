@@ -5,10 +5,11 @@
 //   email isn't connected", "Waiting — needs address"), Print and Send /
 //   Send again (only when the server says it can really go), and "Send void
 //   notice" for a voided receipt the donor already got.
-//   One yellow "Send all not sent" — only while email is connected and some
-//   can go (asks in place: "Email 3 receipts? Yes · No").
+//   One yellow "Email 3 receipts" — only while email is connected and some
+//   Not sent ones can go; never one already Sending (asks in place: "Email 3
+//   receipts? Yes · No"). Email off: the line says so, with Connect.
 //   Settings (?settings=1, managers and treasurers): the financial agent and
-//   how to reach them, "Receipt gifts from ($)", the footer; the tax line,
+//   how to reach them, "Receipt gifts of at least ($)", the footer; the tax line,
 //   the disclosure amount and the campaign's dates under More details.
 //   More: Settings · Disclosure (over $100) for a period · All receipts —
 //   each "Download for a spreadsheet", what the financial agent files
@@ -24,7 +25,10 @@ import './receipts.css';
 const LATEST = 12;
 const AGENT_ROLES = ['manager', 'treasurer'];
 const receipts = (n) => `${n} ${n === 1 ? 'receipt' : 'receipts'}`;
-const centsToField = (c) => (c ? String(Number(c) / 100) : '');
+// The saved amount, shown as it is (0 included); unset → empty.
+const centsToField = (c) => (c === null || c === undefined || c === '' ? '' : String(Number(c) / 100));
+// Where "Connect" goes: the Website tab, with its More open on Email & texting.
+const CONNECT_TO = '/outreach/website?connect=1';
 // "This campaign · Jan 1 – Dec 31, 2026" / "2025"
 const periodWord = (p) => (p.key === 'campaign' ? `This campaign · ${shortDate(p.from)} – ${shortDate(p.to)}` : p.key);
 
@@ -78,9 +82,10 @@ function SettingsForm({ settings, onSaved, onClose }) {
           value={f.agent_contact} onChange={set('agent_contact')} />
       </div>
       <div className="field">
-        <label htmlFor="rc-threshold">Receipt gifts from ($)</label>
-        <input id="rc-threshold" className="input mono" inputMode="decimal" placeholder="0 = every gift"
+        <label htmlFor="rc-threshold">Receipt gifts of at least ($)</label>
+        <input id="rc-threshold" className="input mono" inputMode="decimal" aria-describedby="rc-threshold-hint"
           value={f.threshold} onChange={set('threshold')} />
+        <span id="rc-threshold-hint" className="ops-meta">0 receipts every gift</span>
       </div>
       <div className="field">
         <label htmlFor="rc-footer">Footer</label>
@@ -251,13 +256,13 @@ export default function Receipts() {
         <h1>Receipts</h1>
         {!showSettings && emailOn && sendable > 0 && !confirm && (
           <button type="button" className="btn btn-primary ops-tap" disabled={busy === 'all'} onClick={() => setConfirm(true)}>
-            {busy === 'all' ? 'Sending…' : 'Send all not sent'}
+            {busy === 'all' ? 'Sending…' : `Email ${receipts(sendable)}`}
           </button>
         )}
       </div>
 
       {confirm && (
-        <div className="ops-confirm rc-confirm" role="group" aria-label="Send all not sent">
+        <div className="ops-confirm rc-confirm" role="group" aria-label="Email the receipts not sent">
           <span>Email {receipts(sendable)}?</span>
           <button type="button" className="btn ops-solid ops-tap" onClick={sendAll}>Yes</button>
           <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirm(false)}>No</button>
@@ -275,7 +280,9 @@ export default function Receipts() {
           <button type="button" className="btn ops-tap" onClick={() => setParams({ settings: '1' })}>Set up</button>
         </div>
       )}
-      {data && !emailOn && <p className="ops-meta rc-line">Email isn’t connected — print receipts instead.</p>}
+      {data && !emailOn && (
+        <p className="ops-meta rc-line">Email isn’t connected — print receipts instead. <Link to={CONNECT_TO}>Connect</Link></p>
+      )}
 
       {error && <p className="error" role="alert">{error}</p>}
       {q.isError && <p className="error">{q.error.message}</p>}

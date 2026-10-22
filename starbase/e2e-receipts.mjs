@@ -3,8 +3,9 @@
 // Part 1, email NOT connected (the server at BASE): a treasurer signs up,
 // logs a gift on Money with the form and opens it — "Receipt 2026-0001 · Not
 // sent", as the server has it. Money → More → Receipts lists every receipt
-// (no yellow button while email is off, and it says so); "Set up" opens the
-// settings (financial agent, contact, footer); a row says "Not sent — email
+// (no yellow button while email is off, and it says so, with Connect); "Set
+// up" opens the settings (financial agent, contact, footer; "Receipt gifts of
+// at least ($)" shows its 0); a row says "Not sent — email
 // isn't connected" and Print opens the receipt, which carries everything the
 // server's copy does. Printing shows the receipt alone. The donor's own link
 // (/r/<token>, no sign-in) shows that receipt and nothing else. Voiding the
@@ -25,8 +26,9 @@
 // answered locally and logged, never sent; its automatic email waits 4 s
 // (STARBASE_RECEIPT_DELAY_S; a minute in real use). A gift to a donor with an
 // email says "receipt emails in a minute" and is sent once by itself
-// ("Sent"), with an idempotency key; Send again sends again; a receipt
-// waiting for an email shows the one yellow "Send all not sent", which asks
+// ("Sent"), with an idempotency key; Send again sends again; while one says
+// Sending and another has no email there is no yellow button; a Not sent
+// receipt with an email shows the one yellow "Email 1 receipt", which asks
 // first and sends it. A gift undone right away never reaches the donor.
 // Voiding a gift whose receipt went asks "Receipt already emailed — send a
 // void notice?", and Yes sends it. What the screen says matches what the
@@ -193,9 +195,21 @@ check('financial agent not set: one line + Set up', /Financial agent not set/.te
 const m1 = await simple(page, 'receipts list (desktop)');
 console.log(`      words on /money/receipts: ${m1.words}`);
 await D.shot('02-receipts-list');
+const connect = page.locator('main.page .rc-line a', { hasText: 'Connect' });
+check('email off: the line links to Connect (as Ladders and Outreach do)', (await connect.getAttribute('href').catch(() => null)) === '/outreach/website?connect=1');
+await connect.click();
+await page.waitForURL(`${BASE}/outreach/website?connect=1`, { timeout: 8000 }).catch(() => {});
+await sleep(700);
+check('Connect lands on Email & texting: "Email not connected"', /Email not connected/.test(await D.text()), page.url());
+await D.go('/money/receipts');
 
 // ── 3. Settings: financial agent, contact, footer ──
 await page.getByRole('button', { name: 'Set up' }).click();
+const thrLabel = (await page.locator('label[for="rc-threshold"]').innerText().catch(() => '')).trim();
+const thrHint = (await page.locator('#rc-threshold-hint').innerText().catch(() => '')).trim();
+check('settings: "Receipt gifts of at least ($)" shows the saved 0, helper "0 receipts every gift"',
+  /^Receipt gifts of at least \(\$\)$/i.test(thrLabel) && (await page.inputValue('#rc-threshold')) === '0' && thrHint === '0 receipts every gift',
+  `${thrLabel} | ${await page.inputValue('#rc-threshold')} | ${thrHint}`);
 await page.fill('#rc-agent', 'Jordan Agent');
 await page.fill('#rc-contact', `agent.${tag}@example.org · 604-555-0142`);
 await page.fill('#rc-footer', 'Thank you for building a better Surrey.');
@@ -518,26 +532,40 @@ try {
   await simple(p2, 'one receipt, email connected (desktop)');
   await M.shot('13-receipt-sent');
 
-  // A receipt waiting for an email: Send all not sent.
+  // Right after a gift from a donor with an email (Sending), with another
+  // donor's receipt Not sent for want of an email: no yellow button — the one
+  // Sending goes by itself, the other can't go.
   const cy = (await M.api('/actions/person.create', { name: 'Cy Later', address: '3 Later St', city: 'Surrey' })).json.person;
   const gCy = (await M.api('/actions/gift.log', { person_id: cy.id, amount_cents: 4000, date: String(gE.date).slice(0, 10), method: 'cheque' })).json.gift;
   let rCy = (await M.api(`/receipts/gift/${gCy.id}`)).json.receipt;
   check('no email yet: "No email on file"', rCy.status.line === 'No email on file', rCy.status.line);
+  const sal = (await M.api('/actions/person.create', { name: 'Sal Soon', email: `sal.${tag}@example.org`, address: '8 Soon St', city: 'Surrey' })).json.person;
+  const gSal = (await M.api('/actions/gift.log', { person_id: sal.id, amount_cents: 2500, date: String(gE.date).slice(0, 10), method: 'cash' })).json.gift;
+  await M.go('/money/receipts');
+  const salRow = (await p2.locator('#rc-list .ops-row', { hasText: 'Sal Soon' }).innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const cyRow = (await p2.locator('#rc-list .ops-row', { hasText: 'Cy Later' }).innerText().catch(() => '')).replace(/\s+/g, ' ');
+  check('one Sending, one Not sent with no email → no yellow button', /Sending/i.test(salRow) && /Not sent/i.test(cyRow) && (await yellowCount(p2)) === 0, `${salRow} | ${cyRow}`);
+  await M.shot('13b-receipts-sending-no-button');
+  const salSent = await until(async () => ((await M.api(`/receipts/gift/${gSal.id}`)).json.receipt.status.word === 'Sent'));
+  check('the Sending one went by itself, once', salSent && outbox.filter((m) => m.to[0] === `sal.${tag}@example.org`).length === 1, outbox.length);
+  const beforeCy = outbox.length;
+
+  // A Not sent receipt with an email: the one yellow "Email 1 receipt".
   await M.api('/actions/person.update', { id: cy.id, email: `cy.${tag}@example.org` });
   rCy = (await M.api(`/receipts/gift/${gCy.id}`)).json.receipt;
   check('email added: "Not sent"', rCy.status.word === 'Not sent' && rCy.status.line === 'Not sent', rCy.status.line);
   await M.go('/money/receipts');
-  check('one yellow: Send all not sent', (await yellowCount(p2)) === 1 && await p2.getByRole('button', { name: 'Send all not sent' }).isVisible());
+  check('one yellow: "Email 1 receipt"', (await yellowCount(p2)) === 1 && await p2.getByRole('button', { name: 'Email 1 receipt', exact: true }).isVisible());
   const m3 = await simple(p2, 'receipts list with Send all (desktop)');
   console.log(`      words on /money/receipts (connected): ${m3.words}`);
   await M.shot('14-receipts-send-all');
-  await p2.getByRole('button', { name: 'Send all not sent' }).click();
+  await p2.getByRole('button', { name: 'Email 1 receipt', exact: true }).click();
   const ask = (await p2.locator('.rc-confirm').innerText()).replace(/\s+/g, ' ').trim();
   check('asks in place: "Email 1 receipt? Yes · No"', /^Email 1 receipt\? Yes No$/i.test(ask), ask);
   await p2.locator('.rc-confirm').getByRole('button', { name: 'Yes' }).click();
   await p2.locator('.toast', { hasText: 'Sent 1' }).waitFor({ timeout: 8000 }).catch(() => {});
   rCy = (await M.api(`/receipts/gift/${gCy.id}`)).json.receipt;
-  check('Send all → Cy’s receipt went (provider and server agree)', outbox.length === 3 && outbox[2].to[0] === `cy.${tag}@example.org` && rCy.status.word === 'Sent' && /✓ Sent 1/.test(await p2.innerText('body')), `${outbox.length} ${rCy.status.word}`);
+  check('Yes → Cy’s receipt went (provider and server agree)', outbox.length === beforeCy + 1 && outbox[beforeCy].to[0] === `cy.${tag}@example.org` && rCy.status.word === 'Sent' && /✓ Sent 1/.test(await p2.innerText('body')), `${outbox.length} ${rCy.status.word}`);
   await sleep(600);
   check('nothing left to send → the yellow button is gone', (await yellowCount(p2)) === 0);
   await p2.setViewportSize({ width: 390, height: 844 });
