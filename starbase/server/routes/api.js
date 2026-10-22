@@ -16,6 +16,8 @@ import { pointInPolygon, groupDoors, walkOrder } from '../lib/geo.js';
 import { checkCap } from '../lib/cap.js';
 import { EXTENSIONS } from '../ext.js';
 import { runHooks } from '../lib/hooks.js';
+// Which saved newsletter / press rows Try again would reach (ext/abtests).
+import { retryable } from '../ext/abtests/send.js';
 
 // A date column as YYYY-MM-DD (both backends hand back a Date at UTC midnight).
 const dateOnly = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
@@ -528,19 +530,21 @@ app.get('/subscriptions', async (c) => {
 // how many were sent, failed, and are still waiting. queued_count for a
 // newsletter counts only addresses still subscribed — the ones Send now
 // would actually email (blast.resend drops the rest); retry_count is the
-// same for Try again (failed + queued, still subscribed). failed_count stays
-// the plain record of what happened.
+// same for Try again (failed + queued, still subscribed, plus any the email
+// service never answered for in 10 minutes). failed_count stays the plain
+// record of what happened; sending_count is "not sure it went".
 app.get('/blasts', async (c) => {
   const ctx = c.get('ctx');
   const { rows } = await c.get('db').query(
     `select b.id, b.kind, b.subject, b.status, b.provider_note, b.audience_count, b.sent_at, b.created_at,
-            k.sent_count, k.failed_count, k.queued_count, k.retry_count
+            k.sent_count, k.failed_count, k.queued_count, k.retry_count, k.sending_count
      from blasts b
      cross join lateral (
        select (count(*) filter (where r.status = 'sent'))::int as sent_count,
               (count(*) filter (where r.status = 'failed'))::int as failed_count,
               (count(*) filter (where r.status = 'queued' and l.live))::int as queued_count,
-              (count(*) filter (where r.status in ('queued', 'failed') and l.live))::int as retry_count
+              (count(*) filter (where ${retryable('r')} and l.live))::int as retry_count,
+              (count(*) filter (where r.status = 'sending'))::int as sending_count
        from blast_recipients r
        cross join lateral (
          select (b.kind <> 'newsletter' or exists (

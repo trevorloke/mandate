@@ -126,7 +126,9 @@ need signal.
 (schema-typed rows from one registry) · View · Action (the only write path) ·
 Signal. **One event log underneath**: every mutation is one transaction —
 typed table writes + event append + hash-chain advance commit together or not
-at all. The `events` table is the sync protocol (`GET /api/events?since=`),
+at all (one exception: an email open or click is written on its recipient's
+row without the campaign's write lock, and a job puts the first of each on
+the log within a minute). The `events` table is the sync protocol (`GET /api/events?since=`),
 the audit trail (`GET /api/audit/verify`), and the public API. `GET /api/export`
 returns every campaign table (each feature's too), event log included — never
 sign-ins or a link's secret token. Money is integer cents; donors are

@@ -10,6 +10,13 @@
 // A/B: a send with two subject lines splits its list at random into group A
 // and group B (10/20/30% each) and the rest. A and B go out now; the rest
 // are held — never sent — until the winner job picks a subject.
+//
+// Every email carries an idempotency key — the send, the recipient row and
+// how many times the service refused it (sendKey) — so a repeat after an
+// unknown outcome (a crash, a timeout) is dropped by the service, and a try
+// after a plain refusal is a new send. A row the service never answered for
+// is 'sending' ("not sure it went"): never sent again by itself; Try again
+// reaches it once it is 10 minutes old, with the same key.
 import { z } from 'zod';
 import { randomBytes, randomInt } from 'node:crypto';
 import { sendEmail } from '../../lib/notify.js';
@@ -31,9 +38,10 @@ export const abInput = z.object({
 // One rule for a send's status, shared by blast.send, blast.resend and the
 // winner job: everyone sent → 'sent'; everyone failed (or no one left on it)
 // → 'failed'; anything else — still saved because email wasn't connected,
-// held for an A/B winner, or a mix of sent and failed — → 'queued'. The
-// status alone can't say "partly sent", so each also answers exact counts:
-//   counts: { total, sent, failed, queued }   (total = sent + failed + queued)
+// held for an A/B winner, a mix of sent and failed, or not sure — → 'queued'.
+// The status alone can't say "partly sent", so each also answers exact counts:
+//   counts: { total, sent, failed, queued, sending? }
+//   (total = sent + failed + queued + sending; sending only when there are any)
 export const blastStatus = ({ total, sent, failed }) =>
   (total > 0 && sent === total ? 'sent' : failed === total ? 'failed' : 'queued');
 
@@ -42,11 +50,45 @@ export const blastCounts = async (tx, workspaceId, blastId) => {
     `select count(*)::int as total,
             (count(*) filter (where status = 'sent'))::int as sent,
             (count(*) filter (where status = 'failed'))::int as failed,
-            (count(*) filter (where status = 'queued'))::int as queued
+            (count(*) filter (where status = 'queued'))::int as queued,
+            (count(*) filter (where status = 'sending'))::int as sending
      from blast_recipients where blast_id = $1 and workspace_id = $2`,
     [blastId, workspaceId],
   )).rows[0];
-  return { total: r.total, sent: r.sent, failed: r.failed, queued: r.queued };
+  return { total: r.total, sent: r.sent, failed: r.failed, queued: r.queued, ...(r.sending ? { sending: r.sending } : {}) };
+};
+
+// The idempotency key of one email: send, recipient row, refusals so far.
+export const sendKey = (blastId, row) => `blast-${blastId}-${row.id}-${Number(row.send_tries) || 0}`;
+
+// What a sendEmail answer means for the row: 'sent'; 'queued' (email isn't
+// connected — nothing went); 'failed' (the service said no: the next try is
+// a new send); 'sending' (the service never answered — not sure it went).
+export const outcomeOf = (res) => {
+  if (res.status === 'sent') return { status: 'sent', refused: false };
+  if (res.status === 'failed' && res.unknown) return { status: 'sending', refused: false };
+  if (res.status === 'failed') return { status: 'failed', refused: true };
+  return { status: 'queued', refused: false };
+};
+
+// A 'sending' row this old never heard back: Try again may reach it (same key).
+export const STALE_SENDING = "interval '10 minutes'";
+export const retryable = (alias = '') => {
+  const a = alias ? `${alias}.` : '';
+  return `(${a}status in ('queued', 'failed') or (${a}status = 'sending' and ${a}sending_at < now() - ${STALE_SENDING}))`;
+};
+
+// Store one row's answer. A row someone else already settled is left alone.
+export const recordOutcome = (tx, workspaceId, rowId, res, { token = null, from = null } = {}) => {
+  const o = outcomeOf(res);
+  return tx.query(
+    `update blast_recipients set status = $3, token = coalesce($4, token),
+       sent_at = case when $3 = 'sent' then now() else sent_at end,
+       sending_at = case when $3 = 'sending' then now() else sending_at end,
+       send_tries = send_tries + case when $5 then 1 else 0 end
+     where id = $1 and workspace_id = $2 and ($6::text is null or status = $6)`,
+    [rowId, workspaceId, o.status, token, o.refused, from],
+  );
 };
 
 // Every newsletter identifies the sender and carries the recipient's own
@@ -126,9 +168,10 @@ export const blastHtml = (ctx, kind, body, subscriptionId, token, links) => {
   const paras = String(body).split(/\n[ \t]*\n/)
     .map((p) => `<p style="margin:0 0 16px">${p.split('\n').map(linkify).join('<br>')}</p>`)
     .join('');
+  // This part is the tracked one, so it says so.
   const foot = kind === 'newsletter'
-    ? `Sent by ${esc(ctx.workspace.name)}.<br><a href="${esc(`${base}/u/${subscriptionId}`)}" style="color:#5d5749">Unsubscribe</a>`
-    : esc(ctx.workspace.name);
+    ? `Sent by ${esc(ctx.workspace.name)}. We count opens and clicks.<br><a href="${esc(`${base}/u/${subscriptionId}`)}" style="color:#5d5749">Unsubscribe</a>`
+    : `${esc(ctx.workspace.name)}. We count opens and clicks.`;
   return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
     + '<body style="margin:0;padding:0;background:#f8f6ef">'
     + '<div style="max-width:600px;margin:0 auto;padding:24px 16px;font:17px/1.55 Georgia,\'Times New Roman\',serif;color:#171410">'
@@ -170,15 +213,30 @@ export const abOf = (b) => (b?.ab_status ? {
   decide_at: b.ab_decide_at || null,
   winner: b.ab_winner || null,
   decided_at: b.ab_decided_at || null,
+  // What the winner was picked on: { metric, tie, a, b } (each group's
+  // delivered / opened / clicked at that moment).
+  result: (typeof b.ab_result === 'string' ? JSON.parse(b.ab_result) : b.ab_result) || null,
 } : null);
 
-// Send saved rows of one blast (blast.resend, the winner job). A newsletter
-// subscriber who unsubscribed since is taken off the send, never emailed.
-// Each row's result is stored on it. Answers { sent, failed, skipped, note }.
+// The winner by the chosen measure (opened or clicked, of delivered). A tie
+// — the same whole percent, as the screen shows them, or a group that
+// reached no one — sends A, and says it was a tie.
+const pctOf = (n, of) => (of > 0 ? Math.round((100 * n) / of) : 0);
+export const decide = (groups, metric) => {
+  const pick = (g) => (metric === 'clicks' ? g.clicked : g.opened);
+  const ra = pctOf(pick(groups.a), groups.a.delivered);
+  const rb = pctOf(pick(groups.b), groups.b.delivered);
+  if (!groups.a.delivered || !groups.b.delivered || ra === rb) return { winner: 'a', tie: true };
+  return { winner: rb > ra ? 'b' : 'a', tie: false };
+};
+
+// Send saved rows of one blast (blast.resend). A newsletter subscriber who
+// unsubscribed since is taken off the send, never emailed. Each row's result
+// is stored on it. Answers { sent, failed, skipped, unsure, note }.
 export const deliver = async (tx, ctx, blast, rows) => {
   const links = findLinks(blast.body);
   await saveLinks(tx, ctx.workspaceId, blast.id, links);
-  let sent = 0, failed = 0, skipped = 0, note = null;
+  let sent = 0, failed = 0, skipped = 0, unsure = 0, note = null;
   for (const r of rows) {
     let subscriptionId = null;
     if (blast.kind === 'newsletter') {
@@ -198,16 +256,16 @@ export const deliver = async (tx, ctx, blast, rows) => {
       to: r.email,
       subject: subjectFor(blast, r.ab_group),
       ...composeBlast(ctx, { kind: blast.kind, body: blast.body, subscriptionId, token, links }),
+      idempotencyKey: sendKey(blast.id, r),
     });
-    if (res.status === 'sent') sent += 1;
-    else if (res.status === 'failed') failed += 1;
+    const { status } = outcomeOf(res);
+    if (status === 'sent') sent += 1;
+    else if (status === 'failed') failed += 1;
+    else if (status === 'sending') unsure += 1;
     if (!note && res.detail) note = res.detail;
-    await tx.query(
-      'update blast_recipients set status = $3, token = $4 where id = $1 and workspace_id = $2',
-      [r.id, ctx.workspaceId, res.status, token],
-    );
+    await recordOutcome(tx, ctx.workspaceId, r.id, res, { token });
   }
-  return { sent, failed, skipped, note };
+  return { sent, failed, skipped, unsure, note };
 };
 
 // A new A/B send: store its two subjects and settings. Saved while email

@@ -15,7 +15,7 @@ import { runHooks, hasHook } from '../lib/hooks.js';
 // The tracked newsletter/press send path and A/B subject lines.
 import {
   AB_MIN, abInput, abGroups, abOf, blastCounts, blastStatus, composeBlast, deliver,
-  findLinks, newToken, openTest, restReleased, saveLinks, startTest,
+  findLinks, newToken, openTest, outcomeOf, restReleased, retryable, saveLinks, sendKey, startTest,
 } from '../ext/abtests/send.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
@@ -563,6 +563,10 @@ export const FIELD_ACTIONS = {
     }),
     handler: async (tx, ctx, input, emit) => {
       if (input.ab && input.ab.subject_b === input.subject) throw httpError(400, 'subject B is the same as subject A');
+      // Winner by clicks needs something to click.
+      if (input.ab?.metric === 'clicks' && findLinks(input.body).length === 0) {
+        throw httpError(400, 'winner by clicks needs a link in the message');
+      }
       const audience = input.kind === 'newsletter'
         ? (await tx.query(
             `select id, email, name from subscriptions where workspace_id = $1 and status = 'subscribed'`,
@@ -587,14 +591,17 @@ export const FIELD_ACTIONS = {
       const links = findLinks(input.body);
 
       const id = newId();
-      let sent = 0, failed = 0;
+      let sent = 0, failed = 0, unsure = 0;
       const recipientRows = [];
       // Without email connected sendEmail sends nothing and answers 'queued':
       // the send is saved, and blast.resend sends those rows once it is.
-      // Each recipient gets its own token for the open pixel and its links.
+      // Each recipient gets its own token for the open pixel and its links,
+      // and its row id up front for the email's idempotency key. One the
+      // service never answered for is 'sending' — not sure it went.
       for (const [i, r] of audience.entries()) {
         const group = groups[i] || null;
         const token = newToken();
+        const rowId = newId();
         // The rest of an A/B send waits for the winner: nothing goes to them now.
         const res = group === 'rest' && live
           ? { status: 'queued' }
@@ -602,10 +609,13 @@ export const FIELD_ACTIONS = {
             to: r.email,
             subject: group === 'b' ? ab.subject_b : input.subject,
             ...composeBlast(ctx, { kind: input.kind, body: input.body, subscriptionId: r.id, token, links }),
+            idempotencyKey: sendKey(id, { id: rowId, send_tries: 0 }),
           });
-        if (res.status === 'sent') sent += 1;
-        else if (res.status === 'failed') failed += 1;
-        recipientRows.push({ email: r.email, name: r.name, status: res.status, detail: res.detail, token, group });
+        const out = outcomeOf(res);
+        if (out.status === 'sent') sent += 1;
+        else if (out.status === 'failed') failed += 1;
+        else if (out.status === 'sending') unsure += 1;
+        recipientRows.push({ id: rowId, email: r.email, name: r.name, status: out.status, refused: out.refused, detail: res.detail, token, group });
       }
       const status = blastStatus({ total: audience.length, sent, failed });
       const note = recipientRows.find((r) => r.detail)?.detail || null;
@@ -616,9 +626,11 @@ export const FIELD_ACTIONS = {
       );
       for (const r of recipientRows) {
         await tx.query(
-          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group)
-           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [newId(), ctx.workspaceId, id, r.email, r.name || null, r.status, r.token, r.group],
+          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group,
+             sent_at, sending_at, send_tries)
+           values ($1, $2, $3, $4, $5, $6, $7, $8,
+             case when $6 = 'sent' then now() end, case when $6 = 'sending' then now() end, $9)`,
+          [r.id, ctx.workspaceId, id, r.email, r.name || null, r.status, r.token, r.group, r.refused ? 1 : 0],
         );
       }
       await saveLinks(tx, ctx.workspaceId, id, links);
@@ -628,7 +640,10 @@ export const FIELD_ACTIONS = {
         kind: input.kind, subject: input.subject, audience: audience.length, status,
         ...(test ? { ab: { subject_b: ab.subject_b, pct: ab.pct, wait_hours: ab.wait_hours, metric: ab.metric, status: test.status } } : {}),
       });
-      const counts = { total: audience.length, sent, failed, queued: audience.length - sent - failed };
+      const counts = {
+        total: audience.length, sent, failed, queued: audience.length - sent - failed - unsure,
+        ...(unsure ? { sending: unsure } : {}),
+      };
       return {
         blast: {
           id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note,
@@ -663,9 +678,12 @@ export const FIELD_ACTIONS = {
       )).rows[0];
       if (!blast) throw httpError(404, 'send not found');
       if (!emailConfigured()) throw httpError(409, "email isn't connected yet — connect it, then send");
+      // Not reached yet: queued, failed, or 'sending' long enough ago that
+      // the service never answered (sent again with the same key, so the
+      // service drops it if it did go).
       const waiting = (await tx.query(
-        `select id, email, name, token, ab_group from blast_recipients
-         where blast_id = $1 and workspace_id = $2 and status in ('queued', 'failed')
+        `select id, email, name, token, ab_group, send_tries from blast_recipients
+         where blast_id = $1 and workspace_id = $2 and ${retryable()}
            and ($3::boolean or ab_group is distinct from 'rest')
          order by created_at, id`,
         [blast.id, ctx.workspaceId, restReleased(blast)],

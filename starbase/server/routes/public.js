@@ -272,7 +272,8 @@ app.get('/n/:ws', async (c) => {
   <label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="email">
   <label for="name">Your name</label><input id="name" name="name" autocomplete="name">
   <button type="submit">Subscribe</button>
-</form>`));
+</form>
+<p class="note">We count opens and clicks in our emails.</p>`));
 });
 
 app.post('/n/:ws', async (c) => {

@@ -15,6 +15,11 @@ export const textConfigured = () =>
 // `html` is optional: sent alongside the plain-text part when given.
 // `idempotencyKey` is optional: the provider sends a key it has seen in the
 // last day only once, so a retry after an unknown outcome never doubles up.
+// A provider that hasn't answered in 15 s (STARBASE_EMAIL_TIMEOUT_MS) is given
+// up on: 'failed' with unknown: true — it may or may not have sent it — so a
+// hung connection never holds a send (or anything waiting on it) for long.
+// unknown is set only when the provider never answered.
+const emailTimeoutMs = () => Number(process.env.STARBASE_EMAIL_TIMEOUT_MS) || 15_000;
 export const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
   if (!emailConfigured()) {
     return { sent: false, status: 'queued', detail: 'no email provider configured (set RESEND_API_KEY)' };
@@ -34,13 +39,18 @@ export const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => 
         text,
         ...(html ? { html } : {}),
       }),
+      signal: AbortSignal.timeout(emailTimeoutMs()),
     });
     if (!res.ok) {
-      return { sent: false, status: 'failed', detail: `email provider ${res.status}: ${(await res.text()).slice(0, 200)}` };
+      return { sent: false, status: 'failed', detail: `email provider ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}` };
     }
     return { sent: true, status: 'sent' };
   } catch (e) {
-    return { sent: false, status: 'failed', detail: String(e.message).slice(0, 200) };
+    const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+    return {
+      sent: false, status: 'failed', unknown: true,
+      detail: timedOut ? `email provider didn't answer in ${Math.round(emailTimeoutMs() / 1000)} s` : String(e?.message || e).slice(0, 200),
+    };
   }
 };
 

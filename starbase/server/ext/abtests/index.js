@@ -1,20 +1,24 @@
-// A/B subject lines with open and click tracking, for newsletters and
-// press releases.
+// A/B subject lines with open and click tracking, for newsletters and press
+// releases.
 //
 //   sql.js     columns on blasts / blast_recipients; blast_links
 //   send.js    the tracked send path (tokens, HTML part with pixel and
-//              links, A/B groups) — used by blast.send / blast.resend in
-//              actions/field.js and by the winner job
-//   track.js   public GET /o/<token>.gif and /c/<token>/<n>
-//   winner.js  the job that picks the winner and sends it to the rest
+//              links, A/B groups, idempotency keys, the tie rule) — used by
+//              blast.send / blast.resend in actions/field.js and by the
+//              winner job
+//   track.js   public GET /o/<token>.gif and /c/<token>/<n>, written without
+//              the campaign lock; the job that logs first opens and clicks
+//   winner.js  the job that picks the winner and sends it to the rest, a
+//              few at a time, never holding the campaign lock while it sends
 //   stats.js   GET /api/blasts/stats (desk only)
 export { sql } from './sql.js';
 export { publicRoutes } from './track.js';
 export { api } from './stats.js';
 import { pickWinner } from './winner.js';
+import { LOG_JOB, logHits } from './track.js';
 import { WINNER_JOB } from './send.js';
 
-export const jobs = { [WINNER_JOB]: pickWinner };
+export const jobs = { [WINNER_JOB]: pickWinner, [LOG_JOB]: logHits };
 
 // In the full export: the links each send carried.
 export const exportTables = ['blast_links'];

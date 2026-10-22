@@ -82,6 +82,12 @@ one tap away under **More**.
 - **Outreach → Newsletter** — without email connected, a newsletter is
   *Saved — not sent*; connect email (Resend) and tap *Send now*. A send
   that partly fails says *Sent to 1 of 2 — 1 failed* with *Try again*.
+- **Two subject lines** (50+ subscribers) — Write newsletter → *Try two
+  subject lines*: A and B each go to a small group; after the wait the better
+  one (by opens, or by clicks when the message has a link) goes to everyone
+  else by itself, and *Last sent* shows *Opened · Clicked*. A tie sends A and
+  says *Tie — sent A*. Opens run high (Apple Mail opens by itself); clicks
+  from mail scanners aren't counted.
 - **Outreach → Website** — set the Imagine Surrey website address; copy the
   public volunteer page (`/v/imagine-surrey`), newsletter page
   (`/n/imagine-surrey`), petition, event, and donate (`/d/imagine-surrey`)

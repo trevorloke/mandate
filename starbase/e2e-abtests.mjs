@@ -3,13 +3,15 @@
 // Starts its own fresh in-memory server with a stand-in email provider
 // (fetch to Resend is answered locally and each message written to a
 // mailbox file), then, as a desk user: writes an A/B newsletter while email
-// isn't connected (Saved — not sent), connects email, Send now (A and B
-// only), opens and clicks from the real tracked emails, fast-forwards the
-// wait so the winner job runs, and reads the result on screen — every
-// number checked against the API. Then the small-list path on Press, the
-// compose screen on a 390×844 phone (one yellow button, no sideways scroll,
-// field targets ≥ 48px, word count), and a volunteer on a phone who can't
-// reach any of it. Ends with /api/audit/verify.
+// isn't connected (Saved — not sent, the plan on the card), connects email,
+// Start test (A and B only), opens and clicks from the real tracked emails
+// (a scanner's clicks not counted), fast-forwards the wait so the winner job
+// runs, and reads the result on the first look (Last sent) and under More
+// (Past sends above Subscribers) — every number checked against the API.
+// Then the small-list path on Press, a tie, the compose screen on a 390×844
+// phone (one yellow button, no sideways scroll, field targets ≥ 48px, word
+// count), and a volunteer on a phone who can't reach any of it. Ends with
+// /api/audit/verify.
 //
 //   npm run build  then  node e2e-abtests.mjs   (PORT, SHOTS optional)
 import { chromium } from 'playwright-core';
@@ -35,7 +37,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── The stand-in email provider + a test-only clock, loaded into the server ──
 // /connect sets RESEND_API_KEY (email connected); /due makes pending jobs due
-// now (the A/B wait is at least an hour). Both only exist in this check.
+// now (the A/B wait is at least an hour); /age makes every send a minute
+// older (a click seconds after delivery is a scanner's). All only exist in
+// this check.
 const serverDir = fileURLToPath(new URL('./server/', import.meta.url));
 writeFileSync(STUB, `
 import { createServer } from 'node:http';
@@ -50,9 +54,11 @@ globalThis.fetch = async (url, init) => {
 };
 createServer(async (req, res) => {
   if (req.url === '/connect') process.env.RESEND_API_KEY = 'e2e-key';
-  if (req.url === '/due') {
+  if (req.url === '/due' || req.url === '/age') {
     const { getDb } = await import(${JSON.stringify(pathToFileURL(`${serverDir}db/client.js`).href)});
-    await (await getDb()).query("update jobs set run_at = now() where status = 'pending'");
+    const db = await getDb();
+    if (req.url === '/due') await db.query("update jobs set run_at = now() where status = 'pending'");
+    else await db.query("update blast_recipients set sent_at = sent_at - interval '1 minute' where sent_at is not null");
   }
   res.end('ok');
 }).listen(${CONTROL}, '127.0.0.1');
@@ -145,6 +151,12 @@ await page.selectOption('#newsletter-ab-wait', '1');
 await page.selectOption('#newsletter-ab-metric', 'opens');
 t = await textOf(page);
 check('compose: Subject A / Subject B, test group, wait, winner by', /Subject A/i.test(t) && /Subject B/i.test(t) && /Test group/i.test(t) && /Wait/i.test(t) && /Winner by/i.test(t));
+// Winner by clicks needs something to click.
+await page.fill('#newsletter-body', 'Hello neighbours. No links today.');
+const clicksOff = await page.$eval('#newsletter-ab-metric option[value="clicks"]', (o) => ({ disabled: o.disabled, text: o.textContent }));
+await page.fill('#newsletter-body', 'Hello neighbours.\n\nRead the transit plan: https://imaginesurrey.example/plan.');
+const clicksOn = await page.$eval('#newsletter-ab-metric option[value="clicks"]', (o) => o.disabled);
+check('compose: "Clicks" needs a link in the message', clicksOff.disabled && /add a link/.test(clicksOff.text) && !clicksOn, JSON.stringify({ clicksOff, clicksOn }));
 let m = await measure(page);
 check('compose (desk): one yellow button', m.yellow === 1, JSON.stringify(m));
 await shot(page, '1-compose-ab-desk');
@@ -155,8 +167,10 @@ check('not connected: the confirm says save, and that nothing is sent', /Save fo
 await page.click('button:has-text("Yes, save")');
 await sleep(1200);
 t = await textOf(page);
-check('not connected: "Saved — not sent", and the test waits for Send now',
-  /Saved for 60 subscribers — not sent/.test(t) && /The A\/B test starts on Send now/.test(t) && !/Testing/.test(t) && !/Sent to/.test(t), t.slice(0, 300));
+check('not connected: "Saved — not sent", the plan, and the test waits for Start test',
+  /Saved for 60 subscribers — not sent/.test(t) && /Connect email, then Start test/.test(t)
+  && t.includes('Two subject lines · A to 12, B to 12, winner to 36 after 1 hour') && !/Testing/.test(t) && !/Sent to/.test(t), t.slice(0, 300));
+check('no "A/B" on screen', !/A\/B/.test(t));
 const blastId = (await api('/blasts')).json.blasts[0].id;
 let st = await statOf(blastId);
 let listed = (await api('/blasts')).json.blasts[0];
@@ -168,8 +182,11 @@ await shot(page, '2-saved-not-sent');
 await control('/connect');
 await go(page, '/outreach/newsletter');
 t = await textOf(page);
-check('Not sent row: A/B test, Send now for A and B only', /A\/B test · not sent/.test(t) && /Send now · 24/i.test(t), (t.match(/Not sent.{0,160}/) || [''])[0]);
-await page.click('button:has-text("Send now")');
+check('Not sent card: the plan before the tap, and "Start test"',
+  t.includes('60 subscribers') && t.includes('Two subject lines · A to 12, B to 12, winner to 36 after 1 hour')
+  && /Start test/i.test(t) && !/Send now · 24/i.test(t) && !/A\/B/.test(t), (t.match(/Not sent.{0,200}/) || [''])[0]);
+await shot(page, '2b-not-sent-plan');
+await page.click('button:has-text("Start test")');
 await sleep(300);
 t = await textOf(page);
 check('Send now asks once, with the split', /A to 12, B to 12 now · the winner to 36 after 1 hour\?/.test(t), (t.match(/A to.{0,80}/) || [''])[0]);
@@ -188,9 +205,10 @@ const wait = decideAt.getTime() - Date.now();
 check('API: testing, winner picked in 1 hour', st.ab.status === 'testing' && wait > 55 * 60e3 && wait <= 60 * 60e3, JSON.stringify({ status: st.ab.status, wait }));
 // The screen's own rule (AbTests.jsx fmtTime): a bare time today, "tomorrow
 // <time>" or "<Mon d>, <time>" otherwise — an hour's wait can cross midnight.
+// The app's time format: "4:12 a.m.".
 const shownTime = await page.evaluate((iso) => {
   const d = new Date(iso);
-  const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  const t = d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return t;
   const next = new Date(now);
@@ -201,16 +219,27 @@ const shownTime = await page.evaluate((iso) => {
 check('result: "Testing · A 0% vs B 0% opened · winner picked <time>"',
   t.includes(`Testing · A 0% vs B 0% opened · winner picked ${shownTime}`) && /A and B went to 24 of 60 subscribers/.test(t), (t.match(/Testing.{0,120}/) || [''])[0]);
 check('no "not sent" or Try again for the held 36', !/36 not sent/.test(t) && !/Try again/.test(t));
+check('the winner time reads like every other time ("a.m." / "p.m.")', /[ap]\.m\./.test(shownTime) && t.includes(shownTime) && !/[ap]\.m\.\./.test(t), shownTime);
 await shot(page, '3-testing-result');
 
 // ── 4. Opens and clicks from the real emails ──
 const A = sent1.filter((x) => x.subject === 'This week in Surrey');
 const B = sent1.filter((x) => x.subject !== 'This week in Surrey');
-const hit = (path, opts) => fetch(`${BASE}${path}`, { redirect: 'manual', ...opts });
+// A reader's phone browser; a mail scanner names itself (or nothing).
+const BROWSER = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+const hit = (path, opts = {}) => fetch(`${BASE}${path}`, { redirect: 'manual', ...opts, headers: { 'user-agent': BROWSER, ...(opts.headers || {}) } });
 for (const x of A.slice(0, 2)) await hit(new URL(`/o/${tokenOf(x)}.gif`, BASE).pathname);
 for (const x of B.slice(0, 6)) await hit(`/o/${tokenOf(x)}.gif`);
 await hit(`/o/${tokenOf(B[0])}.gif`); // a second open by the same reader
-const click = await hit(new URL(linkOf(B[1], 1)).pathname);
+const clickPath = new URL(linkOf(B[1], 1)).pathname;
+// Seconds after delivery, and a scanner's user agent: both still redirect, neither counts.
+const early = await hit(clickPath);
+await control('/age');
+const scanner = await hit(clickPath, { headers: { 'user-agent': 'python-requests/2.31.0' } });
+const clickRow = async () => (await statOf(blastId)).ab.b.clicked;
+check('scanner clicks still redirect but are not counted', early.status === 302 && scanner.status === 302
+  && scanner.headers.get('location') === 'https://imaginesurrey.example/plan' && (await clickRow()) === 0, `${early.status} ${scanner.status}`);
+const click = await hit(clickPath);
 check('a click goes to the stored link (302)', click.status === 302 && click.headers.get('location') === 'https://imaginesurrey.example/plan', `${click.status} ${click.headers.get('location')}`);
 const bad = await hit(`/c/${tokenOf(B[1])}/2`);
 const evil = await hit(`/c/${tokenOf(B[1])}/1?to=https://evil.example/`);
@@ -223,6 +252,7 @@ await go(page, '/outreach/newsletter');
 t = await textOf(page);
 const live = `Testing · A ${pct(st.ab.a.opened, st.ab.a.delivered)}% vs B ${pct(st.ab.b.opened, st.ab.b.delivered)}% opened · winner picked ${shownTime}`;
 check('first look: the running test, its rates as the API counts them', t.includes(live) && /B · Transit plan: what Newton told us/.test(t), (t.match(/Testing.{0,140}/) || [''])[0]);
+check('first look: "Testing two subject lines"', /Testing two subject lines/i.test(t));
 await shot(page, '4-testing-first-look');
 
 // ── 5. The wait ends: the winner job sends B to the other 36 ──
@@ -242,12 +272,23 @@ check('API: sent to all 60', listed.status === 'sent' && listed.sent_count === 6
 await go(page, '/outreach/newsletter');
 t = await textOf(page);
 check('first look: no test running any more', !/Testing/.test(t));
+const statLine = `Opened ${pct(st.opened, st.delivered)}% · Clicked ${pct(st.clicked, st.delivered)}%`;
+const r = st.ab.result;
+const winLine = `Winner B · A ${pct(r.a.opened, r.a.delivered)}% vs B ${pct(r.b.opened, r.b.delivered)}% opened · sent to everyone`;
+const lastSent = await page.$eval('section[aria-label="Last sent"]', (el) => el.innerText.replace(/\s+/g, ' ')).catch(() => '');
+check(`first look: Last sent — "${winLine}"`, lastSent.includes('This week in Surrey') && lastSent.includes(winLine) && !r.tie, lastSent.slice(0, 200));
+check(`first look: Last sent — "${statLine}", as the API counts`, lastSent.includes(statLine) && st.delivered === 60 && st.opened === 8 && st.clicked === 1, JSON.stringify({ d: st.delivered, o: st.opened, c: st.clicked }));
+await page.locator('section[aria-label="Last sent"]').screenshot({ path: `${SHOTS}/5-last-sent-first-look.png` });
 await page.click('button.ot-more:has-text("More")');
 await sleep(400);
 t = await textOf(page);
-const statLine = `Opened ${pct(st.opened, st.delivered)}% · Clicked ${pct(st.clicked, st.delivered)}%`;
-check('past sends: "Winner B · sent to everyone"', /Winner B · sent to everyone/.test(t), (t.match(/Winner.{0,40}/) || [''])[0]);
-check(`past sends: "${statLine}" — of delivered, as the API counts`, t.includes(statLine) && st.delivered === 60 && st.opened === 8 && st.clicked === 1, JSON.stringify({ d: st.delivered, o: st.opened, c: st.clicked }));
+check('past sends: the winner line with the rates it was picked on', t.includes(winLine), (t.match(/Winner.{0,80}/) || [''])[0]);
+check(`past sends: "${statLine}" — of delivered`, t.includes(statLine));
+const order = await page.evaluate(() => {
+  const top = (sel) => document.querySelector(sel)?.getBoundingClientRect().top ?? null;
+  return { past: top('section[aria-label="Past sends"]'), subs: top('section[aria-label="Subscribers"]') };
+});
+check('under More: Past sends sit above the subscriber list', order.past != null && order.subs != null && order.past < order.subs, JSON.stringify(order));
 check('under More: one line on Apple Mail opens', /Apple Mail can open emails by itself, so opens run high\./.test(t));
 await page.locator('section[aria-label="Past sends"]').screenshot({ path: `${SHOTS}/5-winner-past-sends.png` });
 
@@ -258,7 +299,7 @@ await page.waitForSelector('#press-subject', { timeout: 5000 });
 await page.click('button.ab-toggle');
 await sleep(200);
 t = await textOf(page);
-check('small list: "A/B needs at least 50 media contacts — this sends normally"', /A\/B needs at least 50 media contacts — this sends normally/.test(t) && !(await page.$('#press-ab-subject')), (t.match(/A\/B.{0,80}/) || [''])[0]);
+check('small list: "Two subject lines need 50+ media contacts — this sends with one."', /Two subject lines need 50\+ media contacts — this sends with one\./.test(t) && !(await page.$('#press-ab-subject')) && !/A\/B/.test(t), (t.match(/Two subject.{0,80}/) || [''])[0]);
 await shot(page, '6-press-small-list-note');
 await page.fill('#press-subject', 'Imagine Surrey unveils transit plan');
 await page.fill('#press-body', 'FOR IMMEDIATE RELEASE https://imaginesurrey.example/news');
@@ -272,6 +313,28 @@ t = await textOf(page);
 const press = mailbox().slice(60);
 check('small list: sent normally, one subject, tracked', /Sent to 1 media contact/.test(t) && press.length === 1 && press[0].subject === 'Imagine Surrey unveils transit plan' && tokenOf(press[0]), press.length);
 await shot(page, '6-press-small-list-sent');
+
+// ── 6b. A tie says so: winner by clicks, and nobody clicked ──
+const tieSend = await act('blast.send', {
+  kind: 'newsletter', subject: 'Tie subject A', body: 'Come out: https://imaginesurrey.example/rally',
+  ab: { subject_b: 'Tie subject B', pct: 10, wait_hours: 1, metric: 'clicks' },
+});
+const tieId = tieSend.json?.blast?.id;
+const tieB = mailbox().filter((x) => x.subject === 'Tie subject B');
+for (const x of tieB.slice(0, 3)) await hit(`/o/${tokenOf(x)}.gif`); // B opened more — but this test is by clicks
+await control('/due');
+let tieStat;
+for (let i = 0; i < 40; i += 1) {
+  tieStat = await statOf(tieId);
+  if (tieStat?.ab?.status === 'decided' && !tieStat.ab.rest.going) break;
+  await sleep(250);
+}
+await go(page, '/outreach/newsletter');
+const tieLast = await page.$eval('section[aria-label="Last sent"]', (el) => el.innerText.replace(/\s+/g, ' ')).catch(() => '');
+check('a tie: "Tie — sent A · A 0% vs B 0% clicked · sent to everyone"', tieStat?.ab?.result?.tie === true && tieStat.ab.winner === 'a'
+  && tieLast.includes('Tie — sent A · A 0% vs B 0% clicked · sent to everyone') && !/Winner A/.test(tieLast), tieLast.slice(0, 200));
+check('a tie: the rest got subject A', mailbox().filter((x) => x.subject === 'Tie subject A').length === 54, mailbox().filter((x) => x.subject === 'Tie subject A').length);
+await page.locator('section[aria-label="Last sent"]').screenshot({ path: `${SHOTS}/6b-tie-last-sent.png` });
 
 // ── 7. The compose screen on a phone (desk user) ──
 const phone = await browser.newContext({
@@ -334,10 +397,17 @@ await shot(vp, '9-volunteer-today');
 await vctx.close();
 
 // ── 9. The books ──
-const ev = (await api('/events?since=0&limit=5000')).json.events;
+// First opens and clicks reach the log by a job (the hit itself takes no lock).
+let ev = [];
 const count = (a) => ev.filter((e) => e.action === a).length;
-check('event log: one open event per reader (8), one click, one winner', count('public.open') === 8 && count('public.click') === 1 && count('blast.ab_winner') === 1,
+for (let i = 0; i < 40; i += 1) {
+  ev = (await api('/events?since=0&limit=5000')).json.events;
+  if (count('public.open') >= 11) break;
+  await sleep(250);
+}
+check('event log: one open event per reader (8 + 3), one click, two winners', count('public.open') === 11 && count('public.click') === 1 && count('blast.ab_winner') === 2,
   JSON.stringify({ open: count('public.open'), click: count('public.click'), winner: count('blast.ab_winner') }));
+check('event log: each of the rest recorded on its own (36 + 48)', ev.filter((e) => e.action === 'blast.ab_rest' && e.entity_type === 'blast_recipient').length === 84);
 const v = (await api('/audit/verify')).json;
 check('hash chain verifies', v.ok === true && v.checked > 70, JSON.stringify(v));
 check('no page errors', errors.length === 0, errors.join(' | '));

@@ -3,11 +3,15 @@
 //   AbFields        the quiet "Try two subject lines" reveal in Write
 //   useBlastStat    one send's counts from GET /api/blasts/stats
 //   abState         a test's state as one line ("Testing · A 12% vs B 18%
-//                   opened · winner picked 3:00 pm", "Winner B · sent to
-//                   everyone") — only what the server counted
+//                   opened · winner picked 3:00 p.m.", "Winner B · A 17% vs
+//                   B 50% opened · sent to everyone", "Tie — sent A · …") —
+//                   only what the server counted
+//   abPlanLine      a saved test's plan, before anyone taps ("Two subject
+//                   lines · A to 13, B to 13, winner to 39 after 4 hours")
 //   SendStats       "Opened 42% · Clicked 8%" (of delivered)
 //   TestingList     tests running now, on the tab's first look
 //   OpensNote       the one line on Apple Mail under More
+//   hasLinks        whether a message has a link to click (Winner by clicks)
 import { useId } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet } from '../api.js';
@@ -23,11 +27,13 @@ const hours = (h) => `${h} ${plural(h, 'hour', 'hours')}`;
 const pctOf = (n, of) => (of > 0 ? Math.round((100 * n) / of) : 0);
 
 // Shares GET /api/blasts/stats under the 'blasts' key, so every send
-// (which invalidates ['blasts']) refreshes it too. While a test runs it is
-// read again every 30 s (opens arrive, the winner goes out); when a test
-// finishes, the send list is read again so its counts match the winner line.
+// (which invalidates ['blasts']) refreshes it too. While a test runs, or its
+// winner is still going out, it is read again every 30 s (opens arrive, the
+// winner goes out); when that ends, the send list is read again so its
+// counts match the winner line.
 const STATS_KEY = ['blasts', 'stats'];
-const testingIds = (d) => (d?.stats || []).filter((s) => s.ab?.status === 'testing').map((s) => s.id).join(',');
+const testingIds = (d) => (d?.stats || []).filter((s) => s.ab?.status === 'testing' || s.ab?.rest?.going > 0)
+  .map((s) => s.id).join(',');
 export const useBlastStats = () => {
   const qc = useQueryClient();
   return useQuery({
@@ -53,12 +59,19 @@ export const abPlan = (total, pct) => {
 };
 export const abAsk = (plan, waitHours) =>
   `A to ${plan.a}, B to ${plan.b} now · the winner to ${plan.rest} after ${hours(waitHours)}?`;
+export const abPlanLine = (plan, waitHours) =>
+  `Two subject lines · A to ${plan.a}, B to ${plan.b}, winner to ${plan.rest} after ${hours(waitHours)}`;
 
-// "3:00 pm", "tomorrow 3:00 pm", "Oct 24, 3:00 pm".
+// The same test the server makes (ext/abtests/send.js findLinks): an
+// http(s) address somewhere in the message.
+export const hasLinks = (body) => /https?:\/\/[a-z0-9]/i.test(String(body || ''));
+
+// "3:00 p.m.", "tomorrow 3:00 p.m.", "Oct 24, 3:00 p.m." — the app's own
+// time format (en-CA), like every other time on screen.
 export const fmtTime = (ts) => {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '';
-  const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  const t = d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return t;
   const next = new Date(now);
@@ -68,22 +81,32 @@ export const fmtTime = (ts) => {
 };
 
 // One line for a test that has started. `stat` (from useBlastStat) carries
-// the per-group counts; `counts` the send's { total, sent, failed, queued }.
-// Answers null for a send with no test, or one that hasn't started.
+// the per-group counts; `counts` the send's { total, sent, failed, queued,
+// sending }. Answers null for a send with no test, or one that hasn't started.
+// A decided test shows the rates it was decided on (the server's result),
+// and a tie says so — A went out because neither did better.
+const ratesOf = (groups, metric) => {
+  if (!groups?.a || !groups?.b) return '';
+  const verb = metric === 'clicks' ? 'clicked' : 'opened';
+  const rate = (g) => pctOf(metric === 'clicks' ? g.clicked : g.opened, g.delivered);
+  return ` · A ${rate(groups.a)}% vs B ${rate(groups.b)}% ${verb}`;
+};
 export const abState = (ab, stat, counts) => {
   if (!ab || ab.status === 'saved') return null;
-  const groups = stat?.ab;
   if (ab.status === 'testing') {
-    const verb = ab.metric === 'clicks' ? 'clicked' : 'opened';
-    const rate = (g) => pctOf(ab.metric === 'clicks' ? g.clicked : g.opened, g.delivered);
-    const rates = groups ? ` · A ${rate(groups.a)}% vs B ${rate(groups.b)}% ${verb}` : '';
-    return { tone: 'queued', line: `Testing${rates} · winner picked ${fmtTime(ab.decide_at)}` };
+    return { tone: 'queued', line: `Testing${ratesOf(stat?.ab, ab.metric)} · winner picked ${fmtTime(ab.decide_at)}` };
   }
-  const w = `Winner ${String(ab.winner || 'a').toUpperCase()}`;
+  const result = ab.result || stat?.ab?.result || null;
+  const w = (result?.tie ? 'Tie — sent A' : `Winner ${String(ab.winner || 'a').toUpperCase()}`)
+    + ratesOf(result, result?.metric || ab.metric);
+  const going = stat?.ab?.rest?.going || 0;
+  if (going > 0) return { tone: 'queued', line: `${w} · sending to ${going}` };
   const c = counts;
   if (!c || c.sent == null) return { tone: 'queued', line: w };
   if (c.total > 0 && c.sent === c.total) return { tone: 'sent', line: `${w} · sent to everyone` };
-  const rest = [c.failed ? `${c.failed} failed` : null, c.queued ? `${c.queued} not sent` : null].filter(Boolean);
+  const rest = [
+    c.failed ? `${c.failed} failed` : null, c.queued ? `${c.queued} not sent` : null, c.sending ? `${c.sending} not sure` : null,
+  ].filter(Boolean);
   return { tone: c.sent > 0 ? 'queued' : 'failed', line: `${w} · sent to ${c.sent} of ${c.total}${rest.length ? ` — ${rest.join(' · ')}` : ''}` };
 };
 
@@ -105,8 +128,9 @@ export function OpensNote() {
 }
 
 // In Write: a quiet reveal for Subject B and the test's three settings.
-// value null = one subject line. A list under 50 sends normally.
-export function AbFields({ idPrefix, audienceCount, noun, value, onChange }) {
+// value null = one subject line. A list under 50 sends normally. Clicks
+// can't pick a winner in a message with nothing to click (`links` false).
+export function AbFields({ idPrefix, audienceCount, noun, value, onChange, links = true }) {
   const uid = useId();
   const open = value != null;
   const small = audienceCount != null && audienceCount < AB_MIN;
@@ -122,7 +146,7 @@ export function AbFields({ idPrefix, audienceCount, noun, value, onChange }) {
         <div id={uid} className="ab-body">
           {small ? (
             <p className="ot-note" data-testid="ab-small">
-              A/B needs at least {AB_MIN} {noun(AB_MIN)} — this sends normally.
+              Two subject lines need {AB_MIN}+ {noun(AB_MIN)} — this sends with one.
             </p>
           ) : (
             <>
@@ -146,9 +170,9 @@ export function AbFields({ idPrefix, audienceCount, noun, value, onChange }) {
                 </div>
                 <div className="field">
                   <label htmlFor={id('metric')}>Winner by</label>
-                  <select id={id('metric')} className="input" value={value.metric} onChange={(e) => set({ metric: e.target.value })}>
+                  <select id={id('metric')} className="input" value={links ? value.metric : 'opens'} onChange={(e) => set({ metric: e.target.value })}>
                     <option value="opens">Opens</option>
-                    <option value="clicks">Clicks</option>
+                    <option value="clicks" disabled={!links}>{links ? 'Clicks' : 'Clicks — add a link'}</option>
                   </select>
                 </div>
               </div>
@@ -171,7 +195,7 @@ export function TestingList({ blasts, kind, skip }) {
   if (rows.length === 0) return null;
   return (
     <section className="ot-sec" aria-label="Testing">
-      <h2 className="ot-sec-h">Testing <span className="ot-count">{rows.length}</span></h2>
+      <h2 className="ot-sec-h">Testing two subject lines <span className="ot-count">{rows.length}</span></h2>
       <ul className="ot-list">
         {rows.map(({ s, b }) => (
           <li key={b.id} className="ot-item" data-testid="ab-testing-row">

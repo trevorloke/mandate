@@ -3,12 +3,15 @@
 //   delivered  rows the email service accepted ('sent')
 //   opened     delivered rows that loaded the pixel or clicked a link
 //   clicked    delivered rows that clicked a link
-//   ab         null, or the test: settings, state, winner, and per group
-//              { total, delivered, opened, clicked } for a and b, plus
-//              rest { total, sent, failed, held } (held: waiting for the winner)
+//   ab         null, or the test: settings, state, winner, result (the
+//              numbers the winner was picked on: { metric, tie, a, b }), and
+//              per group { total, delivered, opened, clicked } for a and b,
+//              plus rest { total, sent, failed, held, going } (held: waiting
+//              for the winner; going: on its way — the winner is picked and
+//              its job is still sending)
 // Percentages are the screen's job (of delivered). No emails, no tokens.
 import { Hono } from 'hono';
-import { AB_MIN, AB_PCTS, AB_WAITS, abOf } from './send.js';
+import { AB_MIN, AB_PCTS, AB_WAITS, WINNER_JOB, abOf } from './send.js';
 
 export const api = new Hono();
 
@@ -27,7 +30,9 @@ api.get('/blasts/stats', async (c) => {
   if (ctx.role === 'volunteer') return c.json({ error: 'volunteers cannot view this' }, 403);
   const { rows } = await c.get('db').query(
     `select b.id, b.ab_status, b.ab_subject_b, b.ab_pct, b.ab_wait_hours, b.ab_metric,
-            b.ab_decide_at, b.ab_winner, b.ab_decided_at,
+            b.ab_decide_at, b.ab_winner, b.ab_decided_at, b.ab_result,
+            exists (select 1 from jobs j where j.workspace_id = b.workspace_id and j.kind = '${WINNER_JOB}'
+                      and j.status in ('pending', 'running') and j.payload->>'blast_id' = b.id::text) as winner_job_on,
             (count(r.id) filter (where r.status = 'sent'))::int as delivered,
             (count(r.id) filter (where r.status = 'sent' and (r.first_open_at is not null or r.first_click_at is not null)))::int as opened,
             (count(r.id) filter (where r.status = 'sent' and r.first_click_at is not null))::int as clicked,
@@ -35,7 +40,8 @@ api.get('/blasts/stats', async (c) => {
             (count(r.id) filter (where r.ab_group = 'rest'))::int as rest_total,
             (count(r.id) filter (where r.ab_group = 'rest' and r.status = 'sent'))::int as rest_sent,
             (count(r.id) filter (where r.ab_group = 'rest' and r.status = 'failed'))::int as rest_failed,
-            (count(r.id) filter (where r.ab_group = 'rest' and r.status = 'queued' and b.ab_winner is null))::int as rest_held
+            (count(r.id) filter (where r.ab_group = 'rest' and r.status = 'queued' and b.ab_winner is null))::int as rest_held,
+            (count(r.id) filter (where r.ab_group = 'rest' and r.status in ('queued', 'sending') and b.ab_winner is not null))::int as rest_left
      from blasts b
      left join blast_recipients r on r.blast_id = b.id and r.workspace_id = b.workspace_id
      where b.workspace_id = $1
@@ -54,7 +60,10 @@ api.get('/blasts/stats', async (c) => {
         ...ab,
         a: group(r, 'a'),
         b: group(r, 'b'),
-        rest: { total: r.rest_total, sent: r.rest_sent, failed: r.rest_failed, held: r.rest_held },
+        rest: {
+          total: r.rest_total, sent: r.rest_sent, failed: r.rest_failed, held: r.rest_held,
+          going: ab.status === 'decided' && r.winner_job_on ? r.rest_left : 0,
+        },
       },
     };
   });
