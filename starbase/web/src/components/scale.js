@@ -6,9 +6,12 @@
 // The field needs it with no signal, so the last one read is kept on the
 // phone with the signed-in user's other copies (OfflineCache.js's key
 // space: sign-out forgets it, another sign-in drops it). It never goes
-// stale on its own: an old list beats the default list. Before anything is
-// kept, the signed-in user's own workspace (['me'], itself kept for an
-// offline start) carries the scale as last saved; with neither, the default.
+// stale on its own: an old list beats the default list. The signed-in
+// user's own workspace (['me'], itself kept for an offline start, and read
+// on every screen) carries the scale as last saved too: whichever of the
+// two is newer (a save bumps the version) is the one the buttons show — so
+// a phone that opened only Today or Shifts since a change still has it.
+// With neither, the default.
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DEFAULT_SCALE, normalizeScale } from '@starbase/shared/scale';
@@ -46,6 +49,19 @@ const scaleFrom = (data) => {
 
 export const SCALE_KEY = ['scale'];
 
+// { scale } answers → the newer one (a higher version); a tie keeps the first.
+const versionOf = (data) => (data?.scale ? scaleFrom(data).version : -1);
+export const newerScale = (a, b) => (versionOf(b) > versionOf(a) ? b : a ?? b);
+// The scale ['me'] carries, as an answer — one per sign-in copy.
+const fromMe = new WeakMap();
+const meScale = (me) => {
+  const raw = me?.workspace?.settings?.scale;
+  if (!raw || typeof raw !== 'object') return undefined;
+  let d = fromMe.get(raw);
+  if (!d) { d = { scale: raw }; fromMe.set(raw, d); }
+  return d;
+};
+
 export function useScale() {
   const qc = useQueryClient();
   const me = qc.getQueryData(['me']);
@@ -56,7 +72,7 @@ export function useScale() {
     enabled: Boolean(me?.user?.id),
     // Asked again when a rating screen opens a minute or more later.
     staleTime: 60_000,
-    initialData: () => readKept(key) ?? (me?.workspace?.settings?.scale ? { scale: me.workspace.settings.scale } : undefined),
+    initialData: () => newerScale(readKept(key), meScale(me)),
     // What's kept is checked with the server as soon as there's signal.
     initialDataUpdatedAt: 0,
   });
@@ -64,5 +80,5 @@ export function useScale() {
   useEffect(() => {
     if (status === 'success' && dataUpdatedAt > 0 && data?.scale) keep(key, data, dataUpdatedAt);
   }, [key, status, data, dataUpdatedAt]);
-  return scaleFrom(data);
+  return scaleFrom(newerScale(data, meScale(me)));
 }

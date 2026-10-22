@@ -6,12 +6,16 @@
 // "Put back". "Not sure" always stays last. Nothing changes until the one
 // yellow Save; the buttons under "What volunteers see" are the real ones,
 // drawn from what's on screen. Codes never show: the server makes them
-// (shared/scale.js) and they never change meaning.
+// (shared/scale.js) and they never change meaning — so typing a new name
+// over someone people were rated for moves those ratings to the new name:
+// the row says so ("3 people rated McCallum will read Bains — someone
+// new?") with "Add them instead". A name Save would refuse (someone off
+// the list, a step's words, a name twice) is said under its row as typed.
 // Reached from the account menu (managers), beside Team.
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { LIMITS, UNSURE_WORD, cleanWord, makeCode, normalizeScale } from '@starbase/shared/scale';
+import { DEFAULT_STEPS, LIMITS, UNSURE_WORD, cleanWord, makeCode, normalizeScale } from '@starbase/shared/scale';
 import { apiGet, action } from '../api.js';
 import RatingButtons from '../components/RatingButtons.jsx';
 import { SCALE_KEY } from '../components/scale.js';
@@ -35,6 +39,9 @@ const draftOf = (scale) => ({
 });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const lower = (s) => cleanWord(s).toLowerCase();
+// A step's usual words: an import reads them as that step, never a candidate.
+const STEP_WORDS = new Set(DEFAULT_STEPS.flatMap((s) => [s.word, s.label]).map(lower));
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const Num = ({ code, band }) => <span className="sc-num rb-chip" data-band={band} aria-hidden="true">{code}</span>;
 
@@ -89,6 +96,32 @@ function Editor() {
   const on = draft.list.filter((c) => !c.off);
   const offList = draft.list.filter((c) => c.off);
   const changed = !same(draft, base);
+  const savedName = new Map((base?.list || []).map((c) => [c.key, c.name]));
+  const full = on.length >= LIMITS.offered;
+  // Why a name can't go on the list (the server says the same at Save), or
+  // null. skip: the row this name is in.
+  const clash = (raw, skip = null) => {
+    const name = cleanWord(raw);
+    const k = name.toLowerCase();
+    if (!k) return null;
+    const old = offList.find((c) => c.key !== skip && lower(c.name) === k);
+    if (old) return `${old.name} is off the list — Put back below`;
+    if (on.some((c) => c.key !== skip && lower(c.name) === k)) return `${name} is already on the list`;
+    if (Object.values(draft.words).some((w) => lower(w) === k) || k === UNSURE_WORD.toLowerCase()) return `“${name}” is already on the buttons`;
+    if (STEP_WORDS.has(k)) return `“${name}” is a step’s words — pick another name`;
+    return null;
+  };
+  // Said under a row whose name was changed here: a clash, or — for someone
+  // people were rated for — that those ratings will read the new name.
+  const rowNote = (c) => {
+    const name = cleanWord(c.name);
+    const was = savedName.get(c.key);
+    if (!name || (was != null && lower(was) === name.toLowerCase())) return null;
+    const why = clash(name, c.key);
+    if (why) return { why };
+    const n = c.code ? Number(counts[c.code]) || 0 : 0;
+    return n > 0 && was ? { moves: `${plural(n, 'person', 'people')} rated ${was} will read ${name} — someone new?`, was, name } : null;
+  };
   const edit = (fn) => { setDraft((d) => fn(d)); setSaid(null); setError(null); };
   const setWord = (code, w) => edit((d) => ({ ...d, words: { ...d.words, [code]: w } }));
   const setName = (key, name) => edit((d) => ({ ...d, list: d.list.map((c) => (c.key === key ? { ...c, name } : c)) }));
@@ -111,19 +144,26 @@ function Editor() {
     [ons[i], ons[j]] = [ons[j], ons[i]];
     return { ...d, list: [...ons, ...d.list.filter((c) => c.off)] };
   });
-  const add = (e) => {
-    e.preventDefault();
-    const name = cleanWord(adding);
+  // A new candidate at the end of the list; if they can't go on, the name
+  // waits in the Add box with why. skip: a row giving the name up.
+  const addName = (raw, skip = null) => {
+    const name = cleanWord(raw);
     if (!name) return;
-    const k = name.toLowerCase();
-    const old = offList.find((c) => lower(c.name) === k);
-    if (old) { setAddError(`${old.name} is off the list — Put back below`); return; }
-    if (on.some((c) => lower(c.name) === k)) { setAddError(`${name} is already on the list`); return; }
-    if (Object.values(draft.words).some((w) => lower(w) === k) || k === UNSURE_WORD.toLowerCase()) { setAddError(`“${name}” is already on the buttons`); return; }
+    const why = full ? `${LIMITS.offered} at most on the list` : clash(name, skip);
+    if (why) { setAdding(name); setAddError(why); return; }
     seq += 1;
     edit((d) => ({ ...d, list: [...d.list.filter((c) => !c.off), { key: `new-${seq}`, code: null, name, off: false }, ...d.list.filter((c) => c.off)] }));
     setAdding('');
     setAddError(null);
+  };
+  const add = (e) => {
+    e.preventDefault();
+    addName(adding);
+  };
+  // "Add them instead": the row gets its old name back, the new one is added.
+  const instead = (c, note) => {
+    setName(c.key, note.was);
+    addName(note.name, c.key);
   };
   const save = async () => {
     setBusy(true);
@@ -148,7 +188,6 @@ function Editor() {
       setBusy(false);
     }
   };
-  const full = on.length >= LIMITS.offered;
 
   return (
     <div className="sc-page">
@@ -170,7 +209,10 @@ function Editor() {
       <section className="sc-sec" aria-labelledby="sc-who">
         <h2 id="sc-who" className="eyebrow sc-h">Voting for? <span className="sc-count">{on.length}</span></h2>
         <ul className="sc-list">
-          {on.map((c, i) => (
+          {on.map((c, i) => {
+            const note = confirm === c.key ? null : rowNote(c);
+            const noteId = `sc-note-${c.key}`;
+            return [
             <li key={c.key} className="sc-row sc-cand">
               {confirm === c.key ? (
                 <div className="sc-confirm" role="group" aria-label={`Take ${c.name} off the list`}>
@@ -181,7 +223,8 @@ function Editor() {
               ) : (
                 <>
                   <input className="input sc-input" value={c.name} maxLength={LIMITS.name}
-                    aria-label={`Candidate ${i + 1}`} onChange={(e) => setName(c.key, e.target.value)} />
+                    aria-label={`Candidate ${i + 1}`} aria-describedby={note ? noteId : undefined}
+                    onChange={(e) => setName(c.key, e.target.value)} />
                   <button type="button" className="btn btn-quiet pp-btn sc-move" aria-label={`Move ${c.name} up`}
                     disabled={i === 0} onClick={() => move(c.key, -1)}>↑</button>
                   <button type="button" className="btn btn-quiet pp-btn sc-move" aria-label={`Move ${c.name} down`}
@@ -191,8 +234,19 @@ function Editor() {
                     : <button type="button" className="btn btn-quiet pp-btn" onClick={() => edit((d) => ({ ...d, list: d.list.filter((x) => x.key !== c.key) }))}>Remove</button>}
                 </>
               )}
-            </li>
-          ))}
+            </li>,
+            note && (
+              <li key={`${c.key}-note`} className="sc-note" id={noteId}>
+                {note.why ? <span className="error">{note.why}</span> : (
+                  <>
+                    <span className="sc-note__said">{note.moves}</span>
+                    <button type="button" className="btn btn-quiet pp-btn" onClick={() => instead(c, note)}>Add them instead</button>
+                  </>
+                )}
+              </li>
+            ),
+            ];
+          })}
           <li className="sc-row sc-fixed"><span className="sc-fixed__name">{UNSURE_WORD}</span><span className="muted sc-fixed__note">Always last</span></li>
         </ul>
         <form className="sc-add" onSubmit={add}>
@@ -208,13 +262,13 @@ function Editor() {
       {offList.length > 0 && (
         <section className="sc-sec" aria-labelledby="sc-off">
           <h2 id="sc-off" className="eyebrow sc-h">Off the list <span className="sc-count">{offList.length}</span></h2>
-          <p className="sc-line">Their old ratings stay; volunteers can’t pick them.</p>
+          <p className="sc-line">{full ? `${LIMITS.offered} at most on the list — take one off first` : 'Their old ratings stay; volunteers can’t pick them.'}</p>
           <ul className="sc-list">
             {offList.map((c) => (
               <li key={c.key} className="sc-row sc-gone">
                 <span className="sc-gone__name">{c.name}</span>
                 <span className="muted mono sc-gone__n">{Number(counts[c.code]) || 0} rated</span>
-                <button type="button" className="btn btn-quiet pp-btn" onClick={() => setOff(c.key, false)}>Put back</button>
+                <button type="button" className="btn btn-quiet pp-btn" disabled={full} onClick={() => setOff(c.key, false)}>Put back</button>
               </li>
             ))}
           </ul>

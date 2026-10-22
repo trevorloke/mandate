@@ -81,9 +81,9 @@ function planFor(key, me) {
 }
 
 // ── People's search over the kept list ──
-// The People screen asks /persons?q=…&limit=300 (+ tag, rating, role, has).
-// With no copy of this exact search: the same filters without the search
-// words, or the whole list, filtered here the way the server filters.
+// The People screen asks /persons?q=…&limit=300 (+ tag, rating, role, has,
+// field). With no copy of this exact search: the same filters without the
+// search words, or the whole list, filtered here the way the server filters.
 const lower = (v) => String(v ?? '').toLowerCase();
 function filterPersons(rows, p, { q = true, rest = true } = {}) {
   const words = lower(p.get('q')).trim();
@@ -112,8 +112,10 @@ function derivePersons(me, plan, qs) {
     same.set('q', '');
     tries.push({ s: same.toString(), rest: false });
   }
-  // The whole list (no filters) — unless it's by volunteer role, which a row doesn't carry.
-  if (!p.get('role')) tries.push({ s: new URLSearchParams({ q: '', limit: String(limit) }).toString(), rest: true });
+  // The whole list (no filters) — unless it's by volunteer role or a
+  // profile field (?field=), which a row doesn't carry: those say No signal
+  // rather than show everyone under the filter's chip.
+  if (!p.get('role') && !p.get('field')) tries.push({ s: new URLSearchParams({ q: '', limit: String(limit) }).toString(), rest: true });
   for (const t of tries) {
     if (t.s === qs) continue;
     const base = read(t.s);

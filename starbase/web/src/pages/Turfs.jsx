@@ -960,7 +960,7 @@ function Door({
             {(queued || added) && <span className="chip fk-wait">{added ? 'Not sent' : queuedChip(true)}</span>}
             {multi
               ? rated.length > 0 && <span className="chip walk-rated">{rated.length} rated</span>
-              : rated.map((p) => <RatingChip key={p.id} code={p.rating} who />)}
+              : rated.map((p) => <RatingChip key={p.id} code={p.rating} who brief />)}
           </span>
           <span className="walk-sr">
             {door.done ? (phoneOnly ? ' — called, not knocked' : ' — done') : ' — not knocked yet'}{isNext ? ', next door' : ''}
