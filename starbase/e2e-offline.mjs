@@ -8,7 +8,12 @@
 // the server's reason (Dismiss / Try again); sign-out asking about unsent
 // work and forgetting the phone's copies — and every claim on screen checked
 // against the API, the volunteer's copies checked for other people's
-// emails, and the audit chain verified at the end.
+// emails, and the audit chain verified at the end. On the laptop the strip
+// says "this device" (only a phone says "this phone"); desk screens with
+// nothing loaded say "No signal — this loads when you’re back online." and
+// a send there (Notify everyone) is off — "Needs signal — nothing sent";
+// on the phone, with the campaign line on, Call falls back to the phone's
+// own dialler, said in one line.
 //
 //   node e2e-offline.mjs                 (starts its own server on :4102)
 //   BASE=http://127.0.0.1:4102 node e2e-offline.mjs   (a fresh server you started,
@@ -139,6 +144,10 @@ const soon = (h) => new Date(Date.now() + h * 3600_000).toISOString();
 const roomy = (await D.api('/actions/shift.create', { title: 'Saturday canvass', starts_at: soon(48), ends_at: soon(51), capacity: 6, location: 'Newton Rec Centre' })).json.shift;
 const tight = (await D.api('/actions/shift.create', { title: 'Phone bank', starts_at: soon(50), ends_at: soon(52), capacity: 1 })).json.shift;
 check('seeded doors, a turf and two shifts', Object.values(P).every((p) => p?.id) && turf?.id && roomy?.id && tight?.id);
+const survey = (await D.api('/actions/survey.create', { name: 'Transit', context: 'both' })).json.survey;
+const ladder = (await D.api('/actions/ladder.create', { name: 'Rated yes', trigger: { kind: 'rating' } })).json.ladder;
+check('a survey, a ladder, and Grace on Saturday canvass', survey?.id && ladder?.id
+  && (await D.api('/actions/shift.assign', { shift_id: roomy.id, person_id: P.grace.id })).status === 200);
 
 const cfg = (await D.api('/map/config')).json;
 check('GET /api/map/config names the configured provider', cfg?.tiles?.url === TILE_URL && cfg.tiles.maxZoom === 19, JSON.stringify(cfg));
@@ -173,6 +182,12 @@ const deskCopies = await D.copies();
 const deskId = (await D.api('/auth/me')).json.user.id;
 check('doors + map settings kept on this phone, keyed to this sign-in', deskCopies.some((k) => k.endsWith(':doors')) && deskCopies.some((k) => k.endsWith(':mapConfig')) && deskCopies.every((k) => k.includes(`:${deskId}:`)), deskCopies.join(' | '));
 
+// Saturday canvass, opened once with signal (kept for the desk's offline look).
+await D.go(`/shifts/${roomy.id}`);
+await page.waitForSelector('.ops-notify', { timeout: 8000 }).catch(() => {});
+check('desk shift with signal: Notify everyone is on', await page.locator('.ops-notify button:has-text("Notify everyone")').isEnabled().catch(() => false)
+  && !/Needs signal/.test(await D.text()));
+
 // A sign request with signal, then its Undo tapped with no signal.
 await D.go(`/map?person=${P.tom.id}`);
 await page.waitForSelector('aside.door-card', { timeout: 8000 });
@@ -196,7 +211,7 @@ const pinsOffline = (await page.$$('.map-pin-wrap')).length;
 check('offline reload: the map opens with the doors kept on this phone', pinsOffline === 4 && /Offline copy/i.test(t) && !/Turfs didn’t load/.test(t), `pins=${pinsOffline}`);
 const tilesDrawn = await page.$$eval('.leaflet-tile-loaded', (els) => els.filter((i) => i.complete && i.naturalWidth > 0).length).catch(() => 0);
 check('offline: tiles seen before still draw', tilesDrawn > 0, tilesDrawn);
-check('strip: offline and 1 saved on this phone', /Offline/i.test(t) && /^1 saved on this phone$/i.test(await D.chip()), await D.chip());
+check('strip on a laptop: offline and "1 saved on this device" (never "this phone")', /Offline/i.test(t) && /^1 saved on this device$/i.test(await D.chip()) && !/this phone/i.test(t), await D.chip());
 
 // Add a door with no signal, at an empty spot inside the turf.
 await page.click('button[aria-label="Add a door"]');
@@ -247,7 +262,7 @@ check('lawn sign offline: "Lawn sign saved offline" with Undo', /Lawn sign saved
 check('the door shows it, "Not sent yet"', /Lawn sign · Not sent yet/i.test(await page.$eval('aside.door-card', (el) => el.innerText.replace(/\s+/g, ' '))));
 check('the map pin for Ana is on the map', (await page.$$('.map-pin-wrap')).length === 5);
 const chip1 = await D.chip();
-check('chip: 4 saved on this phone', /^4 saved on this phone$/i.test(chip1), chip1);
+check('chip: 4 saved on this device', /^4 saved on this device$/i.test(chip1), chip1);
 await page.click('.offline-strip__chip');
 await page.waitForSelector('.obx-sheet', { timeout: 3000 }).catch(() => {});
 const rows = await page.$$eval('.obx-sheet .obx-row', (els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
@@ -255,16 +270,44 @@ check('sheet lists each one in plain words, in order', rows.length === 4
   && /^Sign undo · Tom Riley · \d{1,2}:\d{2} (am|pm)$/.test(rows[0])
   && /^New person · Ana Souza · /.test(rows[1]) && /^Knock · Ana Souza · /.test(rows[2]) && /^Lawn sign · Maya Chen · /.test(rows[3]), rows.join(' | '));
 check('offline sheet: says when it sends, no Send now', /Sends when you’re back online/.test(await page.$eval('.obx-sheet', (el) => el.innerText)) && !(await page.$('.obx-sheet button:has-text("Send now")')));
+const sheetTitle = await page.$eval('.obx-title', (el) => el.innerText.trim()).catch(() => '');
+check('sheet on a laptop: "Saved on this device"; "Sends when…" said once (the strip drops it while the sheet is open)',
+  sheetTitle === 'Saved on this device' && ((await D.text()).match(/Sends when you’re back online/g) || []).length === 1, sheetTitle);
 let m = await D.measure('.obx-sheet');
 check('sheet: no yellow button, field-size targets', m.yellow <= 1 && !(await page.$('.obx-sheet .btn-primary')) && m.small.length === 0, JSON.stringify(m));
 console.log(`      sheet (desk, offline): ${m.words} words, ${m.yellow} yellow on screen`);
 await D.shot('1-desk-offline-sheet');
 await page.keyboard.press('Escape');
+await sleep(200);
+check('sheet closed: the strip says when it sends again', /Sends when you’re back online/.test(await page.innerText('.offline-strip').catch(() => '')));
+
+// Desk screens with nothing loaded yet, no signal: one line — never a
+// "Loading…" that doesn't end, and no New button that would fail.
+for (const [path, noNew] of [['/surveys', 'New survey'], [`/surveys/${survey.id}`], [`/surveys/${survey.id}/results`],
+  ['/ladders', 'New ladder'], [`/ladders/${ladder.id}`], ['/follow-ups'], ['/money/receipts'], ['/inbox/settings']]) {
+  await D.go(path);
+  await page.waitForSelector('.no-signal', { timeout: 6000 }).catch(() => {});
+  t = await D.text();
+  const ys = (await D.measure('main.page')).yellow;
+  check(`${path} with no signal: "No signal — this loads when you’re back online."${noNew ? `, no ${noNew}` : ''}`,
+    /No signal — this loads when you’re back online\./.test(t) && !/Loading…/.test(t) && ys === 0
+      && (!noNew || !(await page.$(`button:has-text("${noNew}")`))), `${t.slice(0, 140)} yellow=${ys}`);
+}
+await D.shot('1c-desk-no-signal');
+// A send that needs signal is off, and says so; nothing reaches the server.
+await D.go(`/shifts/${roomy.id}`);
+await page.waitForSelector('.ops-notify', { timeout: 8000 }).catch(() => {});
+t = await D.text();
+const notifyBtn = page.locator('.ops-notify button:has-text("Notify everyone")');
+check('desk shift with no signal: Notify everyone off — "Needs signal — nothing sent", never "Failed to fetch"',
+  (await notifyBtn.count()) === 1 && await notifyBtn.isDisabled().catch(() => false) && /Needs signal — nothing sent/.test(t) && !/Failed to fetch/i.test(t), t.slice(0, 200));
+check('…and nothing was notified', !(await D.api(`/shifts/${roomy.id}`)).json.assignees.some((a) => a.notified_at));
+await D.shot('1d-desk-notify-no-signal');
 
 // ── Signal back: everything goes, in order, once ──
 await ctx.setOffline(false);
 await page.evaluate(() => window.dispatchEvent(new Event('online')));
-for (let i = 0; i < 20 && /saved on this phone/i.test(await D.chip()); i += 1) await sleep(500);
+for (let i = 0; i < 20 && /saved on this device/i.test(await D.chip()); i += 1) await sleep(500);
 const chip2 = await D.chip();
 check('back online: the waiting ones sent; the refused one stays, "1 refused"', /^1 refused$/i.test(chip2), chip2);
 const ana = (await D.api('/persons?q=Ana%20Souza')).json.persons;
@@ -306,7 +349,7 @@ await page.fill('#nd-name', 'Lost Answer');
 await page.fill('#nd-address', '7160 124 St');
 await page.click('form[aria-label="New door"] button[type="submit"]');
 await sleep(600);
-check('lost answer: "saved on this phone — sends soon"', /Lost Answer saved on this phone — sends soon/.test(await D.text()));
+check('lost answer: "saved on this device — sends soon"', /Lost Answer saved on this device — sends soon/.test(await D.text()));
 check('…the server already has it', ((await D.api('/persons?q=Lost%20Answer')).json.persons || []).length === 1);
 await page.click('.offline-strip__btn:has-text("Send now")');
 await sleep(1000);
@@ -349,6 +392,15 @@ const volEmail = `vol+${tag}@example.org`;
 const inv = (await D.api('/actions/member.invite', { email: volEmail, role: 'volunteer' })).json;
 const vctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'America/Vancouver' });
 await routeTiles(vctx);
+// The campaign line is on for calls (the server's answer, as with Twilio set
+// up — e2e-texting runs it against a fake Twilio). This phone keeps that.
+await vctx.route('**/api/texting/status', async (route) => {
+  try {
+    const res = await route.fetch();
+    const body = await res.json().catch(() => ({}));
+    await route.fulfill({ response: res, json: res.ok() ? { ...body, voice: true } : body });
+  } catch { await route.abort('internetdisconnected').catch(() => {}); }
+});
 const vp = await vctx.newPage();
 vp.on('pageerror', (e) => errors.push('[vol] ' + e.message));
 if (process.env.DEBUG) vp.on('requestfailed', (r) => console.log('      [vol] failed', r.method(), r.url().replace(BASE, ''), r.failure()?.errorText));
@@ -374,6 +426,8 @@ await V.swReady().catch(() => {});
 await V.go('/calls');
 await vp.waitForSelector('section.cl-card', { timeout: 8000 }).catch(() => {});
 await sleep(1500);
+check('Calls with signal, campaign line on: Call goes through the campaign (no tel: link)',
+  (await vp.locator('section.cl-card .tx-call button.cl-call').count()) === 1 && (await vp.locator('section.cl-card a[href^="tel:"]').count()) === 0);
 const vCopies = await V.copies();
 check('volunteer: doors, calls, shifts kept on the phone', ['doors', 'shifts', `shift:${roomy.id}`, 'actions'].every((n) => vCopies.some((k) => k.endsWith(`:${n}`))) && vCopies.some((k) => k.includes(':calls:')), vCopies.map((k) => k.split(':').slice(4).join(':')).join(' | '));
 // Privacy: what this phone kept holds no one else's email (forViewer).
@@ -393,6 +447,10 @@ await vp.waitForSelector('section.cl-card', { timeout: 8000 }).catch(() => {});
 t = await V.text();
 check('offline Calls: the list opens from the phone, "Offline copy"', /Offline copy/i.test(t) && (await vp.$$('section.cl-card')).length === 1, t.slice(0, 160));
 const called = await vp.$eval('section.cl-card', (el) => el.getAttribute('aria-label'));
+const offCall = await vp.$eval('section.cl-card', (el) => el.innerText.replace(/\s+/g, ' ')).catch(() => '');
+check('offline Calls, campaign line on: Call is the phone’s own dialler — "No signal — this calls from your own number", no "Your phone" box',
+  (await vp.locator('section.cl-card a.cl-call[href^="tel:"]').count()) === 1 && /No signal — this calls from your own number/.test(offCall)
+    && (await vp.locator('section.cl-card .tx-call').count()) === 0 && !/Your phone|Calls need signal/.test(offCall), offCall.slice(0, 200));
 await vp.tap('section.cl-card button[aria-label="2: Lean support"]').catch(() => vp.click('section.cl-card button[aria-label="2: Lean support"]'));
 await sleep(500);
 check('offline call rated: "Saved offline"', /Saved offline/.test(await V.text()));
@@ -429,6 +487,7 @@ check('volunteer chip: 3 saved on this phone', /^3 saved on this phone$/i.test(a
 await vp.tap('.offline-strip__chip').catch(() => vp.click('.offline-strip__chip'));
 await vp.waitForSelector('.obx-sheet', { timeout: 3000 }).catch(() => {});
 const vrows = await vp.$$eval('.obx-sheet .obx-row', (els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+check('phone sheet: "Saved on this phone"', (await vp.$eval('.obx-title', (el) => el.innerText.trim()).catch(() => '')) === 'Saved on this phone');
 check('volunteer sheet: call, two sign-ups, in plain words', vrows.length === 3 && new RegExp(`^Call · ${called} · `).test(vrows[0]) && /^Count me in · Saturday canvass · /.test(vrows[1]) && /^Count me in · Phone bank · /.test(vrows[2]), vrows.join(' | '));
 m = await V.measure('.obx-sheet');
 const sheetBox = await vp.$eval('.obx-sheet', (el) => { const r = el.getBoundingClientRect(); return { bottom: Math.round(r.bottom), h: Math.round(r.height) }; });

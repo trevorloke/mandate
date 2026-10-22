@@ -3,6 +3,7 @@
 //                   people who answered, and "Asking" / "Off". One yellow
 //                   "New survey" (name + where, then straight to its questions).
 //                   Archived surveys fold away under "Archived · N".
+//                   No signal: one line, and no New survey (it would fail).
 //   /surveys/:id         the builder (SurveysEdit.jsx)
 //   /surveys/:id/results the results (SurveysResults.jsx)
 // Desk only (App.jsx guards it; the server refuses volunteers these reads).
@@ -10,6 +11,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
+import { NoSignal, noSignal, useOnline } from '../components/NoSignal.jsx';
 import './shifts.css';
 import './surveys.css';
 
@@ -122,6 +124,8 @@ export default function Surveys() {
   const showNew = params.get('new') === '1';
   const [showArchived, setShowArchived] = useState(false);
   const q = useQuery({ queryKey: ['surveys'], queryFn: () => apiGet('/surveys') });
+  const online = useOnline();
+  const offline = noSignal(q);
   const all = q.data?.surveys ?? [];
   const live = all.filter((s) => !s.archived);
   const archived = all.filter((s) => s.archived);
@@ -130,15 +134,16 @@ export default function Surveys() {
     <div className="ops-page sv-page">
       <div className="ops-head">
         <h1>Surveys</h1>
-        {!showNew && (
+        {!showNew && online && (
           <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>New survey</button>
         )}
       </div>
 
       {showNew && <NewSurveyForm onClose={() => setParams({})} />}
 
-      {q.isPending && <p className="muted">Loading…</p>}
-      {q.isError && <p className="error" role="alert">{q.error.message}</p>}
+      {offline && <NoSignal />}
+      {q.isPending && !offline && <p className="muted">Loading…</p>}
+      {q.isError && !offline && <p className="error" role="alert">{q.error.message}</p>}
       {q.isSuccess && live.length === 0 && !showNew && <p className="ops-empty">No surveys yet.</p>}
       {live.length > 0 && <ul className="ops-rows">{live.map((s) => <SurveyRow key={s.id} s={s} />)}</ul>}
 

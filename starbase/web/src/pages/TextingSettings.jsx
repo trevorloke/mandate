@@ -13,6 +13,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action } from '../api.js';
+import { NoSignal, noSignal } from '../components/NoSignal.jsx';
 import { CONNECT_TO } from '../components/TextingCard.jsx';
 import { FILLS, toCodes, toWords, unfilled } from '../components/TextingWords.js';
 import './people.css';
@@ -74,6 +75,15 @@ export default function TextingSettings() {
   const wkUntilId = useId();
   useEffect(() => { if (q.data && !form) setForm({ ...q.data.settings }); }, [q.data, form]);
 
+  if (noSignal(q)) {
+    return (
+      <div className="tx-page">
+        <Link className="eyebrow pf-back" to="/inbox">← Inbox</Link>
+        <h1>Texting</h1>
+        <NoSignal />
+      </div>
+    );
+  }
   if (q.isLoading || !form) return q.isError ? <p className="error">{q.error.message}</p> : <p className="muted">Loading…</p>;
   const d = q.data;
   const edit = d.canEdit;

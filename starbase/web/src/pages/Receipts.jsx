@@ -7,7 +7,9 @@
 //   notice" for a voided receipt the donor already got.
 //   One yellow "Email 3 receipts" — only while email is connected and some
 //   Not sent ones can go; never one already Sending (asks in place: "Email 3
-//   receipts? Yes · No"). Email off: the line says so, with Connect.
+//   receipts? Yes · No"). Email off: the line says so, with Connect. No
+//   signal: it's off, "Needs signal — nothing sent"; nothing loaded yet,
+//   one line.
 //   Settings (?settings=1, managers and treasurers): the financial agent and
 //   how to reach them, "Receipt gifts of at least ($)", the footer; the tax line,
 //   the disclosure amount and the campaign's dates under More details.
@@ -18,6 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, fmtMoney, dollarsToCents } from '../api.js';
+import { NeedsSignal, NoSignal, noSignal, useOnline } from '../components/NoSignal.jsx';
 import { StatusChip, fmtBig, shortDate, methodWord, sendWord, onItsWay } from '../components/ReceiptsBits.jsx';
 import './shifts.css';
 import './receipts.css';
@@ -185,6 +188,8 @@ export default function Receipts() {
     refetchInterval: (query) => (query.state.data?.receipts?.some((r) => onItsWay(r.status)) ? 3000 : false),
   });
   const [period, setPeriod] = useState('campaign');
+  const online = useOnline();
+  const offline = noSignal(q);
   const data = q.data;
   // Cleared sample data leaves its receipts void in the books (the register
   // keeps them); the list doesn't show them.
@@ -255,16 +260,17 @@ export default function Receipts() {
       <div className="ops-head">
         <h1>Receipts</h1>
         {!showSettings && emailOn && sendable > 0 && !confirm && (
-          <button type="button" className="btn btn-primary ops-tap" disabled={busy === 'all'} onClick={() => setConfirm(true)}>
+          <button type="button" className="btn btn-primary ops-tap" disabled={busy === 'all' || !online} onClick={() => setConfirm(true)}>
             {busy === 'all' ? 'Sending…' : `Email ${receipts(sendable)}`}
           </button>
         )}
       </div>
+      {!online && !showSettings && emailOn && sendable > 0 && <NeedsSignal />}
 
       {confirm && (
         <div className="ops-confirm rc-confirm" role="group" aria-label="Email the receipts not sent">
           <span>Email {receipts(sendable)}?</span>
-          <button type="button" className="btn ops-solid ops-tap" onClick={sendAll}>Yes</button>
+          <button type="button" className="btn ops-solid ops-tap" onClick={sendAll} disabled={!online}>Yes</button>
           <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirm(false)}>No</button>
         </div>
       )}
@@ -285,8 +291,9 @@ export default function Receipts() {
       )}
 
       {error && <p className="error" role="alert">{error}</p>}
-      {q.isError && <p className="error">{q.error.message}</p>}
-      {q.isPending && <p className="muted">Loading…</p>}
+      {offline && <NoSignal />}
+      {q.isError && !offline && <p className="error">{q.error.message}</p>}
+      {q.isPending && !offline && <p className="muted">Loading…</p>}
       {q.isSuccess && rows.length === 0 && (
         <div className="ops-empty-block">
           <p className="ops-empty">No receipts yet.</p>

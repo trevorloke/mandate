@@ -133,8 +133,10 @@ requests and their Undo, and *Count me in* / *Can't make it*. The map's doors,
 the Calls list, shifts and walk lists keep their last loaded copy on the
 phone for a day ("Offline copy"); sign-out forgets them. Anything the server
 refuses on the way is kept and listed under the strip's "saved on this phone"
-chip with the reason — *Try again* or *Dismiss*. Gifts, imports and outreach
-need signal.
+chip ("this device" on a computer) with the reason — *Try again* or
+*Dismiss*. Gifts, imports and outreach need signal: with none, their sends
+are off (*Needs signal — nothing sent*) and a desk screen not loaded yet says
+*No signal — this loads when you're back online.*
 
 ## Architecture
 

@@ -17,7 +17,8 @@ import { logContact } from '../offline.js';
 import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
-import { apiGet, action, ApiError } from '../api.js';
+import { apiGet, action } from '../api.js';
+import { noSignal } from '../components/NoSignal.jsx';
 import './people.css';
 import {
   TextingCallButton, TextingRepliesLink, noTexts, textingOn, useTextingStatus, useTextQueue, useTextingPerson,
@@ -106,12 +107,9 @@ export function RatingTag({ code }) {
   );
 }
 
-// No signal: the query is paused (react-query knew it was offline) or the
-// fetch itself failed (a TypeError, not an ApiError) — and nothing is cached.
-// It refetches by itself once the phone is back online.
-export const noSignal = (q) => !q.data && (
-  (q.isPending && q.fetchStatus === 'paused') || (q.isError && !(q.error instanceof ApiError))
-);
+// No signal and nothing cached (components/NoSignal.jsx; Person, Inbox and
+// a thread read it from here too).
+export { noSignal };
 
 export const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 export const isDnc = (p) => Array.isArray(p?.tags) && p.tags.includes('do-not-contact');

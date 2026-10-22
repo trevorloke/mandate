@@ -398,6 +398,15 @@ h2 { font-size: 18px; }
 .ok-text { color: var(--ok); }
 .danger-text { color: var(--danger); }
 .muted { color: var(--text-3); }
+/* No signal, nothing loaded yet: one quiet line (components/NoSignal.jsx). */
+.no-signal {
+  margin: var(--s-3) 0;
+  padding: var(--s-3) var(--s-4);
+  border-left: 3px solid var(--rule-2);
+  background: var(--paper-0);
+  color: var(--text-2);
+  font-size: 16px;
+}
 .error {
   color: var(--danger);
   font-family: var(--font-mono);

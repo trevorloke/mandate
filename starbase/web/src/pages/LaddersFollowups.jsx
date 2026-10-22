@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
+import { NoSignal, noSignal } from '../components/NoSignal.jsx';
 import { LadBack, fmtWhen } from '../components/LaddersBits.jsx';
 import './shifts.css';
 import './ladders.css';
@@ -72,8 +73,12 @@ export default function LaddersFollowups() {
     <div className="ops-page lad-page">
       <LadBack />
       <div className="ops-head"><h1>Follow-ups</h1></div>
-      {q.isPending && <p className="muted">Loading…</p>}
-      {q.isError && <p className="error" role="alert">{q.error.message}</p>}
+      {noSignal(q) ? <NoSignal /> : (
+        <>
+          {q.isPending && <p className="muted">Loading…</p>}
+          {q.isError && <p className="error" role="alert">{q.error.message}</p>}
+        </>
+      )}
       {q.isSuccess && (
         <p className="ops-hero"><span className="n">{open.length}</span><span className="sub">to do</span></p>
       )}

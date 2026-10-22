@@ -17,6 +17,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
+import { NoSignal, noSignal } from '../components/NoSignal.jsx';
 import {
   CONNECT_TO, LadBack, OTHER_STEPS, STEP_KINDS, TriggerPicker, countsLine, fmtWhen, logLine, stepLine, triggerLine, whereLine,
 } from '../components/LaddersBits.jsx';
@@ -397,6 +398,14 @@ export default function LaddersEdit() {
     }
   };
 
+  if (noSignal(q)) {
+    return (
+      <div className="ops-page lad-page">
+        <LadBack />
+        <NoSignal />
+      </div>
+    );
+  }
   if (q.isPending) return <p className="muted">Loading…</p>;
   if (q.isError) {
     return (

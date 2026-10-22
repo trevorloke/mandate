@@ -14,8 +14,25 @@ async function handle(res) {
   return body;
 }
 
+// fetch() itself failed — no answer at all. Never the browser's "Failed to
+// fetch": with the phone offline nothing left it ("No signal — not sent");
+// with signal the answer may have been lost on the way back, so it claims
+// neither. Not an ApiError, so screens (and the outbox) still read it as
+// "no network".
+export class NoSignalError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'NoSignalError';
+  }
+}
+const offlineNow = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+export const noSignalWords = (write) => (offlineNow()
+  ? (write ? 'No signal — not sent' : 'No signal — this loads when you’re back online')
+  : 'No answer — check your signal');
+const unreached = (write) => () => { throw new NoSignalError(noSignalWords(write)); };
+
 export const apiGet = (path) =>
-  fetch(`/api${path}`, { credentials: 'same-origin' }).then(handle);
+  fetch(`/api${path}`, { credentials: 'same-origin' }).catch(unreached(false)).then(handle);
 
 export const apiPost = (path, body) =>
   fetch(`/api${path}`, {
@@ -23,7 +40,7 @@ export const apiPost = (path, body) =>
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
-  }).then(handle);
+  }).catch(unreached(true)).then(handle);
 
 // The only write path: POST /api/actions/:name
 export const action = (name, input) => apiPost(`/actions/${name}`, input);

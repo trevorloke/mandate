@@ -306,13 +306,47 @@ test('Take back on a "Count me in" still on the phone: never sent, or "Can’t m
   assert.equal((await c.get('/api/audit/verify')).json.ok, true);
 });
 
-test('a knock kept on the phone says what was saved, then where', async () => {
-  const { queuedSaid } = await import('../../web/src/components/queued.js');
+test('a knock kept on the phone says what was saved, then where — "this phone" only on a phone', async () => {
+  const { queuedSaid, queuedText, thisDevice } = await import('../../web/src/components/queued.js');
   nav.onLine = false;
   assert.equal(queuedSaid({ queued: true }, 'Rated 1 · Strong yes', '3 answers'), 'Rated 1 · Strong yes · 3 answers · Saved offline');
   assert.equal(queuedSaid({ queued: true }, null, '2 answers'), '2 answers · Saved offline');
   nav.onLine = true;
-  assert.equal(queuedSaid({ queued: true, signedOut: true }, 'No answer'), 'No answer · Saved on this phone — sign in to send');
+  // A laptop at the desk (no touch screen at phone size): "this device".
+  assert.equal(thisDevice(), 'this device');
+  assert.equal(queuedSaid({ queued: true, signedOut: true }, 'No answer'), 'No answer · Saved on this device — sign in to send');
+  assert.equal(queuedText({ queued: true }, 'Lost Answer'), 'Lost Answer saved on this device — sends soon');
+  // A phone: a touch screen at phone size.
+  const asked = [];
+  globalThis.matchMedia = (q) => { asked.push(q); return { matches: /pointer: coarse/.test(q), addEventListener() {}, removeEventListener() {} }; };
+  try {
+    assert.equal(thisDevice(), 'this phone');
+    assert.match(asked[0], /max-width: 720px/);
+    assert.equal(queuedSaid({ queued: true, signedOut: true }, 'No answer'), 'No answer · Saved on this phone — sign in to send');
+    assert.equal(queuedText({ queued: true }), 'Saved on this phone — sends soon');
+  } finally {
+    delete globalThis.matchMedia;
+  }
+});
+
+test('no answer at all: plain words, never "Failed to fetch" — and the outbox still keeps the knock', async () => {
+  const { action, apiGet, NoSignalError, ApiError } = await import('../../web/src/api.js');
+  nav.onLine = false;
+  await assert.rejects(action('shift.notify', { shift_id: '00000000-0000-4000-8000-000000000000' }),
+    (e) => e instanceof NoSignalError && !(e instanceof ApiError) && e.message === 'No signal — not sent');
+  await assert.rejects(apiGet('/surveys'), (e) => e instanceof NoSignalError && e.message === 'No signal — this loads when you’re back online');
+  // Signal, but no answer (it may have reached the server): it claims neither.
+  nav.onLine = true;
+  net.offline = true;
+  await assert.rejects(action('shift.notify', {}), (e) => e instanceof NoSignalError && e.message === 'No answer — check your signal');
+  const p = await c.createPerson('No Answer Knock', { address: '7240 124 St', lat: 49.1324, lng: -122.8529 });
+  const r = await ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', rating: '2' });
+  assert.equal(r.queued, true, 'a network failure keeps it on the phone');
+  net.offline = false;
+  assert.equal((await ob.flushOutbox()).sent, 1);
+  assert.equal((await contactsOf(p.id)).length, 1);
+  // A server refusal is still the server's own words.
+  await assert.rejects(action('shift.notify', {}), (e) => e instanceof ApiError && e.status === 400);
 });
 
 test('signed out: kept on the phone, sent after signing back in', async () => {
@@ -404,6 +438,60 @@ test('a volunteer, offline: a new housemate at a door in their turf, then a knoc
   assert.equal(found[0].rating, '1');
   assert.equal((await contactsOf(id)).length, 1, 'one knock');
   assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+  ob.setOutboxOwner(null);
+  net.cookie = c.cookie;
+});
+
+test('a knock on someone added here whose adding was refused: kept, in plain words; Try again brings it along', async () => {
+  const lat = 49.1341; const lng = -122.8541;
+  const host = await c.createPerson('Door Priya', { address: '7250 124 St', city: 'Surrey', lat, lng });
+  const turf = (await c.action('turf.create', {
+    name: `Refused turf ${tag}`, polygon: [[lat + 0.001, lng - 0.001], [lat + 0.001, lng + 0.001], [lat - 0.001, lng + 0.001], [lat - 0.001, lng - 0.001]],
+  })).json.turf;
+  const meB = (await vol.get('/api/auth/me')).json;
+  assert.equal((await c.action('turf.assign', { turf_id: turf.id, user_id: meB.user.id })).status, 200);
+  ob.setOutboxOwner(meB);
+  net.cookie = vol.cookie;
+
+  // Offline at the door: a new housemate, a knock and a pin on them.
+  nav.onLine = false;
+  const made = await ob.queueAction('person.addAtDoor', { housemate_id: host.id, name: 'Sam Refused' }, { who: 'Sam Refused', door: { address: '7250 124 St', lat, lng } });
+  const id = made.client_id;
+  await ob.logContact({ person_id: id, channel: 'door', outcome: 'contacted', rating: '2' }, { who: 'Sam Refused' });
+  await ob.queueAction('person.locate', { id, lat: lat + 0.0001, lng }, { who: 'Sam Refused' });
+  // Meanwhile the desk takes them off the turf.
+  assert.equal((await c.action('turf.unassign', { turf_id: turf.id, user_id: meB.user.id })).status, 200);
+
+  nav.onLine = true;
+  const evsBefore = (await c.get('/api/events?since=0&limit=5000')).json.events.length;
+  assert.equal((await ob.flushOutbox()).sent, 0);
+  const items = JSON.parse(store.get('starbase:outbox:v2')).filter((i) => i.cid === id || i.input?.person_id === id || i.input?.id === id);
+  assert.equal(items.length, 3, 'all three still on the phone — never dropped');
+  assert.ok(items.every((i) => i.state === 'refused'));
+  const [person, knock, pin] = items;
+  assert.match(ob.refusedText(person), /^That door isn’t in your turf$/);
+  assert.equal(ob.refusedText(knock), 'Not saved — this person wasn’t added');
+  assert.equal(ob.refusedText(pin), 'Not saved — this person wasn’t added');
+  assert.equal(knock.tries, 0, 'the knock never went to the server');
+  assert.equal((await c.get('/api/events?since=0&limit=5000')).json.events.length, evsBefore, 'nothing written');
+  for (const i of items) assert.doesNotMatch(ob.refusedText(i), /workspace/i);
+
+  // Back on the turf: Try again on the person brings the knock and pin along, in order.
+  assert.equal((await c.action('turf.assign', { turf_id: turf.id, user_id: meB.user.id })).status, 200);
+  const r = await ob.retryItem(id);
+  assert.equal(r.sent, 3);
+  assert.equal(ob.unsentCount(), 0);
+  const [sam] = await persons('Sam Refused');
+  assert.equal(sam.id, id);
+  assert.equal(sam.rating, '2');
+  assert.equal((await contactsOf(id)).length, 1, 'one knock');
+  assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+
+  // The server's own "not found" (someone removed meanwhile) in plain words, never "workspace".
+  assert.equal(ob.refusedText({ error: { status: 400, message: 'person not found in this workspace' } }), 'Not saved — this person isn’t on the list');
+  assert.equal(ob.refusedText({ error: { status: 400, message: 'donor not found in this workspace — create the person first' } }), 'Donor not found — create the person first');
+  assert.equal(ob.refusedText({ error: { status: 409, message: 'Shift is full' } }), 'Shift is full');
+  assert.equal(ob.refusedText({}), 'Refused');
   ob.setOutboxOwner(null);
   net.cookie = c.cookie;
 });

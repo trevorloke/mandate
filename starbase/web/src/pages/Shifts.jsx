@@ -23,7 +23,8 @@
 //                  counts people, not messages: reached (any message went
 //                  out), not reached (it failed), not sent (not connected),
 //                  no email or phone on file. "Notify again" only once
-//                  someone was actually reached.
+//                  someone was actually reached. No signal: Notify and
+//                  its Send are off — "Needs signal — nothing sent".
 //
 // Offline: the list and each shift opened are kept on this phone (with
 // "Offline copy" when there's no signal), and "Count me in" / "Can't make
@@ -41,6 +42,7 @@ import { VOLUNTEER_ROLES, SHIFT_STATUSES } from '@starbase/shared/canvass';
 import { apiGet, action } from '../api.js';
 import { queueAction, undoQueued, useOutbox } from '../offline.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
+import { NeedsSignal, useOnline } from '../components/NoSignal.jsx';
 import './shifts.css';
 
 // This phone's own "Count me in" / "Can't make it" still waiting to send, by shift.
@@ -719,6 +721,8 @@ function ShiftDetail({ id, canDesk, me }) {
   useKeepCopy(me, `shift:${id}`, shiftQ);
   const outbox = useOutbox();
   const waiting = waitingSelf(outbox.items, id);
+  // The desk's Notify needs signal (it emails and texts now, or not at all).
+  const online = useOnline();
   // Providers are read once; the brief is shared with Today so it is usually cached.
   const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity });
   // Which actions this login may run. A volunteer gets "Count me in" only
@@ -941,7 +945,7 @@ function ShiftDetail({ id, canDesk, me }) {
     <section className="ops-notify" aria-label="Notify volunteers">
       {!confirming ? (
         <button type="button" className={`btn ops-tap${isPrimary ? ' btn-primary ops-wide' : ''}`}
-          disabled={active.length === 0}
+          disabled={active.length === 0 || !online}
           onClick={() => { setConfirming(true); setResults(null); setNotifyError(null); }}>
           {notifiedBefore ? 'Notify again' : 'Notify everyone'}
         </button>
@@ -949,7 +953,7 @@ function ShiftDetail({ id, canDesk, me }) {
         <div className="ops-confirm" role="group" aria-label="Send notification">
           <span>Email + text {people(active.length)}?</span>
           <button type="button" className="btn btn-primary ops-tap"
-            onClick={notify} disabled={sending}>
+            onClick={notify} disabled={sending || !online}>
             {sending ? (nothingSends ? 'Saving…' : 'Sending…') : (nothingSends ? 'Save — nothing sends' : 'Send')}
           </button>
           <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirming(false)} disabled={sending}>
@@ -957,6 +961,7 @@ function ShiftDetail({ id, canDesk, me }) {
           </button>
         </div>
       )}
+      {!online && active.length > 0 && <NeedsSignal />}
       {confirming && providerNote && (
         <span className="ops-meta">{providerNote} <Link to="/outreach/website?connect=1">Connect</Link></span>
       )}

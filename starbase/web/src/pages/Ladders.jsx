@@ -4,6 +4,7 @@
 // Open follow-ups sit on top as one row; how far people have come
 // (Contact → … → Leader) folds away under "How involved people are". Under
 // the title, the plain words for what a ladder is (as Outreach's link says).
+// No signal: one line, and no New ladder (it would fail).
 //   /ladders/:id   the builder (LaddersEdit.jsx)
 //   /follow-ups    the follow-up list (LaddersFollowups.jsx)
 // Desk only (App.jsx guards it; the server refuses volunteers these reads).
@@ -11,6 +12,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
+import { NoSignal, noSignal, useOnline } from '../components/NoSignal.jsx';
 import { CONNECT_TO, LEVEL_HINT, TriggerPicker, countsLine, plural, triggerLine } from '../components/LaddersBits.jsx';
 import './shifts.css';
 import './ladders.css';
@@ -94,6 +96,8 @@ export default function Ladders() {
   const showNew = params.get('new') === '1';
   const [showLevels, setShowLevels] = useState(false);
   const q = useQuery({ queryKey: ['ladders'], queryFn: () => apiGet('/ladders') });
+  const online = useOnline();
+  const offline = noSignal(q);
   const d = q.data;
   const ladders = d?.ladders ?? [];
   const followups = Number(d?.followups) || 0;
@@ -106,15 +110,16 @@ export default function Ladders() {
           <h1>Ladders</h1>
           <p className="lad-sub">Automatic emails &amp; follow-ups</p>
         </div>
-        {!showNew && (
+        {!showNew && online && (
           <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>New ladder</button>
         )}
       </div>
 
       {showNew && d && <NewLadder options={d.options} onClose={() => setParams({})} />}
 
-      {q.isPending && <p className="muted">Loading…</p>}
-      {q.isError && <p className="error" role="alert">{q.error.message}</p>}
+      {offline && <NoSignal />}
+      {q.isPending && !offline && <p className="muted">Loading…</p>}
+      {q.isError && !offline && <p className="error" role="alert">{q.error.message}</p>}
       {emailWaits && (
         <p className="lad-note" role="status">Email isn’t connected — email steps wait. <Link to={CONNECT_TO}>Connect</Link></p>
       )}

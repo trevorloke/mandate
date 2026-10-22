@@ -12,6 +12,7 @@ import { useId, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
+import { NoSignal, noSignal } from '../components/NoSignal.jsx';
 import { KINDS, KIND_LABEL, WherePicker, plural, useSurveyRefresh } from './Surveys.jsx';
 import './shifts.css';
 import './surveys.css';
@@ -229,6 +230,14 @@ export default function SurveysEdit() {
     }
   };
 
+  if (noSignal(q)) {
+    return (
+      <div className="ops-page sv-page">
+        <Link to="/surveys" className="ops-back">← Surveys</Link>
+        <NoSignal />
+      </div>
+    );
+  }
   if (q.isPending) return <p className="muted">Loading…</p>;
   if (q.isError) {
     return (

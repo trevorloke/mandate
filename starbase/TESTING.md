@@ -130,7 +130,8 @@ one tap away under **More**.
   With no signal Send stays off (*Texts send with signal*). A profile's Call
   and Text open the same card. **Call** rings your own phone first (enter it
   once): answer, press 1, and you're connected — they see the campaign's
-  number.
+  number. With no signal, Call is your phone's own dialler (*No signal —
+  this calls from your own number*).
 - **Shifts** — *Count me in* on an open shift; *Can't make it* to drop out.
 - **Signs** (from Today when there are signs to put up) — *Put up ✓*.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved

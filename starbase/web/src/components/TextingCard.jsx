@@ -18,9 +18,12 @@
 //       and connects you from the campaign's number. The first tap with no
 //       number saved opens "Your phone" (focused, "Add your number first");
 //       it's kept after the first call. Who else sees it is behind a tap.
-//       No signal: the same card with Send / Call off — never the phone's
-//       own Messages or dialler while Twilio is on (the status is kept on
-//       the phone: TextingStatus.js).
+//       No signal: the text card with Send off — never the phone's own
+//       Messages while Twilio is on (the status is kept on the phone:
+//       TextingStatus.js). A call needs no data, so Call is the phone's own
+//       dialler (the children's tel: link), said in one line: "No signal —
+//       this calls from your own number" (a campaign call already ringing
+//       keeps its status line).
 //       Twilio not connected: the children (today's sms: / tel: link) and, in
 //       Text mode, one line — "Texts open on your phone" (volunteers) or
 //       "Texting isn't connected · Connect" (the desk: <TextingOff />, the
@@ -35,7 +38,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, action, ApiError } from '../api.js';
+import { apiGet, action, ApiError, NoSignalError } from '../api.js';
 import { isDesk } from '../Shell.jsx';
 import { useTextingStatus, statusOffline, textingOn, useTextingPerson, useOnline } from './TextingStatus.js';
 import { fillTemplate } from './TextingWords.js';
@@ -69,7 +72,9 @@ export const whenShort = (ts) => {
     ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
 };
 const minutes = (s) => (s == null ? '' : s < 60 ? `${s} sec` : `${Math.round(s / 60)} min`);
-const errorText = (e) => (e instanceof ApiError ? e.message : 'No signal — not sent');
+// No answer at all: "No signal — not sent" offline; with signal the answer may
+// have been lost on its way back, so it says only that (api.js).
+const errorText = (e) => (e instanceof ApiError || e instanceof NoSignalError ? e.message : 'No signal — not sent');
 // "Quiet hours — sending opens at 9 am" (the server's own words for when).
 const quietLine = (quiet, what = 'sending opens') => `Quiet hours — ${what} at ${quiet?.opens || quiet?.label || 'the allowed hours'}`;
 
@@ -200,7 +205,9 @@ const callWords = (call, fn) => {
   }
 };
 
-function CampaignCall({ person, status, offline }) {
+const OWN_NUMBER = 'No signal — this calls from your own number';
+
+function CampaignCall({ person, status, offline, children }) {
   const qc = useQueryClient();
   const id = useId();
   const fn = first(person.name);
@@ -241,6 +248,16 @@ function CampaignCall({ person, status, offline }) {
       setBusy(false);
     }
   };
+
+  // No signal: the phone's own dialler, said plainly — no "Your phone" box.
+  if (offline && !live && children) {
+    return (
+      <>
+        {children}
+        <p className="tx-line tx-line--under">{OWN_NUMBER}</p>
+      </>
+    );
+  }
 
   return (
     <div className="tx-call">
@@ -296,8 +313,17 @@ export function TextingCallButton({ person, me, channel, onSent, onNext, childre
     // Not known yet: never guess the phone's own Messages.
     return offline ? <p className="tx-line tx-line--block" role="note">Texts need signal</p> : null;
   }
-  if (on.voice) return <CampaignCall person={person} status={s} offline={offline} />;
+  if (on.voice) return <CampaignCall person={person} status={s} offline={offline}>{children}</CampaignCall>;
   if (on.voice === false) return children;
+  // Not known yet (no signal, nothing kept): a call from their own phone still works.
+  if (offline && children) {
+    return (
+      <>
+        {children}
+        <p className="tx-line tx-line--under">{OWN_NUMBER}</p>
+      </>
+    );
+  }
   return offline ? <p className="tx-line tx-line--block" role="note">Calls need signal</p> : null;
 }
 

@@ -9,8 +9,9 @@
 // desk's Today has a "new texts" row).
 // Under the nav, a slim strip says when the phone is offline or field work
 // is still waiting in the outbox (src/offline.js): a "3 saved on this phone"
-// chip opens the list (refused ones with the server's reason, Try again /
-// Dismiss), with a "Send now" button when there's signal.
+// chip ("this device" off a phone) opens the list (refused ones with the
+// server's reason, Try again / Dismiss), with a "Send now" button when
+// there's signal. While the list is open it says when it sends, not the strip.
 import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,6 +20,7 @@ import {
   pendingCount, unsentCount, useOutbox, useOutboxAutoFlush, clearOutbox, dismissItem, retryItem, onOutboxSent, setOutboxOwner, NEW_PERSON,
 } from './offline.js';
 import OfflineSheet from './components/OfflineSheet.jsx';
+import { useThisDevice } from './components/queued.js';
 import { forgetPhoneCopies, keepOnlyMine } from './components/OfflineCache.js';
 import { useTextingStatus } from './components/TextingStatus.js';
 import './pages/offline.css';
@@ -93,6 +95,7 @@ const leftOutLine = (who, result) => {
 
 function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice, sent = 0 }) {
   const { pending, refused, flushing, lastError } = outbox;
+  const device = useThisDevice();
   const [open, setOpen] = useState(false);
   const chipRef = useRef(null);
   const close = useCallback(() => {
@@ -113,17 +116,17 @@ function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDism
     <div className={`offline-strip${online ? '' : ' is-offline'}${online && !pending && refused ? ' is-refused' : ''}${justSent && !pending ? ' is-sent' : ''}`} role="status" aria-live="polite">
       <div className="offline-strip__inner">
         <span className="offline-strip__dot" aria-hidden="true" />
-        {!online && <span className="offline-strip__text">{items ? 'Offline' : 'Offline — field work saves on this phone'}</span>}
+        {!online && <span className="offline-strip__text">{items ? 'Offline' : `Offline — field work saves on ${device}`}</span>}
         {justSent && <span className="offline-strip__text offline-strip__sent">✓ {sent} sent</span>}
         {items > 0 && (
           <button type="button" ref={chipRef} className="offline-strip__chip" aria-haspopup="dialog" aria-expanded={open}
             onClick={() => (open ? close() : setOpen(true))}>
-            {pending > 0 && <span>{pending} saved on this phone</span>}
+            {pending > 0 && <span>{pending} saved on {device}</span>}
             {pending > 0 && refused > 0 && <span aria-hidden="true">·</span>}
             {refused > 0 && <span className="is-refused">{refused} refused</span>}
           </button>
         )}
-        {!online && pending > 0 && <span className="offline-strip__hint">Sends when you're back online</span>}
+        {!online && pending > 0 && !open && <span className="offline-strip__hint">Sends when you’re back online</span>}
         {/* Not yellow: the screen under the strip keeps its one primary button. */}
         {online && pending > 0 && (
           <button type="button" className="btn offline-strip__btn" onClick={onSend} disabled={flushing}>
@@ -154,12 +157,13 @@ function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDism
 // signal comes back — then the app opens, or a dead session goes to login.
 function WaitingForSignal() {
   const { pending, refused } = useOutbox();
+  const device = useThisDevice();
   return (
     <main className="page offline-gate">
       <span className="eyebrow">Offline</span>
       <h1 className="offline-gate__title">Waiting for signal</h1>
       <p>Opens by itself when you&rsquo;re back online.</p>
-      {pending + refused > 0 && <p className="offline-gate__saved">{pending + refused} saved on this phone</p>}
+      {pending + refused > 0 && <p className="offline-gate__saved">{pending + refused} saved on {device}</p>}
     </main>
   );
 }

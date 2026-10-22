@@ -20,6 +20,7 @@ import {
   useBlastStat, useBlastStats,
 } from '../components/AbTests.jsx';
 import LaddersLink from '../components/LaddersLink.jsx';
+import { NeedsSignal, useOnline } from '../components/NoSignal.jsx';
 import './outreach.css';
 
 const TABS = [
@@ -331,6 +332,7 @@ function ResendButton({ b, n, label, ask, onDone, plainLabel = false }) {
   const act = useAction(() => {
     queryClient.invalidateQueries({ queryKey: ['blasts'] });
   });
+  const online = useOnline();
   const go = async () => {
     const res = await act.run('blast.resend', { id: b.id });
     setConfirming(false);
@@ -345,10 +347,11 @@ function ResendButton({ b, n, label, ask, onDone, plainLabel = false }) {
       ) : (
         <div className="ot-confirm" role="group" aria-label="Confirm send">
           <span>{ask || <>Send to <strong>{n}</strong> {nounFor(b.kind, n)} now?</>}</span>
-          <button type="button" className="btn ot-solid ot-btn-tap" disabled={act.busy} onClick={go}>
+          <button type="button" className="btn ot-solid ot-btn-tap" disabled={act.busy || !online} onClick={go}>
             {act.busy ? 'Sending…' : 'Yes, send'}
           </button>
           <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setConfirming(false)}>No</button>
+          {!online && <NeedsSignal className="ot-confirm-note" />}
         </div>
       )}
       {act.error && <p className="error">{act.error}</p>}
@@ -453,6 +456,8 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
   const noun = (n) => plural(n, audienceNoun.one, audienceNoun.many);
   // Without email connected nothing goes out — say so before, not after.
   const offline = emailConfigured === false;
+  // No signal: nothing can go now (or be saved) — Yes is off, and says so.
+  const online = useOnline();
 
   // A tap that got no answer (the server went down mid-send) may still be on
   // record, partly sent: look for it — a new send of this kind and subject —
@@ -510,12 +515,13 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
           <div className="ot-confirm" role="group" aria-label="Confirm send">
             <span>{testing && !offline ? abAsk(plan, ab.wait_hours)
               : <>{offline ? 'Save for' : 'Send to'} <strong>{audienceCount}</strong> {noun(audienceCount)}?</>}</span>
-            <button type="button" className="btn btn-primary ot-btn-tap" disabled={act.busy} onClick={send}>
+            <button type="button" className="btn btn-primary ot-btn-tap" disabled={act.busy || !online} onClick={send}>
               {act.busy ? (offline ? 'Saving…' : 'Sending…') : offline ? 'Yes, save' : 'Yes, send'}
             </button>
             <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setConfirming(false)}>No</button>
             {/* No Connect link here: leaving would drop the draft. */}
-            {offline && <span className="ot-confirm-note">Email isn’t connected — nothing is sent.</span>}
+            {offline && online && <span className="ot-confirm-note">Email isn’t connected — nothing is sent.</span>}
+            {!online && <NeedsSignal className="ot-confirm-note" />}
           </div>
         ) : (
           <>

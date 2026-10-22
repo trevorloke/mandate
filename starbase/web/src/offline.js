@@ -33,7 +33,10 @@
 // failures queue — a 4xx on the first try is returned as an error, because
 // replaying it would fail the same way forever. A 4xx on a replay is kept
 // (refused, with the server's reason) until someone dismisses or retries it:
-// never silently dropped.
+// never silently dropped. A knock, pin or sign on someone added here whose
+// adding was refused isn't sent at all — it's kept as refused, "Not saved —
+// this person wasn't added" — and Try again on the person brings it along.
+//   refusedText(item)  → a refused item's reason, in plain words.
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import { action, ApiError } from './api.js';
@@ -47,6 +50,10 @@ export const NEW_PERSON = ['person.create', 'person.addAtDoor'];
 // What can be taken back while it waits: a sign request (its cancel is
 // sign.cancel) and "Count me in" (shift.leave).
 const UNDOABLE = ['sign.place', 'shift.join'];
+// The person an item is about (a knock, a pin, a sign request).
+const personOf = (it) => (it.name === 'person.locate' ? it.input?.id : it.input?.person_id) || null;
+// Kept on an item about someone this phone added, whose adding was refused.
+const NOT_ADDED = { status: 400, code: 'not_added', message: 'Not saved — this person wasn’t added' };
 
 const KEY = 'starbase:outbox:v2';
 const V1_KEY = 'starbase:outbox:v1'; // knocks only (before this outbox)
@@ -237,6 +244,14 @@ async function runFlush() {
   for (;;) {
     const next = memory.find((i) => i.state === 'pending' && mine(i));
     if (!next) break;
+    // About someone added here whose adding was refused: the server would
+    // only say "not found". Kept, never sent (a sign taken back just goes).
+    const pid = personOf(next);
+    if (pid && memory.some((i) => i.cid === pid && NEW_PERSON.includes(i.name) && i.state === 'refused')) {
+      if (next.undo && UNDOABLE.includes(next.name)) remove(next.cid);
+      else update(next.cid, { state: 'refused', error: NOT_ADDED });
+      continue;
+    }
     update(next.cid, { tries: (next.tries || 0) + 1 });
     try {
       let done = next;
@@ -285,7 +300,11 @@ export function dismissItem(cid) {
 export function retryItem(cid) {
   const it = find(cid);
   if (!it) return Promise.resolve({ sent: 0, left: pendingCount() });
-  update(cid, { state: 'pending', error: null });
+  // Trying a refused new person again brings what was kept back with them.
+  const along = NEW_PERSON.includes(it.name)
+    ? (i) => i.state === 'refused' && i.error?.code === NOT_ADDED.code && personOf(i) === cid
+    : () => false;
+  write(memory.map((i) => (i.cid === cid || along(i) ? { ...i, state: 'pending', error: null } : i)));
   return offlineNow() ? Promise.resolve({ sent: 0, left: pendingCount() }) : flushOutbox();
 }
 
@@ -349,6 +368,18 @@ export function useOutboxAutoFlush(onFlushed) {
 }
 
 // ── What the sheet says about an item ──
+// A refused item's reason: the server's, as a sentence — but never its
+// "… in this workspace", and a knock on someone it doesn't have says so
+// plainly (they may have been removed meanwhile).
+export function refusedText(item) {
+  const e = item?.error || {};
+  if (e.code === NOT_ADDED.code) return NOT_ADDED.message;
+  const said = String(e.message || '').trim();
+  if (/^person not found\b/i.test(said)) return 'Not saved — this person isn’t on the list';
+  const t = said.replace(/\s+in this workspace\b/gi, '');
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Refused';
+}
+
 const SIGN_WORD = Object.fromEntries(SIGN_KINDS.map((s) => [s.code, s.label]));
 const CHANNEL_WORD = { door: 'Knock', phone: 'Call', text: 'Text' };
 // "2:14 pm" today, "Oct 18" before that — the phone's own clock.

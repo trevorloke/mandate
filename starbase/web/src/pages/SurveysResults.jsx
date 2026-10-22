@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api.js';
+import { NoSignal, noSignal } from '../components/NoSignal.jsx';
 import { plural } from './Surveys.jsx';
 import './shifts.css';
 import './surveys.css';
@@ -85,6 +86,14 @@ export default function SurveysResults() {
   // A profile opened from here comes back here ("← Results").
   const from = { to: `${location.pathname}${location.search}`, label: 'Results' };
 
+  if (noSignal(q)) {
+    return (
+      <div className="ops-page sv-page">
+        <Link to="/surveys" className="ops-back">← Surveys</Link>
+        <NoSignal />
+      </div>
+    );
+  }
   if (q.isPending) return <p className="muted">Loading…</p>;
   if (q.isError) {
     return (

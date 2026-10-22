@@ -23,12 +23,13 @@
 //               Someone added on this phone (not sent yet) whose pin is in
 //               the turf joins the list at once, marked "Not sent yet"; so
 //               does a sign request still on the phone.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, ApiError } from '../api.js';
 import { logContact, pendingKnocks, pendingPeopleIn, queueAction, undoQueued, useOutbox } from '../offline.js';
-import { queuedChip, queuedSaid, queuedText } from '../components/queued.js';
+import { queuedChip, queuedSaid, queuedText, thisDevice } from '../components/queued.js';
+import { useOnline } from '../components/NoSignal.jsx';
 import { AddPersonInline, SIGN_LABEL, SignAsk, signCancelOffered } from '../components/DoorCard.jsx';
 import RatingButtons, {
   More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
@@ -108,20 +109,14 @@ export function cachedWalkLists(me) {
 }
 
 // The list on screen is the phone's copy: "Offline copy" with no signal,
-// "Copy on this phone" when there's signal but the server didn't answer.
-const copyChip = (q) => (q.fetchStatus === 'paused' || !onlineNow() ? 'Offline copy' : 'Copy on this phone');
+// "Copy on this phone" ("this device" off a phone) when there's signal but
+// the server didn't answer.
+const copyChip = (q) => (q.fetchStatus === 'paused' || !onlineNow() ? 'Offline copy' : `Copy on ${thisDevice()}`);
 
 // navigator.onLine as state (the walk list hides its outbox row offline —
 // the shell's strip already says it — and the map's no-signal card).
 const onlineNow = () => typeof navigator === 'undefined' || navigator.onLine !== false;
-const subscribeOnline = (fn) => {
-  window.addEventListener('online', fn);
-  window.addEventListener('offline', fn);
-  return () => { window.removeEventListener('online', fn); window.removeEventListener('offline', fn); };
-};
-export function useOnline() {
-  return useSyncExternalStore(subscribeOnline, onlineNow, () => true);
-}
+export { useOnline };
 
 export function forgetFieldCache() {
   try {
