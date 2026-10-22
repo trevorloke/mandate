@@ -402,6 +402,175 @@ const ev = (await D.api('/events?since=0&limit=5000')).json.events.filter((e) =>
 check('the change is on the log, once', ev.length === 1 && ev[0].payload?.changes?.off?.includes('4B'), ev.length);
 const v = (await D.api('/audit/verify')).json;
 check('hash chain verifies', v.ok === true, JSON.stringify(v));
+
+// ════════════════════════════════════════════════════════════════════════════
+// 7. Fix round: a rename that would move people's ratings, names Save would
+//    refuse, the phone's newer scale copy, an old "Opposed" link after a new
+//    candidate, chips that give way to names at 390, Put back at 12, and a
+//    profile-field filter with no signal
+// ════════════════════════════════════════════════════════════════════════════
+// Lena's door gets a second person (the door card's tabs, below).
+const leo = (await D.api('/actions/person.create', { name: 'Leonardo Example', phone: '604-555-0146', address: P.lena.address, city: 'Surrey', lat: P.lena.lat, lng: P.lena.lng })).json.person;
+check('Lena’s door gets a second person', !!leo?.id);
+// The volunteer signs in again on a fresh phone and opens the map (its copy
+// of the scale is the current one).
+const v2ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'America/Vancouver' });
+await tiles(v2ctx);
+const v2 = await v2ctx.newPage();
+const V2 = helpers(v2, v2ctx, 'vol-2');
+check('volunteer signs in again', (await v2ctx.request.post(`${BASE}/api/auth/login`, { data: { email: volEmail, password: 'knock-knock-2026' } })).ok());
+await V2.go(`/map?person=${P.ana.id}`);
+await v2.waitForSelector('aside.door-card .rb-btn', { timeout: 10000 }).catch(() => {});
+await V2.swReady().catch(() => {});
+await sleep(1500);
+const sBefore = (await D.api('/scale')).json.scale;
+const opposedBefore = sBefore.candidates.map((c) => c.code); // the band's codes before a new candidate
+const rows7 = () => page.$$eval('.sc-cand input', (els) => els.map((e) => e.value));
+const noteText = () => page.$$eval('.sc-note', (els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+
+// Rating scale (manager, 1360): typing a new name over Bains (Tom is rated Bains).
+const nBains = Number((await D.api('/brief')).json.ratings?.['4BA']) || 0;
+const saysBains = `${nBains} ${nBains === 1 ? 'person' : 'people'} rated Bains will read Sidhu — someone new?`;
+await D.go('/rating-scale');
+await page.waitForSelector('.sc-page .rb-btn', { timeout: 8000 }).catch(() => {});
+await page.fill('.sc-cand input[value="Bains"]', 'Sidhu');
+let notes = await noteText();
+check(`typing over Bains says what it does: "${saysBains}"`,
+  nBains > 0 && notes.length === 1 && notes[0].toLowerCase() === `${saysBains} Add them instead`.toLowerCase(), notes.join(' | '));
+m = await measure(page);
+check('…still one yellow button, no sideways scroll', m.yellow === 1 && m.overflow <= 0, JSON.stringify({ y: m.yellow, o: m.overflow }));
+await D.shot('07-rename-note');
+await page.click('.sc-note button:has-text("Add them instead")');
+check('Add them instead: Bains keeps their name, Sidhu is added', (await rows7()).join('|') === 'McCallum|Linda Annis|van Vliet|Bains|Randhawa|Sidhu' && (await noteText()).length === 0, (await rows7()).join('|'));
+// Names Save would refuse, said under the row as typed.
+await page.fill('.sc-cand input[value="Randhawa"]', 'LOCKE');
+notes = await noteText();
+check('renamed onto someone off the list: "Locke is off the list — Put back below"', notes.some((n) => /^Locke is off the list — Put back below$/.test(n)), notes.join(' | '));
+await page.fill('.sc-cand input[value="LOCKE"]', 'Strong support');
+notes = await noteText();
+check('a step’s usual words: "“Strong support” is a step’s words — pick another name"', notes.some((n) => /“Strong support” is a step’s words — pick another name/.test(n)), notes.join(' | '));
+await page.fill('.sc-cand input[value="Strong support"]', 'Randhawa');
+check('…back to Randhawa: no line', (await noteText()).length === 0);
+await page.click('.sc-save .btn-primary');
+await page.waitForSelector('.sc-save [role="status"]', { timeout: 6000 }).catch(() => {});
+const sNew = (await D.api('/scale')).json.scale;
+const sidhu = sNew.candidates.find((c) => c.name === 'Sidhu');
+check('saved: Bains kept their code, Sidhu is new', sidhu && !opposedBefore.includes(sidhu.code) && sNew.candidates.find((c) => c.code === '4BA')?.name === 'Bains', JSON.stringify(sNew.candidates.map((c) => [c.code, c.name])));
+
+// The phone opens Shifts with signal (no rating buttons there: its own copy
+// of the scale stays old, the sign-in's is new), then the map with no signal.
+await V2.go('/shifts');
+await sleep(1500);
+await v2ctx.setOffline(true);
+await v2.goto(`${BASE}/map?person=${P.ana.id}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await v2.waitForSelector('aside.door-card .rb-btn', { timeout: 15000 }).catch(() => {});
+await sleep(800);
+await v2.tap('aside.door-card button[aria-label^="4: Opposed"]').catch(() => v2.click('aside.door-card button[aria-label^="4: Opposed"]').catch(() => {}));
+await sleep(300);
+b = await buttonsText(v2, 'aside.door-card');
+check('no signal: the map offers Sidhu (the newer of the phone’s two copies)', b?.who.includes('Sidhu'), JSON.stringify(b?.who));
+await v2ctx.setOffline(false);
+await v2.evaluate(() => window.dispatchEvent(new Event('online')));
+await sleep(800);
+
+// An old "Opposed" link (its codes from before Sidhu) still reaches Sidhu's people.
+check('Tom is rated Sidhu', (await D.api('/actions/contact.log', { person_id: P.tom.id, channel: 'door', outcome: 'contacted', rating: sidhu.code })).status === 200);
+const opposedNow = (await D.api(`/persons?q=&limit=300&rating=${['4', ...sNew.candidates.map((c) => c.code)].join(',')}`)).json.persons;
+const oldLink = `rating=${encodeURIComponent(['4', ...opposedBefore].join(','))}`;
+await D.go(`/people?${oldLink}`);
+await page.waitForSelector('.pp-count', { timeout: 8000 }).catch(() => {});
+await sleep(500);
+const oldRows = await listed();
+check('People with the old Opposed link: every opposed person, Tom (Sidhu) too', oldRows.length === opposedNow.length && oldRows.includes(`/people/${P.tom.id}`)
+  && /Opposed/.test(await page.innerText('.pp-chips').catch(() => '')), `${oldRows.length} vs ${opposedNow.length}`);
+await page.click('.pp-filterbtn');
+const onChips = await page.$$eval('.pp-sheet .pp-pick.on', (els) => els.map((e) => e.innerText.trim().toLowerCase()));
+check('…and the sheet shows Opposed on', onChips.join('|') === 'opposed', onChips.join('|'));
+await page.click('.pp-sheet__head button:has-text("Done")');
+await D.go(`/calls?${oldLink}&channel=phone`);
+await sleep(800);
+const toCall = opposedNow.filter((p) => p.phone).length;
+check(`Calls carried from it: ${toCall} to call (Sidhu’s too)`, new RegExp(`\\b${toCall} to call`).test(await D.text()), (await D.text()).match(/\d+ to call/)?.[0]);
+
+// A long name off the list, at 390: the chip gives way, never the address or the names.
+check('manager renames Locke (off the list) "Brenda van Locke"', (await D.api('/actions/scale.save', {
+  candidates: sNew.candidates.map((c) => ({ code: c.code, name: c.code === '4B' ? 'Brenda van Locke' : c.name, off: c.off })),
+})).status === 200);
+await V2.go(`/turfs/${turf.id}`);
+await v2.waitForSelector('.walk-door__head', { timeout: 10000 }).catch(() => {});
+await sleep(600);
+const maya7 = await v2.$$eval('.walk-door__head', (els) => els.map((h) => {
+  const a = h.querySelector('.walk-door__addr'); const n = h.querySelector('.walk-door__names'); const c = h.querySelector('.walk-door__chips .rb-chip');
+  const head = h.getBoundingClientRect();
+  return { addr: a.innerText, addrH: Math.round(a.getBoundingClientRect().height), namesCut: n.scrollWidth > n.clientWidth + 1, names: n.innerText,
+    chip: c?.innerText || '', title: c?.title || '', chipRight: c ? Math.round(c.getBoundingClientRect().right) : 0, headRight: Math.round(head.right) };
+}).find((r) => /Maya/.test(r.names)));
+check('walk list at 390: Maya’s door reads "4 · Brenda van Locke", address on one line, name whole',
+  maya7 && /^4 · Brenda van Locke$/.test(maya7.chip) && /off the list/.test(maya7.title) && maya7.addrH <= 30 && !maya7.namesCut && maya7.chipRight <= maya7.headRight,
+  JSON.stringify(maya7));
+m = await measure(v2);
+check('…no sideways scroll on the walk list', m.overflow <= 0, m.overflow);
+await V2.shot('07-walk-long');
+await V2.go(`/map?person=${P.lena.id}`);
+await v2.waitForSelector('aside.door-card .fk-tabs', { timeout: 10000 }).catch(() => {});
+await sleep(800);
+const tabs7 = await v2.$$eval('aside.door-card .fk-tab', (els) => els.map((e) => {
+  const n = e.querySelector('.fk-tab__name'); const c = e.querySelector('.rb-chip');
+  return { name: n.innerText, cut: n.scrollWidth > n.clientWidth + 1, chip: c?.innerText || '', right: Math.round(e.getBoundingClientRect().right) };
+}));
+const strip7 = await v2.$eval('aside.door-card .fk-tabs', (e) => ({ sw: e.scrollWidth, cw: e.clientWidth })).catch(() => null);
+check('door card at 390: both names whole, nothing off to the side', tabs7.length === 2 && tabs7.every((t) => !t.cut && t.right <= 390) && strip7 && strip7.sw <= strip7.cw,
+  JSON.stringify({ tabs7, strip7 }));
+await V2.shot('07-door-tabs');
+// People rows at 390 (manager): the name stays on its line.
+const p7ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'America/Vancouver', storageState: await dctx.storageState() });
+const p7 = await p7ctx.newPage();
+const P7 = helpers(p7, p7ctx, 'mgr-phone-3');
+await P7.go('/people?rating=4B');
+await p7.waitForSelector('.pp-row', { timeout: 8000 }).catch(() => {});
+const ppRows = await p7.$$eval('.pp-row', (els) => els.map((r) => ({ name: r.querySelector('.pp-row__name').innerText, h: Math.round(r.querySelector('.pp-row__name').getBoundingClientRect().height), chip: Math.round(r.querySelector('.rb-chip').getBoundingClientRect().width), row: Math.round(r.getBoundingClientRect().width) })));
+check('People at 390: the long chip gives way, each name on one line', ppRows.length === 2 && ppRows.every((r) => r.h <= 26 && r.chip <= r.row / 2 + 1), JSON.stringify(ppRows));
+// Rating scale at 390: twelve on the list — Put back waits.
+await P7.go('/rating-scale');
+await p7.waitForSelector('.sc-page .rb-btn', { timeout: 8000 }).catch(() => {});
+for (const name of ['Aa Example', 'Bb Example', 'Cc Example', 'Dd Example', 'Ee Example', 'Ff Example']) {
+  if (await p7.locator('.sc-add input').isDisabled()) break;
+  await p7.fill('.sc-add input', name);
+  await p7.click('.sc-add button:has-text("Add")');
+}
+const onCount = (await p7.$$('.sc-cand')).length;
+check('twelve on the list: Put back is off, "12 at most on the list — take one off first"', onCount === 12
+  && await p7.locator('.sc-gone button:has-text("Put back")').first().isDisabled()
+  && /12 at most on the list — take one off first/.test(await p7.innerText('.sc-sec:has(#sc-off)').catch(() => '')), onCount);
+m = await measure(p7);
+check('…one yellow, no sideways scroll, every control ≥ 48px', m.yellow === 1 && m.overflow <= 0 && m.small.length === 0, JSON.stringify({ y: m.yellow, o: m.overflow, small: m.small }));
+await P7.full('07-scale-full-390');
+await p7ctx.close();
+
+// A profile-field filter with no signal (desk, 1360): never the whole kept list.
+const fld = (await D.api('/actions/field.create', { name: 'Strata council member', kind: 'yesno' })).json.field;
+check('a Yes/No field, Lena yes', fld?.id && (await D.api('/actions/field.values.set', { person_id: P.lena.id, values: [{ field_id: fld.id, value: true }] })).status === 200);
+await D.go('/people');
+await page.waitForSelector('.pp-table, .pp-list', { timeout: 8000 }).catch(() => {});
+await sleep(1500); // kept a moment after it loads
+await dctx.setOffline(true);
+const inApp = (url) => page.evaluate((u) => { history.pushState({}, '', u); dispatchEvent(new PopStateEvent('popstate')); }, url);
+await inApp(`/people?field=${encodeURIComponent(`${fld.id}:yes`)}`);
+await sleep(2500);
+t = await D.text();
+const offRows = await page.$$eval('.pp-table tbody tr, .pp-list li', (els) => els.length);
+check('no signal, People by a field never opened here: "No signal — the list loads…", not everyone', /No signal — the list loads when you’re back online/.test(t) && offRows === 0, `${offRows} rows`);
+await inApp(`/calls?field=${encodeURIComponent(`${fld.id}:yes`)}&channel=phone`);
+await sleep(2500);
+check('…Calls by it too: No signal', /No signal — your list loads when you’re back online/.test(await D.text()) && !/\d+ to call/.test(await D.text()), (await D.text()).slice(0, 160));
+await D.shot('07-field-offline');
+await dctx.setOffline(false);
+await D.go(`/people?field=${encodeURIComponent(`${fld.id}:yes`)}`);
+await page.waitForSelector('.pp-count', { timeout: 8000 }).catch(() => {});
+check('back online: Lena, the one person it matches', (await listed()).join(' ') === `/people/${P.lena.id}`, (await listed()).join(' '));
+await v2ctx.close();
+const v7 = (await D.api('/audit/verify')).json;
+check('hash chain still verifies', v7.ok === true, JSON.stringify(v7));
 check('no page errors', errors.length === 0, errors.join(' | '));
 
 await browser.close();

@@ -706,7 +706,10 @@ function PeopleList() {
     return <Navigate replace to={`/calls${carry(f, { channel: bank === 'text' ? 'text' : 'phone' })}`} />;
   }
 
-  const offline = noSignal(persons);
+  // No signal — or only the last filter's list, held while this one waits
+  // for signal (one the kept list can't answer, like a profile field): never
+  // under this filter's chips.
+  const offline = noSignal(persons) || (persons.isPlaceholderData && persons.fetchStatus === 'paused');
   // Searched with no signal over a kept list the server had cut off: there may be more.
   const partial = keptPartial(persons.data);
   const count = persons.isLoading ? '…' : rows.length >= LIMIT ? `${LIMIT}+` : String(rows.length);
@@ -933,7 +936,7 @@ function CallsScreen() {
     const open = callOrder(ok.filter((p) => repliedSet.has(p.id) || (!awaySet.has(p.id) && !textedHere.has(p.id))), seed);
     return [...open.filter((p) => repliedSet.has(p.id)), ...open.filter((p) => !repliedSet.has(p.id))];
   }, [reachable, seed, smsOn, away, replied, textedHere]);
-  const offline = noSignal(persons);
+  const offline = noSignal(persons) || (persons.isPlaceholderData && persons.fetchStatus === 'paused');
 
   const [done, setDone] = useState(readDone);
   const [currentId, setCurrentId] = useState(null);
