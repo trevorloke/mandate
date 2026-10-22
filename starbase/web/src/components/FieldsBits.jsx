@@ -112,12 +112,13 @@ function FieldControl({ f, value, onChange, disabled }) {
   );
 }
 
-function PersonFieldsForm({ fields, personId }) {
+// saved / setSaved live in PersonFields: the form starts fresh from the
+// server's values after a save, and "✓ Saved" must outlast that.
+function PersonFieldsForm({ fields, personId, saved, setSaved }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => Object.fromEntries(fields.map((f) => [f.id, draftOf(f)])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(false);
   const changed = fields.filter((f) => !sameDraft(f, draft[f.id]));
   const set = (fid, v) => { setSaved(false); setError(null); setDraft((d) => ({ ...d, [fid]: v })); };
 
@@ -164,6 +165,7 @@ function PersonFieldsForm({ fields, personId }) {
 }
 
 export function PersonFields({ query, personId }) {
+  const [saved, setSaved] = useState(false);
   if (query.isPending) return <p className="muted">Loading…</p>;
   if (query.isError) return <p className="error">{query.error.message}</p>;
   const { fields = [], edit } = query.data || {};
@@ -181,7 +183,7 @@ export function PersonFields({ query, personId }) {
   }
   // A fresh form whenever the saved values change (after Save, or another desk's).
   const version = fields.map((f) => `${f.id}=${JSON.stringify(f.value)}`).join('|');
-  return <PersonFieldsForm key={version} fields={fields} personId={personId} />;
+  return <PersonFieldsForm key={version} fields={fields} personId={personId} saved={saved} setSaved={setSaved} />;
 }
 
 // ── People: filter by one field's value ──

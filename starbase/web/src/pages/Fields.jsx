@@ -97,7 +97,7 @@ function FieldForm({ initial = null, primary = false, submitLabel, busy, onSubmi
               return (
                 <div className="sv-choice fd-choice--kept" key={`kept-${c}`}>
                   <span className="fd-choice__words">{c}</span>
-                  <span className="fd-choice__n mono">{n}</span>
+                  <span className="fd-choice__n mono">{n} filled in</span>
                 </div>
               );
             }

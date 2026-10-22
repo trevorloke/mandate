@@ -1,9 +1,11 @@
 /* Profile fields on a profile ("More details"). The controls are the survey
    questions' (survey-questions.css: 48px tap buttons, 48px inputs); only the
-   form's own spacing and the Save row live here. Save is quiet ink, never
-   yellow: the profile's one primary button belongs to Edit details. */
+   form's own spacing and the Save row live here. Save is ink, never yellow:
+   Edit details' Save is the profile's one yellow button. */
 .fd-form { display: flex; flex-direction: column; gap: var(--s-4); padding-top: var(--s-1); }
 .fd-q__label { font-size: 15px; }
+/* Choices: two across on a phone, more on a desk. */
+.fd-form .sv-q__opts { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 .fd-q input[type='date'].sv-q__input { max-width: 260px; }
 .fd-foot { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
 .btn.fd-save {
