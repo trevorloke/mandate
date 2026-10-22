@@ -5,16 +5,29 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // the shared primitives so single-class page rules can override them.
 import './app.css';
 import App from './App.jsx';
+import { NoSignalError } from './api.js';
+import { keptPersister, watchKeptCopies } from './components/KeptCopies.js';
 
+// Once more after a second — except a 401 / 404, or no signal at all (the
+// browser says it's offline): then the screen says so straight away, and
+// loads again by itself when the signal is back (below, and KeptCopies.js).
+const noSignalNow = (error) => error instanceof NoSignalError && typeof navigator !== 'undefined' && navigator.onLine === false;
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (failureCount, error) => (error?.status === 401 || error?.status === 404 ? false : failureCount < 1),
+      retry: (failureCount, error) => (error?.status === 401 || error?.status === 404 || noSignalNow(error) ? false : failureCount < 1),
       refetchOnWindowFocus: false,
       staleTime: 15_000,
+      // Desk screens keep their last copy and show it with no signal
+      // (components/KeptCopies.js). A persister would switch react-query to
+      // "offlineFirst"; the field screens are built on "online" (a query
+      // with no signal waits, paused), so it's said here.
+      persister: keptPersister,
+      networkMode: 'online',
     },
   },
 });
+watchKeptCopies(queryClient);
 
 // ── Opening the app with no signal ──
 // The auth gate needs ['me']; with no network that fetch fails and would bounce

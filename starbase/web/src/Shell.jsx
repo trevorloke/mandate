@@ -18,10 +18,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, initials } from './api.js';
 import {
   pendingCount, unsentCount, useOutbox, useOutboxAutoFlush, clearOutbox, dismissItem, retryItem, onOutboxSent, setOutboxOwner, NEW_PERSON,
+  clockText,
 } from './offline.js';
 import OfflineSheet from './components/OfflineSheet.jsx';
 import { useThisDevice } from './components/queued.js';
 import { forgetPhoneCopies, keepOnlyMine } from './components/OfflineCache.js';
+import { useKeptTime } from './components/KeptCopies.js';
 import { useTextingStatus } from './components/TextingStatus.js';
 import './pages/offline.css';
 
@@ -93,7 +95,9 @@ const leftOutLine = (who, result) => {
   return n ? `${who ? `${who} · ` : ''}${n} ${n === 1 ? 'answer' : 'answers'} not saved — question changed` : null;
 };
 
-function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice, sent = 0 }) {
+// kept: the screen shows what this sign-in loaded before ("No signal · from
+// 2:14 pm" — components/KeptCopies.js), said here once for every screen.
+function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice, sent = 0, kept = null }) {
   const { pending, refused, flushing, lastError } = outbox;
   const device = useThisDevice();
   const [open, setOpen] = useState(false);
@@ -110,13 +114,15 @@ function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDism
   const stuck = lastError && !/still offline/i.test(lastError) ? lastError : null;
   // "4 sent": what was on the phone just reached the server (said for a moment).
   const justSent = online && sent > 0;
-  if (online && items === 0 && !notice && !justSent) return null;
+  const showKept = Boolean(kept) && (!online || kept.why === 'No answer');
+  if (online && items === 0 && !notice && !justSent && !showKept) return null;
 
   return (
-    <div className={`offline-strip${online ? '' : ' is-offline'}${online && !pending && refused ? ' is-refused' : ''}${justSent && !pending ? ' is-sent' : ''}`} role="status" aria-live="polite">
+    <div className={`offline-strip${online && !showKept ? '' : ' is-offline'}${online && !pending && refused ? ' is-refused' : ''}${justSent && !pending ? ' is-sent' : ''}`} role="status" aria-live="polite">
       <div className="offline-strip__inner">
         <span className="offline-strip__dot" aria-hidden="true" />
-        {!online && <span className="offline-strip__text">{items ? 'Offline' : `Offline — field work saves on ${device}`}</span>}
+        {showKept && <span className="chip obx-copy offline-strip__kept">{kept.why} · from {clockText(kept.at)}</span>}
+        {!online && !showKept && <span className="offline-strip__text">{items ? 'Offline' : `Offline — field work saves on ${device}`}</span>}
         {justSent && <span className="offline-strip__text offline-strip__sent">✓ {sent} sent</span>}
         {items > 0 && (
           <button type="button" ref={chipRef} className="offline-strip__chip" aria-haspopup="dialog" aria-expanded={open}
@@ -275,6 +281,7 @@ function SignedInShell({ me }) {
   // Offline outbox: send queued field work on reconnect / focus / every 30s,
   // then refresh every screen that shows what it changed.
   const online = useOnline();
+  const kept = useKeptTime();
   const outbox = useOutbox();
   const outboxRef = useRef(outbox);
   outboxRef.current = outbox;
@@ -425,6 +432,7 @@ function SignedInShell({ me }) {
           notice={notice || leftOut}
           onDismissNotice={() => { setNotice(null); setLeftOut(null); }}
           sent={sentNote}
+          kept={kept}
         />
       </header>
       <main className="page">

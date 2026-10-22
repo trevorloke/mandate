@@ -15,12 +15,13 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
 import { bandOf, codesInBand, offTail, ratingByCode } from '@starbase/shared/scale';
 import RatingButtons, { RatingChip, ratingSay, ratingText, useScale } from '../components/RatingButtons.jsx';
-import { logContact } from '../offline.js';
+import { queueAction } from '../offline.js';
 import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import { apiGet, action } from '../api.js';
-import { noSignal } from '../components/NoSignal.jsx';
+import { noSignal, useOnline, NeedsSignalLine } from '../components/NoSignal.jsx';
+import { keptPartial } from '../components/KeptCopies.js';
 import { FieldFilterChip, FieldFilterGroups } from '../components/FieldsBits.jsx';
 import './people.css';
 import {
@@ -158,15 +159,21 @@ export function Icon({ name, size = 20 }) {
 
 // Run an action with busy/error state; `onDone` gets the result (invalidate here).
 // meta: { who } names a knock in the shell's "saved on this phone" list.
-export function useAction(onDone) {
+// needsSignal: these controls write straight to the server, so with no
+// signal they're off (busy) and say "Needs signal".
+// Knocks and a profile's tags always go through the offline outbox (saved,
+// sent once).
+const OUTBOX = ['contact.log', 'person.tag'];
+export function useAction(onDone, { needsSignal = false } = {}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const online = useOnline();
+  const off = needsSignal && !online;
   const run = async (name, input, meta) => {
     setBusy(true);
     setError(null);
     try {
-      // Knocks always go through the offline outbox (saved, sent once).
-      const res = name === 'contact.log' ? await logContact(input, meta) : await action(name, input);
+      const res = OUTBOX.includes(name) ? await queueAction(name, input, meta) : await action(name, input);
       await onDone?.(res, name, input);
       return res;
     } catch (e) {
@@ -176,7 +183,7 @@ export function useAction(onDone) {
       setBusy(false);
     }
   };
-  return { run, busy, error, clearError: () => setError(null) };
+  return { run, busy: busy || off, error: error || (off ? 'Needs signal' : null), clearError: () => setError(null) };
 }
 
 // Tag chips with × remove, a type-to-add input (Enter / comma), and suggested chips.
@@ -522,7 +529,7 @@ function AddPersonForm({ onClose }) {
   const [form, setForm] = useState(EMPTY);
   const [tags, setTags] = useState([]);
   const [more, setMore] = useState(false);
-  const act = useAction();
+  const act = useAction(undefined, { needsSignal: true });
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const opt = (v) => (v && v.trim() ? v.trim() : undefined);
 
@@ -639,6 +646,7 @@ function PeopleList() {
   const { me } = useOutletContext() ?? {};
   const desk = canDesk(me); // person.create is desk-only
   const phone = useIsPhone();
+  const online = useOnline();
   const { params, f, update } = useFilters();
   const [filterOpen, setFilterOpen] = useState(false);
   const filterBtn = useRef(null);
@@ -687,6 +695,8 @@ function PeopleList() {
   }
 
   const offline = noSignal(persons);
+  // Searched with no signal over a kept list the server had cut off: there may be more.
+  const partial = keptPartial(persons.data);
   const count = persons.isLoading ? '…' : rows.length >= LIMIT ? `${LIMIT}+` : String(rows.length);
   // The profile's back link returns to this list, filters and all.
   const back = { from: { to: `/people${carry(f, { has: f.has })}`, label: 'People' } };
@@ -708,12 +718,13 @@ function PeopleList() {
             ]}
           />
           {desk && !showNew && (
-            <button type="button" className="btn btn-primary pp-btn" onClick={() => update({ new: '1' }, { replace: false })}>
+            <button type="button" className="btn btn-primary pp-btn" disabled={!online} onClick={() => update({ new: '1' }, { replace: false })}>
               Add person
             </button>
           )}
         </div>
       </div>
+      {desk && !showNew && !online && <NeedsSignalLine>Adding people needs signal</NeedsSignalLine>}
 
       {showNew && <AddPersonForm onClose={() => update({ new: null })} />}
 
@@ -737,7 +748,7 @@ function PeopleList() {
       <FilterChips f={f} update={update}
         extra={f.field ? <FieldFilterChip value={f.field} onRemove={() => update({ field: null })} /> : null} />
 
-      {!offline && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}</p>}
+      {!offline && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}{partial ? ' in the kept list' : ''}</p>}
 
       {persons.isError && !offline && <p className="error">{persons.error.message}</p>}
 
@@ -745,7 +756,7 @@ function PeopleList() {
         <p className="pp-offline" role="status">No signal — the list loads when you’re back online.</p>
       ) : rows.length === 0 && !persons.isLoading ? (
         <div className="pp-empty">
-          <p>{anyFilter ? 'No one matches.' : 'No people yet.'}</p>
+          <p>{partial ? 'No one in the kept list matches.' : anyFilter ? 'No one matches.' : 'No people yet.'}</p>
           {anyFilter ? (
             <button type="button" className="btn pp-btn" onClick={() => update({ q: null, tag: null, rating: null, role: null, has: null, field: null })}>
               Clear filters

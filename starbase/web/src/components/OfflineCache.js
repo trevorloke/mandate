@@ -14,6 +14,12 @@
 // (oldest out first). Sign-out forgets them all (forgetPhoneCopies), and a
 // different sign-in drops anyone else's (keepOnlyMine). Volunteers' copies
 // hold only what the server already let them see (forViewer).
+//
+// Desk screens keep theirs through the same store (components/KeptCopies.js
+// — no per-page code): copyKey / readCopy / writeCopy / removeCopy below,
+// in this browser ('local', a day) or, for anything with money in it on a
+// desk sign-in, in this tab only ('session' — gone when the tab closes).
+// Sign-out forgets both.
 import { useEffect } from 'react';
 
 const PREFIX = 'starbase:copy:v1:';
@@ -24,11 +30,12 @@ const ENTRY_MAX = 1_500_000; // characters of JSON
 const TOTAL_MAX = 3_000_000;
 
 const ls = () => { try { return globalThis.localStorage || null; } catch { return null; } };
+const ss = () => { try { return globalThis.sessionStorage || null; } catch { return null; } };
+const storeOf = (tier) => (tier === 'session' ? ss() : ls());
 const scope = (me) => (me?.user?.id && me?.workspace?.id ? `${me.workspace.id}:${me.user.id}:` : null);
 const keyFor = (me, name) => { const s = scope(me); return s ? `${PREFIX}${s}${name}` : null; };
 
-function readEntry(key) {
-  const store = ls();
+function readEntry(key, store = ls()) {
   if (!store || !key) return null;
   try {
     const v = JSON.parse(store.getItem(key) || 'null');
@@ -50,8 +57,7 @@ export function phoneCopy(me, name) {
   return { initialData: () => get()?.data, initialDataUpdatedAt: () => get()?.at };
 }
 
-const ours = () => {
-  const store = ls();
+const ours = (store = ls()) => {
   const out = [];
   if (!store) return out;
   try {
@@ -63,26 +69,32 @@ const ours = () => {
   return out;
 };
 
-function writeEntry(key, data, at) {
-  const store = ls();
+// group: { prefix, max } — copies under that prefix (a desk sign-in's) give
+// way among themselves first, so they never push the field's copies out.
+function writeEntry(key, data, at, store = ls(), group = null) {
   if (!store || !key) return;
   let text;
   try { text = JSON.stringify({ at, data }); } catch { return; }
   try {
     if (text.length > ENTRY_MAX) { store.removeItem(key); return; } // too big to keep
     // Make room: drop the oldest other copies until this one fits.
-    const others = ours().filter((k) => k !== key).map((k) => {
+    const sized = (list) => list.map((k) => {
       const raw = store.getItem(k) || '';
       let when = 0;
       try { when = JSON.parse(raw).at || 0; } catch { /* unreadable: goes first */ }
       return { k, size: raw.length, when };
     }).sort((a, b) => a.when - b.when);
-    let total = others.reduce((n, o) => n + o.size, 0) + text.length;
-    while (total > TOTAL_MAX && others.length) {
-      const o = others.shift();
-      store.removeItem(o.k);
-      total -= o.size;
-    }
+    const room = (list, max) => {
+      let total = list.reduce((n, o) => n + o.size, 0) + text.length;
+      while (total > max && list.length) {
+        const o = list.shift();
+        store.removeItem(o.k);
+        total -= o.size;
+      }
+    };
+    const others = ours(store).filter((k) => k !== key);
+    if (group) room(sized(others.filter((k) => k.startsWith(group.prefix))), group.max);
+    room(sized(ours(store).filter((k) => k !== key)), TOTAL_MAX);
     store.setItem(key, text);
   } catch {
     try { store.removeItem(key); } catch { /* storage blocked */ }
@@ -112,24 +124,48 @@ const offlineNow = () => typeof navigator !== 'undefined' && navigator.onLine ==
 export const showingCopy = (q) => Boolean(q?.data)
   && (offlineNow() || q.fetchStatus === 'paused' || (q.isError && !q.error?.status));
 
+// Bumped at sign-out, so a load that was on its way for the last sign-in is
+// never kept for the next (components/KeptCopies.js).
+let generation = 0;
 const forget = (keep) => {
-  const store = ls();
-  if (!store) return;
+  if (!keep) generation += 1;
   for (const t of timers.values()) clearTimeout(t);
   timers.clear();
-  try {
-    // Every key first, then remove: removing while scanning can reorder them.
-    const all = [];
-    for (let i = 0; i < store.length; i += 1) all.push(store.key(i));
-    for (const k of all) {
-      if (!k || !(k.startsWith(PREFIX) || k.startsWith(FIELD_PREFIX))) continue;
-      if (keep && k.slice(k.startsWith(PREFIX) ? PREFIX.length : FIELD_PREFIX.length).startsWith(keep)) continue;
-      store.removeItem(k);
-    }
-  } catch { /* storage blocked */ }
+  for (const store of [ls(), ss()]) {
+    if (!store) continue;
+    try {
+      // Every key first, then remove: removing while scanning can reorder them.
+      const all = [];
+      for (let i = 0; i < store.length; i += 1) all.push(store.key(i));
+      for (const k of all) {
+        if (!k || !(k.startsWith(PREFIX) || k.startsWith(FIELD_PREFIX))) continue;
+        if (keep && k.slice(k.startsWith(PREFIX) ? PREFIX.length : FIELD_PREFIX.length).startsWith(keep)) continue;
+        store.removeItem(k);
+      }
+    } catch { /* storage blocked */ }
+  }
 };
 
 // Sign-out: every copy on this phone goes (walk lists too).
 export const forgetPhoneCopies = () => forget(null);
 // Signed in: copies belonging to anyone else on this phone go.
 export const keepOnlyMine = (me) => { const s = scope(me); if (s) forget(s); };
+
+// ── For components/KeptCopies.js (desk screens) ──
+// tier: 'local' (this browser, a day) or 'session' (this tab only).
+export const copyKey = keyFor;
+export const copyScope = scope;
+export const copyGeneration = () => generation;
+export const readCopy = (key, tier = 'local') => readEntry(key, storeOf(tier));
+export const removeCopy = (key, tier = 'local') => { try { storeOf(tier)?.removeItem(key); } catch { /* blocked */ } };
+// Written a moment after it loaded (a list refetches after every tap), and
+// only while the same sign-in is here (gen: copyGeneration() when it loaded).
+export function writeCopy(key, data, at, { tier = 'local', group = null, gen } = {}) {
+  if (!key) return;
+  clearTimeout(timers.get(key));
+  timers.set(key, setTimeout(() => {
+    timers.delete(key);
+    if (gen !== undefined && gen !== generation) return;
+    writeEntry(key, data, at, storeOf(tier), group ? { prefix: `${PREFIX}${group.scope}${group.name}`, max: group.max } : null);
+  }, 800));
+}

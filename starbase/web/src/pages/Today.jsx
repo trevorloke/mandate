@@ -35,6 +35,7 @@ import { ApiError, apiGet, apiPost, fmtMoney } from '../api.js';
 import { ratingWho, useScale } from '../components/RatingButtons.jsx';
 import { useFollowupCount } from '../components/LaddersCount.js';
 import { useTextingStatus } from '../components/TextingStatus.js';
+import { NeedsSignal, useOnline } from '../components/NoSignal.jsx';
 import './today.css';
 
 const greeting = () => {
@@ -99,6 +100,7 @@ function SampleCard({ onToast }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [already, setAlready] = useState(false);
+  const online = useOnline();
 
   const load = async () => {
     setBusy(true);
@@ -126,11 +128,12 @@ function SampleCard({ onToast }) {
     <section className="card today-sample" aria-label="Sample data">
       <p className="today-sample-lede">Try it with 52 made-up Surrey voters.</p>
       <div className="today-actions">
-        <button type="button" className="btn btn-primary today-tap" onClick={load} disabled={busy}>
+        <button type="button" className="btn btn-primary today-tap" onClick={load} disabled={busy || !online}>
           {busy ? 'Loading…' : 'Load sample data'}
         </button>
         <Link to="/people/import" className="btn btn-quiet today-tap">Import your list</Link>
       </div>
+      {!online && <NeedsSignal>Needs signal</NeedsSignal>}
       {error && <p className="error" role="alert">{error}</p>}
       {already && (
         <>

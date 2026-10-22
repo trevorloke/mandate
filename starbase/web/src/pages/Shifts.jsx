@@ -42,7 +42,7 @@ import { VOLUNTEER_ROLES, SHIFT_STATUSES } from '@starbase/shared/canvass';
 import { apiGet, action } from '../api.js';
 import { queueAction, undoQueued, useOutbox } from '../offline.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
-import { NeedsSignal, useOnline } from '../components/NoSignal.jsx';
+import { NeedsSignal, NeedsSignalLine, useOnline } from '../components/NoSignal.jsx';
 import './shifts.css';
 
 // This phone's own "Count me in" / "Can't make it" still waiting to send, by shift.
@@ -578,6 +578,7 @@ function ShiftList({ canDesk, me }) {
   useKeepCopy(me, 'shifts', shifts);
   const listCopy = showingCopy(shifts);
   const outbox = useOutbox();
+  const online = useOnline();
   const all = shifts.data?.shifts ?? [];
   // s.mine is the answer; the email lookup runs only for a server without it.
   const legacy = !canDesk && shifts.isSuccess && all.some((s) => typeof s.mine !== 'boolean');
@@ -596,11 +597,12 @@ function ShiftList({ canDesk, me }) {
       <div className="ops-head">
         <h1>Shifts</h1>
         {canDesk && !showNew && (
-          <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>
+          <button type="button" className="btn btn-primary ops-tap" disabled={!online} onClick={() => setParams({ new: '1' })}>
             New shift
           </button>
         )}
       </div>
+      {canDesk && !showNew && !online && <NeedsSignalLine>New shifts need signal</NeedsSignalLine>}
 
       {showNew && <ShiftForm onClose={() => setParams({})} />}
 
@@ -905,10 +907,13 @@ function ShiftDetail({ id, canDesk, me }) {
   const addBlock = (isPrimary) => (
     <div className="ops-add" data-primary={isPrimary ? '' : undefined}>
       {!adding ? (
-        <button type="button" className={`btn ops-tap${isPrimary ? ' ops-wide' : ''}${isPrimary && !confirming ? ' btn-primary' : ''}`}
-          onClick={() => { setAdding(true); setAdded(null); setAddError(null); }}>
-          + Add volunteer
-        </button>
+        <>
+          <button type="button" className={`btn ops-tap${isPrimary ? ' ops-wide' : ''}${isPrimary && !confirming ? ' btn-primary' : ''}`}
+            disabled={!online} onClick={() => { setAdding(true); setAdded(null); setAddError(null); }}>
+            + Add volunteer
+          </button>
+          {!online && <NeedsSignal>Needs signal</NeedsSignal>}
+        </>
       ) : (
         <>
           <label htmlFor="shift-add-person" className="eyebrow">Add volunteer</label>

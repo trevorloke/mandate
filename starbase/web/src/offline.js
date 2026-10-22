@@ -26,8 +26,9 @@
 // One FIFO queue — order matters: a person added offline, then knocked, must
 // reach the server in that order — so a new item goes behind anything still
 // waiting, even with signal. Every item carries a client-made id the server
-// dedupes on (contact.log and sign.place: client_id; person.create: id), so a
-// replay after a dropped response is recorded exactly once; shift.join /
+// dedupes on (contact.log, sign.place and person.tag: client_id;
+// person.create: id), so a replay after a dropped response is recorded
+// exactly once; shift.join /
 // shift.leave answer a replay with "already on it" / "not on it" and
 // sign.cancel with "not found", which the replay reads as done. Only network
 // failures queue — a 4xx on the first try is returned as an error, because
@@ -46,14 +47,18 @@ import { action, ApiError } from './api.js';
 // already on the list (every role; the server copies the door's address).
 // relationship.add: someone you know, on My people (its link and person ids
 // are made on the phone, so a replay is the same link).
-export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.addAtDoor', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave', 'relationship.add'];
+// person.tag: tags put on or taken off on a profile at the desk (desk roles;
+// the server dedupes it on client_id, server/ext/deskoffline).
+export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.addAtDoor', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave', 'relationship.add', 'person.tag'];
+// Keyed by a client_id the server dedupes on.
+const CLIENT_KEYED = ['contact.log', 'sign.place', 'person.tag'];
 // The writes that add a person, on an id made here.
 export const NEW_PERSON = ['person.create', 'person.addAtDoor'];
 // What can be taken back while it waits: a sign request (its cancel is
 // sign.cancel) and "Count me in" (shift.leave).
 const UNDOABLE = ['sign.place', 'shift.join'];
 // The person an item is about (a knock, a pin, a sign request).
-const personOf = (it) => (it.name === 'person.locate' ? it.input?.id : it.input?.person_id) || null;
+const personOf = (it) => (it.name === 'person.locate' || it.name === 'person.tag' ? it.input?.id : it.input?.person_id) || null;
 // Kept on an item about someone this phone added, whose adding was refused.
 const NOT_ADDED = { status: 400, code: 'not_added', message: 'Not saved — this person wasn’t added' };
 
@@ -163,11 +168,11 @@ export function clearOutbox() {
 // The id the server dedupes on, made here so a replay is the same write.
 const withClientId = (name, input) => {
   if (NEW_PERSON.includes(name)) return input.id ? input : { ...input, id: newClientId() };
-  if (name === 'contact.log' || name === 'sign.place') return input.client_id ? input : { ...input, client_id: newClientId() };
+  if (CLIENT_KEYED.includes(name)) return input.client_id ? input : { ...input, client_id: newClientId() };
   return input;
 };
 const cidOf = (name, input) => (NEW_PERSON.includes(name) ? input.id
-  : name === 'contact.log' || name === 'sign.place' ? input.client_id : newClientId());
+  : CLIENT_KEYED.includes(name) ? input.client_id : newClientId());
 
 // A replay of something the server already did answers "already": that IS done.
 const alreadyDone = (name, err) => err instanceof ApiError && (
@@ -383,6 +388,22 @@ export function refusedText(item) {
 }
 
 const SIGN_WORD = Object.fromEntries(SIGN_KINDS.map((s) => [s.code, s.label]));
+// "Tag · Media", "Tag off · VIP", "Tags · Media, Host" — tags in words, as
+// People shows them ("donor-prospect" → "Donor prospect"; "VIP" stays).
+const tagSay = (t) => {
+  const v = String(t ?? '').trim();
+  if (!v || v === v.toUpperCase()) return v;
+  const w = v.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+};
+const tagChangeText = (i) => {
+  const add = (i.add || []).map(tagSay);
+  const off = (i.remove || []).map(tagSay);
+  const parts = [];
+  if (add.length) parts.push(`${add.length > 1 ? 'Tags' : 'Tag'} · ${add.join(', ')}`);
+  if (off.length) parts.push(`${off.length > 1 ? 'Tags off' : 'Tag off'} · ${off.join(', ')}`);
+  return parts.join(' · ') || 'Tags';
+};
 const CHANNEL_WORD = { door: 'Knock', phone: 'Call', text: 'Text', in_person: 'Talk' };
 // "2:14 pm" today, "Oct 18" before that — the phone's own clock.
 export const clockText = (iso) => {
@@ -398,7 +419,7 @@ export const clockText = (iso) => {
 // nameOf(personId) fills in a name the item didn't keep.
 export function itemText(item, nameOf = () => '') {
   const i = item.input || {};
-  const who = item.meta?.who || (i.person_id ? nameOf(i.person_id) : '') || (item.name === 'person.locate' ? nameOf(i.id) : '');
+  const who = item.meta?.who || (i.person_id ? nameOf(i.person_id) : '') || (item.name === 'person.locate' || item.name === 'person.tag' ? nameOf(i.id) : '');
   let what;
   switch (item.name) {
     case 'contact.log':
@@ -412,6 +433,7 @@ export function itemText(item, nameOf = () => '') {
     case 'shift.join': what = item.undo ? 'Count me in · undo' : 'Count me in'; break;
     case 'shift.leave': what = 'Can’t make it'; break;
     case 'relationship.add': what = 'Someone you know'; break;
+    case 'person.tag': what = tagChangeText(i); break;
     default: what = 'Saved';
   }
   const name = NEW_PERSON.includes(item.name) ? i.name : item.name === 'relationship.add' ? i.person?.name || who : who;
@@ -514,4 +536,37 @@ export function applyOutbox(data, items = visible) {
     }
   }
   return { ...data, persons, signs, unlocated };
+}
+
+// ── A profile with what's still on this device laid over it ──
+// The desk's safe writes with no signal (pages/Person.jsx): a contact or
+// rating (with its note) and tags. pendingAbout(items, id) counts them;
+// applyOutboxToProfile(data) is GET /api/persons/:id as the server will
+// have it once they're sent — the rating, the tags, and each contact at the
+// top of the history marked pending ("Not sent yet").
+const aboutPerson = (it, id) => it.state === 'pending' && (
+  (it.name === 'contact.log' && it.input?.person_id === id) || (it.name === 'person.tag' && it.input?.id === id));
+export const pendingAbout = (items = visible, id) => (id ? items.filter((it) => aboutPerson(it, id)).length : 0);
+export function applyOutboxToProfile(data, items = visible) {
+  const id = data?.person?.id;
+  const mine = id ? items.filter((it) => aboutPerson(it, id)) : [];
+  if (!mine.length) return data;
+  const person = { ...data.person };
+  const contacts = [...(data.contacts || [])];
+  for (const it of mine) {
+    const i = it.input || {};
+    if (it.name === 'contact.log') {
+      contacts.unshift({
+        id: `pending:${it.cid}`, channel: i.channel, outcome: i.outcome, rating: i.rating || null,
+        note: i.note || null, created_at: it.at, by_name: null, pending: true,
+      });
+      if (i.rating) { person.rating = i.rating; person.rated_at = it.at; }
+    } else {
+      const off = new Set(i.remove || []);
+      const tags = (Array.isArray(person.tags) ? person.tags : []).filter((t) => !off.has(t));
+      for (const t of i.add || []) if (!tags.includes(t)) tags.push(t);
+      person.tags = tags;
+    }
+  }
+  return { ...data, person, contacts };
 }
