@@ -38,7 +38,10 @@ export function useMyPeople(me) {
   const q = useQuery({
     queryKey: MINE_KEY,
     queryFn: () => apiGet('/relationships/mine'),
+    // The phone's copy stands in for no signal only: it counts as old, so
+    // with signal the server is always asked first (a removal elsewhere).
     ...phoneCopy(me, MINE_COPY),
+    initialDataUpdatedAt: 0,
   });
   useKeepCopy(me, MINE_COPY, q);
   return q;

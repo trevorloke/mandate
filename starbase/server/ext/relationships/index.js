@@ -20,19 +20,17 @@ export { actions } from './actions.js';
 export { api } from './api.js';
 import { myPeopleCount } from './api.js';
 
-// Today: the in-person talks of the last 7 days (the core counts doors,
-// calls and texts; field.week already counts every contact, these too), and
-// how many people the signed-in person knows ("My people · 6").
+// Today: the in-person talks of the last 7 days — inPerson: { week, mine }
+// beside the core's field counts (doors, calls, texts; field.week already
+// counts every contact, these too) — and how many people the signed-in
+// person knows (myPeople: "My people · 6").
 const brief = async (db, ctx, body) => {
-  if (body?.field) {
-    const r = (await db.query(
-      `select count(*)::int as n, (count(*) filter (where created_by = $2))::int as mine from contacts
-       where workspace_id = $1 and channel = 'in_person' and created_at >= now() - interval '7 days'`,
-      [ctx.workspaceId, ctx.user.id],
-    )).rows[0];
-    body.field.inPerson = r.n;
-    if (body.field.mine) body.field.mine.inPerson = r.mine;
-  }
+  const r = (await db.query(
+    `select count(*)::int as n, (count(*) filter (where created_by = $2))::int as mine from contacts
+     where workspace_id = $1 and channel = 'in_person' and created_at >= now() - interval '7 days'`,
+    [ctx.workspaceId, ctx.user.id],
+  )).rows[0];
+  body.inPerson = { week: r.n, mine: r.mine };
   body.myPeople = await myPeopleCount(db, ctx);
 };
 

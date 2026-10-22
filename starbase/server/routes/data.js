@@ -410,6 +410,7 @@ const legacySampleIds = async (tx, W, marks) => {
     gifts: await created('gifts'),
     assignments: await created('shift_assignments'),
     subscriptions: await created('subscriptions', ` and source = 'sample'`),
+    relationships: await created('relationships'),
     signs: marks.signIds,
     shifts: marks.shiftIds,
     petitions: marks.petitionIds,

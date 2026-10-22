@@ -737,7 +737,7 @@ function VolunteerToday({ b, me }) {
       <More>
         <MineLine you={mine.calls} team={f.calls} noun="call" small />
         <MineLine you={mine.texts} team={f.texts} noun="text" small />
-        {Number(f.inPerson) > 0 && <MineLine you={mine.inPerson} team={f.inPerson} noun="in-person talk" small />}
+        {Number(b.inPerson?.week) > 0 && <MineLine you={b.inPerson.mine} team={b.inPerson.week} noun="in-person talk" small />}
         {/* Always here, signs waiting or not: the sign crew's way to Add a sign. */}
         <ul className="today-rows">
           <LinkRow to="/signs" main="Signs" />
@@ -810,7 +810,7 @@ function DeskToday({ b, me, toast }) {
       <More>
         <p className="today-fieldline mono">
           This week: {num(f.calls)} {plural(Number(f.calls) || 0, 'call')} · {num(f.texts)} {plural(Number(f.texts) || 0, 'text')}
-          {Number(f.inPerson) > 0 && <> · {num(f.inPerson)} in person</>}
+          {Number(b.inPerson?.week) > 0 && <> · {num(b.inPerson.week)} in person</>}
           {b.money && <> · {fmtMoney(b.money.weekCents)} raised</>}
         </p>
         <p className="today-fieldline mono">
