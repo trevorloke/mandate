@@ -150,10 +150,13 @@ test('answers ride along with contact.log, checked against their question', asyn
   assert.equal(ben.contacts[0].outcome, 'contacted');
 });
 
-test('an answer that does not fit refuses the whole knock — nothing half-saved', async () => {
+test('an answer that no longer fits is left out on its own — the knock and the other answers are kept', async () => {
   const db = await getDb();
   const count = async () => (await db.query('select count(*)::int as n from contacts where workspace_id = $1', [ws])).rows[0].n;
-  const n0 = await count();
+  const gus = await desk.createPerson('Gus Example', { phone: '604-555-0117' });
+  // A question of its own survey, so the main survey's results stay as they are.
+  const side = ok(await desk.action('survey.create', { name: `Side ${tag}`, context: 'door' })).survey;
+  const sideQ = ok(await desk.action('survey.question.add', { survey_id: side.id, kind: 'yesno', text: 'Side?' })).question;
   const bad = [
     [{ question_id: Q.choice.id, value: 'Pizza' }, 'not one of the choices'],
     [{ question_id: Q.choice.id, value: ['Transit'] }, 'one choice is one string'],
@@ -164,25 +167,67 @@ test('an answer that does not fit refuses the whole knock — nothing half-saved
     [{ question_id: Q.scale.id, value: 2.5 }, 'scale is whole'],
     [{ question_id: Q.text.id, value: '   ' }, 'an empty short answer'],
     [{ question_id: Q.text.id, value: 'x'.repeat(501) }, 'short answers are short'],
-    [{ question_id: P.ana.id, value: 'Transit' }, 'not a question'],
   ];
+  const n0 = await count();
   for (const [answer, why] of bad) {
-    const r = await desk.action('contact.log', { person_id: P.cy.id, channel: 'door', outcome: 'contacted', rating: '2', answers: [answer] });
-    assert.equal(r.status, 400, why);
+    const r = ok(await vol.action('contact.log', { person_id: gus.id, channel: 'door', outcome: 'contacted', rating: '2', answers: [answer] }), why);
+    assert.equal(r.answers_saved, 0, why);
+    assert.deepEqual(r.answers_skipped.map((a) => a.question_id), [answer.question_id], why);
+    assert.ok(r.answers_skipped[0].question, 'the reply names the question');
   }
+  assert.equal(await count(), n0 + bad.length, 'every knock was kept');
+  assert.equal(ok(await desk.get(`/api/persons/${gus.id}`)).person.rating, '2', 'and its rating');
+  assert.equal(ok(await desk.get(`/api/persons/${gus.id}/answers`)).answers.length, 0, 'no answer that did not fit was stored');
+
+  // One that fits and one that doesn't: the one that fits is stored.
+  const mixed = ok(await vol.action('contact.log', {
+    person_id: gus.id, channel: 'door', outcome: 'contacted', rating: '3',
+    answers: [{ question_id: sideQ.id, value: true }, { question_id: Q.scale.id, value: 9 }],
+  }));
+  assert.equal(mixed.answers_saved, 1);
+  assert.deepEqual(mixed.answers_skipped, [{ question_id: Q.scale.id, question: Q.scale.text }]);
+  assert.deepEqual(ok(await desk.get(`/api/persons/${gus.id}/answers`)).answers.map((a) => [a.question_id, a.says]), [[sideQ.id, 'Yes']]);
+  ok(await desk.action('survey.archive', { id: side.id }));
+
+  // A broken knock is still refused whole: two answers to one question, or
+  // another campaign's question.
+  const n1 = await count();
   const twice = await desk.action('contact.log', {
     person_id: P.cy.id, channel: 'door', outcome: 'contacted',
     answers: [{ question_id: Q.yesno.id, value: true }, { question_id: Q.yesno.id, value: false }],
   });
   assert.equal(twice.status, 400, 'one answer per question');
-  assert.equal(await count(), n0, 'no contact was stored for any refused knock');
-  assert.equal(ok(await desk.get(`/api/persons/${P.cy.id}`)).person.rating, null, 'and no rating either');
-
-  // Another campaign's question is not this campaign's.
+  assert.equal((await desk.action('contact.log', {
+    person_id: P.cy.id, channel: 'door', outcome: 'contacted', rating: '2', answers: [{ question_id: P.ana.id, value: 'Transit' }],
+  })).status, 400, 'not a question');
   const os = ok(await other.action('survey.create', { name: 'Theirs' })).survey;
   const oq = ok(await other.action('survey.question.add', { survey_id: os.id, kind: 'yesno', text: 'Theirs?' })).question;
   const cross = await desk.action('contact.log', { person_id: P.cy.id, channel: 'door', outcome: 'contacted', answers: [{ question_id: oq.id, value: true }] });
   assert.equal(cross.status, 400);
+  assert.equal(await count(), n1, 'no contact was stored for a refused knock');
+  assert.equal(ok(await desk.get(`/api/persons/${P.cy.id}`)).person.rating, null, 'and no rating either');
+});
+
+test('a question changed while a knock waited on a phone: the knock lands, only that answer is left out', async () => {
+  const s3 = ok(await desk.action('survey.create', { name: `Changed ${tag}`, context: 'door', active: false })).survey;
+  const pick = ok(await desk.action('survey.question.add', { survey_id: s3.id, kind: 'choice', text: 'Pick one', options: ['Housing', 'Transit'] })).question;
+  const keep = ok(await desk.action('survey.question.add', { survey_id: s3.id, kind: 'choice', text: 'Keep one', options: ['Alpha', 'Beta'] })).question;
+  // The phone saved this offline; meanwhile the desk made "Pick one" a 1–5 scale (allowed: off and unanswered).
+  ok(await desk.action('survey.question.update', { id: pick.id, kind: 'scale' }));
+  const ali = await desk.createPerson('Ali Example', { phone: '604-555-0118' });
+  const knock = {
+    person_id: ali.id, channel: 'door', outcome: 'contacted', rating: '2', client_id: 'a11a11a1-0000-4000-8000-00000000a001',
+    answers: [{ question_id: pick.id, value: 'Housing' }, { question_id: keep.id, value: 'Alpha' }],
+  };
+  const r = ok(await vol.action('contact.log', knock), 'the replay is not refused');
+  assert.equal(r.answers_saved, 1);
+  assert.deepEqual(r.answers_skipped, [{ question_id: pick.id, question: 'Pick one' }]);
+  const prof = ok(await desk.get(`/api/persons/${ali.id}`));
+  assert.equal(prof.person.rating, '2', 'the rating landed');
+  assert.equal(prof.contacts.length, 1);
+  assert.deepEqual(ok(await desk.get(`/api/persons/${ali.id}/answers`)).answers.map((a) => a.says), ['Alpha']);
+  assert.equal(ok(await vol.action('contact.log', knock)).duplicate, true, 'and it is still the same knock once');
+  ok(await desk.action('survey.archive', { id: s3.id }));
 });
 
 test('a knock replayed from the outbox stores its answers once', async () => {
@@ -242,7 +287,7 @@ test('results: each person once (latest answer), counts, %, people, short answer
   assert.ok(lines.some((l) => l.startsWith('Ana Example,604-555-0110,ana@example.org,12345 72 Ave') && l.includes(',Housing,')));
 });
 
-test('editing a live question: choices renamed keep older answers valid; kind locked once answered', async () => {
+test('editing a live question: choices renamed keep older answers valid; words and kind locked once answered', async () => {
   ok(await desk.action('survey.question.update', { id: Q.choice.id, options: ['Transit', 'Housing', 'Parks'] }));
   // A knock saved offline before the edit still lands.
   ok(await vol.action('contact.log', {
@@ -254,9 +299,22 @@ test('editing a live question: choices renamed keep older answers valid; kind lo
     ['Transit', 0, false], ['Housing', 1, false], ['Parks', 0, false], ['Safety', 2, true],
   ], 'the old label keeps its bar after the current ones');
   assert.equal((await desk.action('survey.question.update', { id: Q.choice.id, kind: 'text' })).status, 409);
+  // Answered: its words are fixed too — old answers never move under a new question.
+  const reword = await desk.action('survey.question.update', { id: Q.yesno.id, text: 'Would you refuse to vote early?' });
+  assert.equal(reword.status, 409);
+  assert.match(reword.json.error, /add a new question/);
+  assert.equal(ok(await desk.get(`/api/surveys/${S.id}`)).questions.find((q) => q.id === Q.yesno.id).text, 'Will you vote early?');
+  ok(await desk.action('survey.question.update', { id: Q.yesno.id, text: 'Will you vote early?' }), 'the same words are no change');
   const fresh = ok(await desk.action('survey.question.add', { survey_id: S.id, kind: 'yesno', text: 'Fresh?' })).question;
+  ok(await desk.action('survey.question.update', { id: fresh.id, text: 'Fresh, really?' }), 'an unanswered question can be reworded');
+  // While the survey is asked, phones may hold the question for a day: its kind stays.
+  const live = await desk.action('survey.question.update', { id: fresh.id, kind: 'choice', options: ['A', 'B'] });
+  assert.equal(live.status, 409, 'no kind change while the survey is on');
+  assert.match(live.json.error, /turn off Asking now/i);
+  ok(await desk.action('survey.update', { id: S.id, active: false }));
   const changed = ok(await desk.action('survey.question.update', { id: fresh.id, kind: 'choice', options: ['A', 'B'] }));
-  assert.equal(changed.question.kind, 'choice', 'an unanswered question can change kind');
+  assert.equal(changed.question.kind, 'choice', 'an unanswered question of a survey that is off can change kind');
+  ok(await desk.action('survey.update', { id: S.id, active: true }));
   ok(await desk.action('survey.question.remove', { id: fresh.id }));
 
   // A removed question's answers stay; a knock carrying one still lands.
@@ -332,6 +390,85 @@ test('"answered" is one count on the list, the builder and results; any answer f
   assert.equal(b.answered, 1);
   assert.equal(b.locked, true);
   ok(await desk.action('survey.archive', { id: s2.id }));
+});
+
+test('"Save answers", then a rating: one contact for the visit, not two', async () => {
+  const db = await getDb();
+  const sv = ok(await desk.action('survey.create', { name: `Visit ${tag}` })).survey;
+  const sign = ok(await desk.action('survey.question.add', { survey_id: sv.id, kind: 'yesno', text: 'Lawn sign?' })).question;
+  const why = ok(await desk.action('survey.question.add', { survey_id: sv.id, kind: 'text', text: 'Why?' })).question;
+  const hal = await desk.createPerson('Hal Example', { phone: '604-555-0119' });
+  const contactsOf = async (id) => (await db.query(
+    'select id, outcome, rating, note from contacts where workspace_id = $1 and person_id = $2 order by created_at', [ws, id],
+  )).rows;
+  const cid = (n) => `b0b0b0b0-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+  // Save answers: a talked knock with the answers and no rating.
+  const first = ok(await vol.action('contact.log', {
+    person_id: hal.id, channel: 'door', outcome: 'contacted', client_id: cid(1), note: 'Corner lot',
+    answers: [{ question_id: sign.id, value: true }],
+  }));
+  // More answers in the same visit, then the rating: both finish that knock.
+  const more = ok(await vol.action('contact.log', {
+    person_id: hal.id, channel: 'door', outcome: 'contacted', client_id: cid(2), visit_of: cid(1),
+    answers: [{ question_id: why.id, value: 'Likes the bike lanes' }],
+  }));
+  assert.equal(more.amended, true);
+  assert.equal(more.contact.id, first.contact.id);
+  const rated = ok(await vol.action('contact.log', {
+    person_id: hal.id, channel: 'door', outcome: 'contacted', rating: '2', note: 'Call back Sat', client_id: cid(3), visit_of: cid(1),
+  }));
+  assert.equal(rated.amended, true);
+  assert.equal(rated.contact.id, first.contact.id, 'the rating finished the same contact');
+  let rows = await contactsOf(hal.id);
+  assert.equal(rows.length, 1, 'one contact for one visit');
+  assert.deepEqual([rows[0].outcome, rows[0].rating, rows[0].note], ['contacted', '2', 'Corner lot\nCall back Sat']);
+  assert.equal(ok(await desk.get(`/api/persons/${hal.id}`)).person.rating, '2');
+  const answers = ok(await desk.get(`/api/persons/${hal.id}/answers`)).answers;
+  assert.equal(answers.length, 2);
+  assert.ok(answers.every((a) => a.channel === 'door'), 'both answers are on that knock');
+
+  // Replays from the outbox are the same taps, once.
+  for (const n of [1, 2, 3]) {
+    const again = ok(await vol.action('contact.log', {
+      person_id: hal.id, channel: 'door', outcome: 'contacted', client_id: cid(n), visit_of: n > 1 ? cid(1) : undefined,
+      rating: n === 3 ? '2' : undefined, answers: n === 2 ? [{ question_id: why.id, value: 'Likes the bike lanes' }] : undefined,
+    }));
+    assert.equal(again.duplicate, true, `tap ${n}`);
+  }
+  assert.equal((await contactsOf(hal.id)).length, 1);
+  assert.equal(ok(await desk.get(`/api/persons/${hal.id}/answers`)).answers.length, 2, 'no answer stored twice');
+
+  // Once rated, the visit is over: a change of mind is its own contact (as before).
+  ok(await vol.action('contact.log', { person_id: hal.id, channel: 'door', outcome: 'contacted', rating: '1', client_id: cid(4), visit_of: cid(1) }));
+  rows = await contactsOf(hal.id);
+  assert.deepEqual(rows.map((r) => r.rating), ['2', '1']);
+
+  // Only the caller's own unrated knock on the same person and channel is finished.
+  const ivy = await desk.createPerson('Ivy Example', { phone: '604-555-0120' });
+  ok(await vol.action('contact.log', { person_id: ivy.id, channel: 'door', outcome: 'contacted', client_id: cid(5), answers: [{ question_id: sign.id, value: false }] }));
+  const notMine = ok(await desk.action('contact.log', { person_id: ivy.id, channel: 'door', outcome: 'contacted', rating: '3', client_id: cid(6), visit_of: cid(5) }));
+  assert.ok(!notMine.amended, "someone else's knock is not finished by this tap");
+  const otherPerson = ok(await vol.action('contact.log', { person_id: hal.id, channel: 'door', outcome: 'contacted', rating: '3', client_id: cid(7), visit_of: cid(5) }));
+  assert.ok(!otherPerson.amended, 'another person');
+  const byPhone = ok(await vol.action('contact.log', { person_id: ivy.id, channel: 'phone', outcome: 'contacted', rating: '3', client_id: cid(8), visit_of: cid(5) }));
+  assert.ok(!byPhone.amended, 'a call is not the door visit');
+  const unknown = ok(await vol.action('contact.log', { person_id: ivy.id, channel: 'door', outcome: 'no_answer', client_id: cid(9), visit_of: cid(99) }));
+  assert.ok(!unknown.amended, 'a knock that never arrived: this tap is logged on its own');
+  // An outcome finishes the visit too.
+  ok(await vol.action('contact.log', { person_id: ivy.id, channel: 'door', outcome: 'refused', client_id: cid(10), visit_of: cid(5) }));
+  const ivyRows = await contactsOf(ivy.id);
+  assert.equal(ivyRows.length, 4, "Ivy's knock (finished as refused), the desk's, the call, the knock with no first");
+  assert.equal(ivyRows[0].outcome, 'refused');
+
+  // The rating that finished the visit is on the hash chain as an update of that contact.
+  const ev = (await db.query(
+    `select action, op, payload from events where workspace_id = $1 and entity_type = 'contact' and entity_id = $2 order by seq`,
+    [ws, first.contact.id],
+  )).rows;
+  assert.deepEqual(ev.map((e) => [e.action, e.op]), [['contact.log', 'create'], ['contact.log', 'update'], ['contact.log', 'update']]);
+  assert.equal(ev[2].payload.rating, '2');
+  ok(await desk.action('survey.archive', { id: sv.id }));
 });
 
 test('every survey write is on the hash chain', async () => {

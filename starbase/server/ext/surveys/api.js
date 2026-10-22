@@ -152,7 +152,8 @@ api.get('/surveys/:id', async (c) => {
     questions: questions.map((q) => ({
       id: q.id, position: q.position, kind: q.kind, text: q.text, options: q.options,
       answered: counts.get(q.id)?.n || 0,
-      // Any answer at all fixes the kind (survey.question.update refuses a change).
+      // Any answer at all fixes the words and the kind (survey.question.update
+      // refuses a change); while the survey is asked the kind is fixed too.
       locked: (counts.get(q.id)?.total || 0) > 0,
     })),
     turfs,

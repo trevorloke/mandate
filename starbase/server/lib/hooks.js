@@ -7,9 +7,11 @@
 //                                   entityId, op, payload }]. A hook may emit
 //                                   more events with meta.emit(...) and they
 //                                   join the same transaction and chain.
-//   contactLogged(tx, ctx, { contact, input }, emit)
-//                                   after contact.log stores a contact; input
-//                                   carries any extras such as survey answers.
+//   contactLogged(tx, ctx, { contact, input, reply }, emit)
+//                                   after contact.log stores a contact (or
+//                                   finishes the visit's earlier one); input
+//                                   carries any extras such as survey answers;
+//                                   fields put on reply go back to the caller.
 //   brief(db, ctx, brief)           GET /api/brief, just before it is sent:
 //                                   a feature may correct the counts it owns
 //                                   (texts sent through the app, say).

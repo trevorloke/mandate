@@ -10,10 +10,16 @@
 // a door card or switching people loses nothing) until the next contact.log
 // for that person carries them:
 //   const answers = survey.take();          // [{ question_id, value }], draft cleared
-//   logContact({ ..., answers: answers.length ? answers : undefined });
+//   const visitOf = survey.visitOf(channel);
+//   const r = await logContact({ ..., answers: answers.length ? answers : undefined, visit_of: visitOf });
+//   survey.logged(r, { channel, outcome, rating, answers, visitOf });
 //   on a refusal: survey.restore(answers)
 // That is the same outbox as every knock, so answers given with no signal are
-// sent once, later. "Save answers" logs a talked contact with just the answers.
+// sent once, later. "Save answers" logs a talked contact with just the answers;
+// the next tap on that person (a rating, an outcome, more answers) within
+// half an hour finishes that same contact (visit_of) — one record per visit.
+// The server leaves out an answer whose question changed meanwhile and says
+// so (answers_skipped): answersTail / answersSaid word the toast from it.
 //
 // The questions asked here come from GET /api/surveys/active (questions only)
 // and are kept on the phone for a day, so they still show with no signal. A
@@ -32,8 +38,22 @@ const SCALE = [1, 2, 3, 4, 5];
 const YESNO = [{ v: true, label: 'Yes' }, { v: false, label: 'No' }];
 
 export const answersWord = (n) => `${n} ${n === 1 ? 'answer' : 'answers'}`;
-// What a toast adds for answers that went with a tap: " · 2 answers".
-export const answersTail = (list) => (list?.length ? ` · ${answersWord(list.length)}` : '');
+// reply: what contact.log answered (none yet when it's saved on the phone).
+const leftOut = (reply) => reply?.answers_skipped?.length || 0;
+const leftOutText = (n) => `${answersWord(n)} not saved — question changed`;
+// What a toast adds for answers that went with a tap: " · 2 answers",
+// " · 1 answer · 1 answer not saved — question changed".
+export const answersTail = (list, reply) => {
+  const skipped = leftOut(reply);
+  const kept = (list?.length || 0) - skipped;
+  return `${kept > 0 ? ` · ${answersWord(kept)}` : ''}${skipped ? ` · ${leftOutText(skipped)}` : ''}`;
+};
+// The toast for answers on their own: "2 answers saved".
+export const answersSaid = (list, reply) => {
+  const skipped = leftOut(reply);
+  const kept = (list?.length || 0) - skipped;
+  return [kept > 0 ? `${answersWord(kept)} saved` : null, skipped ? leftOutText(skipped) : null].filter(Boolean).join(' · ');
+};
 
 // ── The phone's copy of what to ask ──
 const CACHE_PREFIX = 'starbase:surveys:v1:';
@@ -52,6 +72,7 @@ function writeCache(key, data, at) {
 }
 function forgetAll() {
   drafts.clear();
+  visits.clear();
   bump();
   try {
     for (let i = localStorage.length - 1; i >= 0; i -= 1) {
@@ -104,6 +125,11 @@ const putDraft = (key, patch) => {
   if (Object.keys(next).length) drafts.set(key, next); else drafts.delete(key);
   bump();
 };
+
+// ── Visits: person → the talked knock with no rating yet ("Save answers")
+// that their next tap finishes: { cid, channel, at }, for this sign-in ──
+const visits = new Map();
+const VISIT_MS = 30 * 60 * 1000;
 
 // Is this a whole answer, and what goes to the server for it.
 const answerOf = (q, v) => {
@@ -166,6 +192,27 @@ export function useSurvey({ context, personId, turfId = null, lat = null, lng = 
       if (!personId || !answers.length) return [];
       putDraft(key, Object.fromEntries(answers.map((a) => [a.question_id, undefined])));
       return answers;
+    },
+    // The client_id of this visit's "Save answers" knock, for the next tap here.
+    visitOf: (channel) => {
+      const v = personId ? visits.get(key) : null;
+      if (!v || v.channel !== channel || Date.now() - v.at > VISIT_MS) return undefined;
+      return v.cid;
+    },
+    // After a tap went (sent or saved on the phone): answers with no rating
+    // keep the visit open for its rating; anything else ends it. An answer
+    // left out (its question changed) brings the current questions.
+    logged: (r, { channel, outcome, rating, answers, visitOf }) => {
+      if (!personId || !r) return;
+      const reply = r.queued ? null : r.result;
+      if (leftOut(reply)) queryClient.invalidateQueries({ queryKey: ['surveys-active'] });
+      if (outcome === 'contacted' && !rating && (answers?.length || visitOf)) {
+        // Still the first knock unless the server logged this one on its own.
+        const cid = visitOf && (!reply || reply.amended) ? visitOf : r.client_id;
+        if (cid) visits.set(key, { cid, channel, at: Date.now() });
+      } else {
+        visits.delete(key);
+      }
     },
     // A refused tap: put the answers back (anything typed since stays).
     restore: (list) => {

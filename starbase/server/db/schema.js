@@ -358,6 +358,10 @@ alter table persons add column if not exists rated_at timestamptz;
 alter table gifts add column if not exists cadence text;
 alter table contacts add column if not exists client_id uuid;
 create unique index if not exists contacts_client_idx on contacts (workspace_id, client_id) where client_id is not null;
+-- Later taps of the same visit that finished this contact instead of logging
+-- a second one (contact.log visit_of: "Save answers", then the rating): their
+-- outbox ids, so a replay of one is recognised.
+alter table contacts add column if not exists merged_client_ids jsonb not null default '[]';
 alter table pledges add column if not exists last_received_on date;
 -- The pledge a gift was received for (pledge.receive), so a void can reopen
 -- the pledge and a restore can close it again.

@@ -42,7 +42,7 @@ import { logContact, queueAction, undoQueued } from '../offline.js';
 import { isOffline, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
-import SurveyQuestions, { answersTail, answersWord, useSurvey } from './SurveyQuestions.jsx';
+import SurveyQuestions, { answersSaid, answersTail, useSurvey } from './SurveyQuestions.jsx';
 import '../pages/map.css';
 
 // "Wants a sign?" — one tap files a request (Undo is on the toast). A kind
@@ -366,11 +366,14 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const noteRef = useRef('');
   const setNote = (v) => { noteRef.current = v; setNoteState(v); };
   const latest = useRef(null);
-  useLayoutEffect(() => { latest.current = { sel, channel, toast, refresh, multi }; });
-  const sendNote = async (person, via, text, { toast: say, refresh: reload, multi: many }) => {
+  useLayoutEffect(() => { latest.current = { sel, channel, toast, refresh, multi, survey }; });
+  const sendNote = async (person, via, text, { toast: say, refresh: reload, multi: many, survey: asked }) => {
     const who = many ? `${firstName(person.name)} · ` : '';
+    // After "Save answers" the note joins that same knock.
+    const visitOf = asked?.visitOf(via);
     try {
-      const r = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text }, { who: person.name });
+      const r = await logContact({ person_id: person.id, channel: via, outcome: 'contacted', note: text, visit_of: visitOf }, { who: person.name });
+      asked?.logged(r, { channel: via, outcome: 'contacted', visitOf });
       say(r.queued ? `${who}${queuedText(r, 'Note')}` : `${who}Note saved`);
       if (!r.queued) reload();
     } catch (err) {
@@ -391,7 +394,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     const text = noteRef.current.trim();
     if (text && sel && id !== sel.id) {
       setNote('');
-      sendNote(sel, channel, text, { toast, refresh, multi });
+      sendNote(sel, channel, text, { toast, refresh, multi, survey });
     }
     onSelect(id);
   };
@@ -421,6 +424,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     const sentNote = noteRef.current.trim();
     if (sentNote) setNote('');
     const answers = outcome === 'contacted' && person.id === sel?.id ? survey.take() : [];
+    // After "Save answers" this tap finishes that same knock (one per visit).
+    const visitOf = person.id === sel?.id ? survey.visitOf(via) : undefined;
     try {
       // The outbox: sends now when there's signal, saves on the phone when
       // there isn't (and replays exactly once — the server dedupes on its id).
@@ -431,7 +436,9 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         rating: rating || undefined,
         note: sentNote || undefined,
         answers: answers.length ? answers : undefined,
+        visit_of: visitOf,
       }, { who: person.name });
+      if (person.id === sel?.id) survey.logged(r, { channel: via, outcome, rating, answers, visitOf });
       if (pending) backToDoor(); // the call/text is logged — the next tap is back at the door
       // Append-only: "Change" brings the rating row back; the next tap logs the fix.
       const change = { label: 'Change', onClick: () => focusRating(rateRef.current) };
@@ -448,7 +455,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           ? (via === 'door' ? 'Note saved' : via === 'phone' ? 'Call logged' : 'Text logged')
           : `${OUTCOME_LABEL[outcome]}${via !== 'door' ? ` (${via})` : ''}`;
       const only = answers.length && !rating && !sentNote && via === 'door';
-      toast(`${who}${only ? `${answersWord(answers.length)} saved` : `${what}${answersTail(answers)}`}`, change);
+      toast(`${who}${only ? answersSaid(answers, r.result) : `${what}${answersTail(answers, r.result)}`}`, change);
       refresh();
     } catch (err) {
       // Only a refusal lands here (bad input, no permission) — network

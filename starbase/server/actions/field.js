@@ -84,6 +84,12 @@ export const FIELD_ACTIONS = {
         question_id: uuid(),
         value: z.union([z.string().max(2000), z.number(), z.boolean(), z.array(z.string().max(200)).max(50)]),
       })).max(50).nullish(),
+      // The same visit: the client_id of this caller's earlier talked tap on
+      // this person with no rating yet ("Save answers"). That contact gets
+      // this tap's outcome, rating and note — one record per visit, not two.
+      // If it isn't there (refused, someone else's, already rated), this tap
+      // is logged on its own as usual.
+      visit_of: uuid().nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
       await requirePerson(tx, ctx.workspaceId, input.person_id);
@@ -94,6 +100,39 @@ export const FIELD_ACTIONS = {
           [ctx.workspaceId, input.client_id],
         )).rows[0];
         if (dup) return { contact: dup, duplicate: true };
+      }
+      // A hook (surveys) may add to the reply: answers it had to leave out.
+      const reply = {};
+      if (input.visit_of && input.visit_of !== input.client_id) {
+        const first = (await tx.query(
+          `select id, person_id, channel, outcome, rating, note, created_by, merged_client_ids from contacts
+           where workspace_id = $1 and client_id = $2 for update`,
+          [ctx.workspaceId, input.visit_of],
+        )).rows[0];
+        const merged = first ? (typeof first.merged_client_ids === 'string' ? JSON.parse(first.merged_client_ids) : first.merged_client_ids || []) : [];
+        const mine = first && first.person_id === input.person_id && first.created_by === ctx.user.id && first.channel === input.channel;
+        // This tap was already merged into it (a replay): the same tap, once.
+        if (mine && input.client_id && merged.includes(input.client_id)) {
+          return { contact: { id: first.id, person_id: first.person_id, channel: first.channel, outcome: first.outcome, rating: first.rating, note: first.note }, duplicate: true };
+        }
+        if (mine && first.outcome === 'contacted' && first.rating == null) {
+          const note = [first.note, input.note].filter(Boolean).join('\n') || null;
+          await tx.query(
+            `update contacts set outcome = $3, rating = $4, note = $5, merged_client_ids = $6 where id = $1 and workspace_id = $2`,
+            [first.id, ctx.workspaceId, input.outcome, input.rating || null, note,
+             JSON.stringify(input.client_id ? [...merged, input.client_id] : merged)],
+          );
+          if (input.rating) {
+            await tx.query(
+              'update persons set rating = $3, rated_at = now(), updated_at = now() where id = $1 and workspace_id = $2',
+              [input.person_id, ctx.workspaceId, input.rating],
+            );
+          }
+          const payload = { id: first.id, ...input, note };
+          emit('contact', first.id, 'update', payload);
+          await runHooks('contactLogged', tx, ctx, { contact: { id: first.id, ...input }, input, reply }, emit);
+          return { contact: payload, amended: true, ...reply };
+        }
       }
       const id = newId();
       await tx.query(
@@ -110,8 +149,8 @@ export const FIELD_ACTIONS = {
       }
       const payload = { id, ...input };
       emit('contact', id, 'create', payload);
-      await runHooks('contactLogged', tx, ctx, { contact: { id, ...input }, input }, emit);
-      return { contact: payload };
+      await runHooks('contactLogged', tx, ctx, { contact: { id, ...input }, input, reply }, emit);
+      return { contact: payload, ...reply };
     },
   },
 

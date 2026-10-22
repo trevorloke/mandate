@@ -18,7 +18,9 @@
 //                        sent by that sign-in — never as someone else's.
 //   applyOutbox(doors) → the map's /api/map/doors payload with what's still on
 //                        the phone laid over it (new people, pins, signs, ratings).
-//   onOutboxSent(fn)   → told about each item once the server has it.
+//   onOutboxSent(fn)   → told about each item once the server has it
+//                        ({ name, input, meta, result, later }; later: sent from
+//                        the phone after the tap, not while the screen waited).
 //
 // One FIFO queue — order matters: a person added offline, then knocked, must
 // reach the server in that order — so a new item goes behind anything still
@@ -169,9 +171,9 @@ async function send(item, { replay }) {
   }
 }
 
-const told = (item, result) => {
+const told = (item, result, later = false) => {
   for (const fn of sentListeners) {
-    try { fn({ name: item.name, input: item.input, meta: item.meta, result }); } catch { /* a listener's bug is not the outbox's */ }
+    try { fn({ name: item.name, input: item.input, meta: item.meta, result, later }); } catch { /* a listener's bug is not the outbox's */ }
   }
 };
 export function onOutboxSent(fn) {
@@ -239,14 +241,14 @@ async function runFlush() {
       // even while it was on its way just now: the request lands, then its
       // cancel goes straight after.
       if (next.name === 'sign.place' && find(next.cid)?.undo && result?.sign?.id) {
-        told(next, result);
+        told(next, result, true);
         done = { ...next, name: 'sign.cancel', input: { id: result.sign.id }, undo: false, tries: 1 };
         update(next.cid, done);
         result = await send(done, { replay: true });
       }
       keep(next.cid, result);
       remove(next.cid);
-      told(done, result);
+      told(done, result, true);
       sent += 1;
     } catch (err) {
       if (isNetworkFailure(err)) { lastError = 'Still offline — will retry'; break; }

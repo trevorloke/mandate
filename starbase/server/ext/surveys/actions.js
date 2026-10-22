@@ -6,7 +6,10 @@
 //   survey.update            { id, name?, context?, turf_ids?, active? }
 //   survey.archive           { id, restore? }   restore: true brings it back (off)
 //   survey.question.add      { survey_id, kind, text, options? }
-//   survey.question.update   { id, text?, kind?, options? }   kind only while unanswered
+//   survey.question.update   { id, text?, kind?, options? }
+//                            text and kind only while unanswered (answers keep
+//                            the words they were given to); kind only while the
+//                            survey is off too (phones keep questions a day)
 //   survey.question.reorder  { survey_id, ids }  every question, in the new order
 //   survey.question.remove   { id }
 import { z } from 'zod';
@@ -196,8 +199,16 @@ export const actions = {
       const { id, ...patch } = input;
       const cur = await loadQuestion(tx, ctx, id);
       const kind = patch.kind ?? cur.kind;
-      if (kind !== cur.kind && await answeredCount(tx, ctx, id) > 0) {
+      const text = patch.text ?? cur.text;
+      // Rewording an answered question would put its answers under words
+      // nobody was asked; a new kind would make them unreadable.
+      if ((kind !== cur.kind || text !== cur.text) && await answeredCount(tx, ctx, id) > 0) {
         throw httpError(409, 'this question has answers — add a new question instead');
+      }
+      // Phones keep the questions for a day, so a survey being asked keeps
+      // each question's kind: answers already on their way still fit.
+      if (kind !== cur.kind && (await loadSurvey(tx, ctx, cur.survey_id)).active) {
+        throw httpError(409, 'turn off Asking now to change the kind — or add a new question');
       }
       const old = parseJ(cur.options, []);
       const opts = patch.options !== undefined || kind !== cur.kind
@@ -206,7 +217,6 @@ export const actions = {
       // Labels taken off stay valid for answers already on their way.
       const retired = [...new Set([...parseJ(cur.retired_options, []), ...old.filter((o) => !opts.includes(o))])]
         .filter((o) => !opts.includes(o));
-      const text = patch.text ?? cur.text;
       await tx.query(
         `update survey_questions set text = $3, kind = $4, options = $5, retired_options = $6, updated_at = now()
          where id = $1 and workspace_id = $2`,

@@ -119,6 +119,7 @@
 .sv-big strong { font-size: 40px; color: var(--text-1); margin-right: 6px; }
 .sv-res { padding: var(--s-4); }
 .sv-res__q { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.sv-res__ends { margin: 2px 0 0; font-size: 13px; color: var(--text-2); }
 .sv-res__n { margin: 2px 0 var(--s-3); font-size: 12px; color: var(--text-3); }
 .sv-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-3); }
 .sv-bar { display: flex; flex-direction: column; gap: 4px; }
@@ -128,11 +129,11 @@
 .sv-bar__n strong { color: var(--text-1); font-size: 15px; }
 .sv-bar__track { display: block; height: 10px; background: var(--paper-2); border-radius: 999px; overflow: hidden; }
 .sv-bar__fill { display: block; height: 100%; background: var(--ink); border-radius: 999px; }
-.disclose.sv-bar__see { min-height: 44px; font-size: 14px; font-weight: 500; padding: 0; }
+.disclose.sv-bar__see { min-height: 48px; font-size: 14px; font-weight: 500; padding: 0; }
 .sv-people { list-style: none; margin: 0 0 var(--s-1); padding: 0; }
 .sv-people li { border-bottom: 1px solid var(--rule); }
 .sv-people li:last-child { border-bottom: 0; }
-.sv-people a { display: flex; align-items: center; min-height: 44px; text-decoration: none; overflow-wrap: anywhere; }
+.sv-people a { display: flex; align-items: center; min-height: 48px; text-decoration: none; overflow-wrap: anywhere; }
 @media (hover: hover) { .sv-people a:hover { text-decoration: underline; } }
 .sv-people__more { padding: var(--s-2) 0; font-size: 13px; }
 .sv-texts { list-style: none; margin: 0; padding: 0; }

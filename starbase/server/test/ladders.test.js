@@ -577,6 +577,16 @@ test('each trigger: volunteer page, RSVP, first donation only, a 1 or 2 from a v
   const three = await mgr.createPerson('Tre Undecided');
   await v.action('contact.log', { person_id: three.id, channel: 'phone', outcome: 'contacted', rating: '3' });
   assert.equal(await runOf(rated.id, three.id), undefined, 'a 3 is not a yes');
+  // A talked knock first ("Save answers"), then the 1 that finishes that same visit: on the ladder too.
+  const vee = await mgr.createPerson('Vee Visit', { address: '12390 72 Ave' });
+  const first = 'cafe0000-0000-4000-8000-0000000000a1';
+  assert.equal((await v.action('contact.log', { person_id: vee.id, channel: 'door', outcome: 'contacted', client_id: first })).status, 200);
+  assert.equal(await runOf(rated.id, vee.id), undefined, 'no rating yet');
+  const fin = await v.action('contact.log', {
+    person_id: vee.id, channel: 'door', outcome: 'contacted', rating: '1', client_id: 'cafe0000-0000-4000-8000-0000000000a2', visit_of: first,
+  });
+  assert.equal(fin.json.amended, true);
+  assert.ok(await runOf(rated.id, vee.id), 'the rating that finished the visit counts');
 
   // An import with a tag starts nothing.
   const imp = await mgr.post('/api/data/import', { rows: [{ name: 'Ivy Import', email: mail('ivy') }], tag: 'imported' });

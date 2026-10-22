@@ -82,6 +82,12 @@ function useOnline() {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// "Ali Hassan · 1 answer not saved — question changed" (the field toasts' words).
+const leftOutLine = (who, result) => {
+  const n = result?.answers_skipped?.length || 0;
+  return n ? `${who ? `${who} · ` : ''}${n} ${n === 1 ? 'answer' : 'answers'} not saved — question changed` : null;
+};
+
 function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice }) {
   const { pending, refused, flushing, lastError } = outbox;
   const [open, setOpen] = useState(false);
@@ -257,6 +263,9 @@ function SignedInShell({ me }) {
   const outboxRef = useRef(outbox);
   outboxRef.current = outbox;
   const [notice, setNotice] = useState(null);
+  // A knock sent later from the phone whose answer the server left out (its
+  // question changed meanwhile): said once, until dismissed.
+  const [leftOut, setLeftOut] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
   const [confirmLeft, setConfirmLeft] = useState(0);
   const cancelSignOut = useCallback(() => setConfirmLeft(0), []);
@@ -309,6 +318,11 @@ function SignedInShell({ me }) {
     }
     return '';
   }, [queryClient]);
+  // A knock sent from the phone after the tap: an answer the server left out is said here.
+  useEffect(() => onOutboxSent(({ name, input, meta, result, later }) => {
+    const line = later && name === 'contact.log' ? leftOutLine(meta?.who || nameOf(input?.person_id), result) : null;
+    if (line) setLeftOut(line);
+  }), [nameOf]);
 
   // Queued field work is sent under whoever is signed in when it goes out,
   // so it must leave before this person signs out — never with the next one.
@@ -384,8 +398,8 @@ function SignedInShell({ me }) {
           onSend={sendNow}
           onRetry={retry}
           nameOf={nameOf}
-          notice={notice}
-          onDismissNotice={() => setNotice(null)}
+          notice={notice || leftOut}
+          onDismissNotice={() => { setNotice(null); setLeftOut(null); }}
         />
       </header>
       <main className="page">

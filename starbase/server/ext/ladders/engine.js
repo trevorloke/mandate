@@ -194,7 +194,8 @@ const factsOf = async (tx, meta, events, kinds) => {
       add(p.person_id, 'rsvp', p.event_id);
     } else if (e.entityType === 'gift' && e.op === 'create' && p.person_id) {
       if (kinds.has('donation') && await firstGift(tx, ws, p.person_id, e.entityId)) add(p.person_id, 'donation');
-    } else if (e.entityType === 'contact' && e.op === 'create' && YES_RATINGS.has(String(p.rating))) {
+    } else if (e.entityType === 'contact' && (e.op === 'create' || e.op === 'update') && YES_RATINGS.has(String(p.rating))) {
+      // update: a rating that finished the visit's "Save answers" contact.
       add(p.person_id, 'rating');
     }
   }

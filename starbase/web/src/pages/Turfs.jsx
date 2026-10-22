@@ -33,7 +33,7 @@ import { AddPersonInline, SIGN_LABEL, SignAsk, signCancelOffered } from '../comp
 import RatingButtons, {
   More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
 } from '../components/RatingButtons.jsx';
-import SurveyQuestions, { answersTail, answersWord, useSurvey } from '../components/SurveyQuestions.jsx';
+import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import './turfs.css';
 
 const DESK_ROLES = ['manager', 'treasurer', 'staff'];
@@ -577,12 +577,13 @@ function WalkList({ id }) {
   // toast's "Change" reopens it); a household with someone still to rate
   // stays open. A note in the box goes with the tap (and is cleared at once,
   // so it can't be sent twice).
-  const log = async (person, outcome, rating = null, { quiet = false, batch = false, door = null, answers = null } = {}) => {
+  const log = async (person, outcome, rating = null, { quiet = false, batch = false, door = null, answers = null, visitOf = null } = {}) => {
     const note = (notesRef.current[person.id] || '').trim();
     const input = { person_id: person.id, channel: 'door', outcome };
     if (rating) input.rating = rating;
     if (note) { input.note = note; setNote(person.id, ''); }
     if (answers?.length) input.answers = answers; // survey answers (the door's "Questions")
+    if (visitOf) input.visit_of = visitOf; // finishes this visit's "Save answers" knock
     setBusyKey(person.id, true);
     try {
       const r = await logContact(input, { who: person.name });
@@ -614,11 +615,11 @@ function WalkList({ id }) {
         const what = rating
           ? `Rated ${ratingText(rating)}`
           : outcome === 'contacted' ? 'Note saved' : OUTCOME_LABEL[outcome];
-        const said = answers?.length && !rating && !note ? `${answersWord(answers.length)} saved` : `${what}${answersTail(answers)}`;
+        const said = answers?.length && !rating && !note ? answersSaid(answers, r.result) : `${what}${answersTail(answers, r.result)}`;
         toast(r.queued ? `${queuedText(r)}${answersTail(answers)}` : `${who}${said}`, { tone: r.queued ? 'queued' : 'ok', act });
       }
       if (!r.queued && !batch) refresh();
-      return { ok: true, queued: r.queued, signedOut: r.signedOut };
+      return { ok: true, queued: r.queued, signedOut: r.signedOut, client_id: r.client_id, result: r.result };
     } catch (err) {
       if (note && !notesRef.current[person.id]) setNote(person.id, note);
       toast(`Not saved — ${err.message}`, { tone: 'error' });
@@ -856,7 +857,7 @@ function WalkList({ id }) {
               notes={notes}
               setNote={setNote}
               onNoteFocus={hideToast}
-              onLog={(p, outcome, rating = null, answers = null) => log(p, outcome, rating, { door: d, answers })}
+              onLog={(p, outcome, rating = null, answers = null, visitOf = null) => log(p, outcome, rating, { door: d, answers, visitOf })}
               onNobodyHome={() => nobodyHome(d)}
               onSign={(p, kind) => askSign(d, p, kind)}
               onAdded={(person) => personAdded(d, person)}
@@ -905,11 +906,15 @@ function Door({
   // The active survey's questions: answers go with a "talked" tap; a refused tap puts them back.
   const { id: turfId } = useParams();
   const survey = useSurvey({ context: 'door', personId: sel?.id, turfId, lat: door.lat, lng: door.lng });
-  const talk = async (p, rating = null) => {
-    const answers = survey.take();
-    const r = await onLog(p, 'contacted', rating, answers);
-    if (!r?.ok) survey.restore(answers);
+  // After "Save answers", the next tap on that person finishes the same knock.
+  const tap = async (p, outcome, rating = null) => {
+    const answers = outcome === 'contacted' ? survey.take() : [];
+    const visitOf = survey.visitOf('door');
+    const r = await onLog(p, outcome, rating, answers, visitOf);
+    if (!r?.ok) { survey.restore(answers); return; }
+    survey.logged(r, { channel: 'door', outcome, rating, answers, visitOf });
   };
+  const talk = (p, rating = null) => tap(p, 'contacted', rating);
   // Profile: the profile's back link reads `from` ("← Walk list"), and this
   // list's own history entry remembers the door, so coming back opens it again.
   const here = `${location.pathname}${location.search}`;
@@ -972,7 +977,7 @@ function Door({
           <OutcomeButtons
             items={DOOR_OUTCOMES}
             disabled={doorBusy}
-            onPick={(code) => (code === NOBODY ? onNobodyHome() : onLog(sel, code))}
+            onPick={(code) => (code === NOBODY ? onNobodyHome() : tap(sel, code))}
           />
           <SurveyQuestions key={`questions-${sel.id}`} survey={survey} disabled={Boolean(busy[sel.id] || busy[door.key])} onSave={() => talk(sel)} />
           <More id={`walk-more-${index}`} open={more} onToggle={() => setMore((m) => !m)}>
@@ -997,7 +1002,7 @@ function Door({
                 </button>
               )}
               {multi && (
-                <button type="button" className="btn walk-act" disabled={Boolean(busy[sel.id])} onClick={() => onLog(sel, 'no_answer')}>
+                <button type="button" className="btn walk-act" disabled={Boolean(busy[sel.id])} onClick={() => tap(sel, 'no_answer')}>
                   No answer · {firstName(sel.name)} only
                 </button>
               )}

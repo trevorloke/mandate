@@ -8,12 +8,15 @@
 //   text     a short answer                value: "Wants a bike lane on 72 Ave"
 //
 // An answer is stored only if its question is in the caller's workspace and
-// the value fits the question; anything else refuses the whole contact
-// (400), so a screen never says "saved" for an answer that wasn't. Answers to
-// a question that has since been removed, or a survey since turned off or
-// archived, are still kept: the person really said it (a knock saved offline
-// can arrive after the desk's edit). Choice labels taken off a question stay
-// valid for the same reason (retired_options).
+// the value fits the question. A question from elsewhere refuses the whole
+// contact (400). An answer that no longer fits its question (a phone kept the
+// questions for a day; the desk changed one meanwhile) is left out on its
+// own: the knock and every other answer are kept, and the reply says which
+// were left out (answers_skipped) so the screen never says "saved" for them.
+// Answers to a question that has since been removed, or a survey since turned
+// off or archived, are still kept: the person really said it (a knock saved
+// offline can arrive after the desk's edit). Choice labels taken off a
+// question stay valid for the same reason (retired_options).
 import { newId } from '../../lib/events.js';
 import { httpError } from '../../actions/util.js';
 
@@ -60,7 +63,7 @@ export const showValue = (kind, v) => {
 };
 
 // contactLogged hook (lib/hooks.js): runs inside contact.log's transaction.
-export const storeAnswers = async (tx, ctx, { contact, input }, emit) => {
+export const storeAnswers = async (tx, ctx, { contact, input, reply = {} }, emit) => {
   const answers = Array.isArray(input?.answers) ? input.answers : [];
   if (!answers.length) return;
   const ids = answers.map((a) => a.question_id);
@@ -74,11 +77,13 @@ export const storeAnswers = async (tx, ctx, { contact, input }, emit) => {
   const checked = answers.map((a) => {
     const q = byId.get(a.question_id);
     if (!q) throw httpError(400, 'that question is not in this campaign');
-    const value = checkValue(q, a.value);
-    if (value === undefined) throw httpError(400, `that answer doesn't fit "${q.text}"`);
-    return { q, value };
+    return { q, value: checkValue(q, a.value) };
   });
+  const skipped = checked.filter((a) => a.value === undefined);
+  reply.answers_saved = checked.length - skipped.length;
+  reply.answers_skipped = skipped.map(({ q }) => ({ question_id: q.id, question: q.text }));
   for (const { q, value } of checked) {
+    if (value === undefined) continue;
     const id = newId();
     await tx.query(
       `insert into survey_responses (id, workspace_id, survey_id, question_id, contact_id, person_id, value, created_by)

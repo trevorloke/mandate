@@ -51,6 +51,7 @@ function QuestionResult({ q, from }) {
   return (
     <section className="card sv-res" aria-label={q.text}>
       <h2 className="sv-res__q">{q.text}</h2>
+      {q.kind === 'scale' && <p className="sv-res__ends">1 low · 5 high</p>}
       <p className="sv-res__n mono">{q.answered} answered</p>
       {q.kind === 'text' ? (
         q.answers.length === 0 ? <p className="muted">No answers yet.</p> : (

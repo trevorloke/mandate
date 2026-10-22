@@ -275,9 +275,18 @@ prof = (await D.api(`/persons/${P.maya.id}`)).json;
 check('Save answers: a talked contact, no rating, 3 answers', ans.length === 3 && prof.contacts[0].outcome === 'contacted' && prof.person.rating === null
   && ans.some((a) => a.says === 'Lawn sign, Phone calls') && ans.some((a) => a.says === 'More buses on 72 Ave'), ans.map((a) => a.says).join('|'));
 await V.shot('06-walk-saved-phone');
+// Rating Maya after "Save answers" finishes that same knock: one contact for the visit.
+await vpage.click('.walk-panel button[aria-label="2: Lean support"]');
+await sleep(900);
+t = await V.text();
+prof = (await D.api(`/persons/${P.maya.id}`)).json;
+check('then a rating: "Rated 2" on the same knock — one contact, not two', /Rated 2/.test(t) && prof.contacts.length === 1
+  && prof.contacts[0].rating === '2' && prof.person.rating === '2', JSON.stringify(prof.contacts.map((c) => [c.outcome, c.rating])));
+check('…and its 3 answers are still on it', (await D.api(`/persons/${P.maya.id}/answers`)).json.answers.length === 3);
 
 // No signal: the answers wait in the outbox with the knock and arrive once.
-await vpage.click('.walk-door__head:has-text("7120 124 St")').catch(() => {});
+// (The rating may have moved the list on to this door already.)
+if (!(await vpage.$('.walk-door.is-open:has-text("7120 124 St")'))) await vpage.click('.walk-door__head:has-text("7120 124 St")').catch(() => {});
 await sleep(400);
 if (!(await vpage.$('.walk-panel .sv-field.is-open'))) await vpage.click('.walk-panel .sv-field__btn');
 await vctx.setOffline(true);
@@ -346,6 +355,9 @@ const people = await page.$$eval('.sv-res[aria-label="What matters most to you?"
 check('See people names who said Housing', people.join() === 'Harjit Example', people.join());
 const texts = await page.innerText('.sv-res[aria-label="Anything else?"]');
 check('short answers listed', /More buses on 72 Ave/.test(texts) && /Maya Example/.test(texts));
+check('results: the 1–5 question says "1 low · 5 high"', /1 low · 5 high/.test(await page.innerText('.sv-res[aria-label="How likely are you to vote?"]')));
+m = await measure(page, '.sv-bar__see, .sv-people a');
+check('results: "See people" and names ≥ 48px', m.minTap >= 48, JSON.stringify(m));
 m = await measure(page);
 check('results: no yellow button (nothing to start here)', m.yellow === 0, JSON.stringify(m));
 await D.full('09-results-desktop');
@@ -388,7 +400,17 @@ await sleep(300);
 const mq = await measure(ppage, '.sv-qitem[data-open] .sv-kind, .sv-qitem[data-open] .input, .sv-qitem[data-open] .btn');
 check('question editor on a phone: fields ≥ 48px, no sideways scroll', mq.minTap >= 48 && mq.overflow <= 0, JSON.stringify(mq));
 check('a question with answers keeps its kind', /has answers/.test(await ppage.innerText('.sv-qitem[data-open]')));
+check('…and its words: no box to retype them', !(await ppage.$('.sv-qitem[data-open] input[placeholder="What matters most to you?"]'))
+  && /What matters most to you\?/.test(await ppage.innerText('.sv-qitem[data-open] .sv-locked')));
+const firstQ = built.questions.find((q) => q.text === 'What matters most to you?');
+const reword = await PH.api('/actions/survey.question.update', { id: firstQ.id, text: 'What worries you least?' });
+check('the server refuses rewording an answered question', reword.status === 409 && /add a new question/.test(reword.json.error), reword.raw);
 await PH.full('15-question-editor-phone');
+await ppage.click('.sv-qitem[data-open] button:has-text("Add a new question")');
+await sleep(300);
+const startVal = await ppage.inputValue('form[aria-label="Add question"] input[placeholder="What matters most to you?"]').catch(() => '');
+check('"Add a new question" starts one from it (one yellow)', startVal === 'What matters most to you?' && (await measure(ppage)).yellow === 1, startVal);
+await ppage.click('form[aria-label="Add question"] button:has-text("Cancel")');
 await dphone.close();
 
 // ── 9. Archive keeps answers; the field stops asking ──
@@ -410,12 +432,49 @@ await page.click('button.ops-more:has-text("Archived")');
 check('list: archived survey folds under "Archived · 1"', /Archived · 1/.test(await D.text()) && /Doorstep issues/.test(await D.text()));
 await D.shot('16-list-archived');
 
+// ── 9b. A question changed while a knock waited on the phone ──
+const second = (await D.api('/actions/survey.create', { name: 'Second round', context: 'door' })).json.survey;
+const pickQ = (await D.api('/actions/survey.question.add', { survey_id: second.id, kind: 'choice', text: 'Pick one', options: ['Housing', 'Transit'] })).json.question;
+await D.api('/actions/survey.question.add', { survey_id: second.id, kind: 'choice', text: 'Keep one', options: ['Alpha', 'Beta'] });
+await V.go(`/turfs/${turf.id}`);
+await vpage.waitForSelector('.walk-door', { timeout: 8000 }).catch(() => {});
+await vpage.click('.walk-door__head:has-text("12345 72 Ave")');
+await sleep(400);
+await vpage.click('.walk-panel .sv-field__btn');
+const harjitBefore = (await D.api(`/persons/${P.harjit.id}`)).json.contacts.length;
+await vctx.setOffline(true);
+await sleep(300);
+await vpage.click('.walk-panel .sv-q:has-text("Pick one") .sv-opt:has-text("Housing")');
+await vpage.click('.walk-panel .sv-q:has-text("Keep one") .sv-opt:has-text("Alpha")');
+await vpage.click('.walk-panel button[aria-label="2: Lean support"]');
+await sleep(700);
+check('offline knock with 2 answers: "Saved offline"', /saved offline/i.test(await V.text()));
+const live = await D.api('/actions/survey.question.update', { id: pickQ.id, kind: 'scale' });
+check('the desk cannot change a kind while the survey is asked', live.status === 409 && /Asking now/.test(live.json.error), live.raw);
+await D.api('/actions/survey.update', { id: second.id, active: false });
+const kindNow = await D.api('/actions/survey.question.update', { id: pickQ.id, kind: 'scale' });
+await D.api('/actions/survey.update', { id: second.id, active: true });
+check('…turned off, it can (nothing answered yet)', kindNow.status === 200 && kindNow.json.question.kind === 'scale', kindNow.raw);
+await vctx.setOffline(false);
+await vpage.evaluate(() => window.dispatchEvent(new Event('online')));
+await sleep(2500);
+prof = (await D.api(`/persons/${P.harjit.id}`)).json;
+ans = (await D.api(`/persons/${P.harjit.id}/answers`)).json.answers;
+check('replayed: the knock and its rating landed (not refused)', prof.contacts.length === harjitBefore + 1 && prof.person.rating === '2'
+  && (await V.api('/surveys/active?context=door')).status === 200 && !(await vpage.$('.offline-strip .is-refused')), `${prof.contacts.length} ${prof.person.rating}`);
+check('…with the answer that fits (Alpha), and not the one that does not (Housing)', ans.some((a) => a.says === 'Alpha') && !ans.some((a) => a.question_id === pickQ.id), ans.map((a) => a.says).join('|'));
+const strip = await vpage.innerText('.offline-strip').catch(() => '');
+check('the strip says which answer was not saved', /Harjit Example · 1 answer not saved — question changed/.test(strip), strip);
+await V.shot('17-left-out-phone');
+await vpage.click('.offline-strip button:has-text("Dismiss")');
+await D.api('/actions/survey.archive', { id: second.id });
+
 // ── 10. The books still verify ──
 const v = (await D.api('/audit/verify')).json;
 check('hash chain verifies after the whole journey', v.ok === true && v.checked > 30, JSON.stringify(v));
 const evs = (await D.api('/events?limit=1000')).json.events;
 check('answers are on the event log, written by the knock that carried them',
-  evs.filter((e) => e.entity_type === 'survey_response').length === 8 && evs.filter((e) => e.entity_type === 'survey_response').every((e) => e.action === 'contact.log'),
+  evs.filter((e) => e.entity_type === 'survey_response').length === 9 && evs.filter((e) => e.entity_type === 'survey_response').every((e) => e.action === 'contact.log'),
   evs.filter((e) => e.entity_type === 'survey_response').length);
 check('no page errors', errors.length === 0, errors.join(' | '));
 

@@ -230,16 +230,19 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
 
   const log = async (outcome, rating) => {
     const answers = outcome === 'contacted' ? survey.take() : [];
+    // After "Save answers" the next tap finishes that same contact.
+    const visitOf = survey.visitOf(channel);
     const res = await act.run('contact.log', {
       person_id: person.id, channel, outcome, rating: rating || undefined, note: note.trim() || undefined,
-      answers: answers.length ? answers : undefined,
+      answers: answers.length ? answers : undefined, visit_of: visitOf,
     });
     if (!res) survey.restore(answers);
     if (res) {
+      survey.logged(res, { channel, outcome, rating, answers, visitOf });
       setNote('');
       setNoteOpen(false);
       // Not reached yet: the door card's words ("Saved on this phone — sends soon").
-      const what = `${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}${answersTail(answers)}`;
+      const what = `${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}${answersTail(answers, res.result)}`;
       setSaid({ text: res.queued ? `${queuedText(res)} · ${what}` : `✓ ${what}`, what, queued: Boolean(res.queued) });
     }
   };

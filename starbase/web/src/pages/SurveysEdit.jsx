@@ -2,9 +2,11 @@
 // "Add question". Under it: "Asking now" on/off, where it's asked (Door ·
 // Calls · Both) and "Results · N". The questions in the order they're
 // asked; tap one to edit it, move it up or down, or remove it ("Remove this
-// question? Yes · No" — its answers are kept). A question's kind is fixed
-// once someone has answered it. Under "More": only in some turfs, rename,
-// archive (answers kept; "Bring back" undoes it).
+// question? Yes · No" — its answers are kept). Once someone has answered a
+// question its words and kind are fixed ("Add a new question" starts one
+// from it); while the survey is asked its kind is fixed too (phones keep the
+// questions a day). Under "More": only in some turfs, rename, archive
+// (answers kept; "Bring back" undoes it).
 import { useId, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -16,13 +18,18 @@ import './surveys.css';
 const CHOICE = ['choice', 'choices'];
 const OPTIONS_MAX = 20;
 
-function QuestionForm({ initial = null, answered = false, submitLabel, primary = false, onSubmit, onCancel, busy }) {
+// answered: words and kind fixed (choices can still change). asking: the
+// survey is on, so the kind is fixed. onAskNew: start a new question from this one.
+function QuestionForm({ initial = null, answered = false, asking = false, submitLabel, primary = false, onSubmit, onCancel, onAskNew, busy }) {
   const uid = useId();
   const [text, setText] = useState(initial?.text || '');
   const [kind, setKind] = useState(initial?.kind || 'choice');
   const [opts, setOpts] = useState(initial?.options?.length ? initial.options : ['', '']);
   const [error, setError] = useState(null);
   const choice = CHOICE.includes(kind);
+  const kindFixed = answered || asking;
+  // An answered yes/no, 1–5 or short answer has nothing left to edit here.
+  const editable = !answered || choice;
   const setOpt = (i, v) => setOpts((o) => o.map((x, j) => (j === i ? v : x)));
 
   const submit = async (e) => {
@@ -38,14 +45,25 @@ function QuestionForm({ initial = null, answered = false, submitLabel, primary =
   return (
     <form className={`sv-qform${primary ? ' card' : ''}`} onSubmit={submit} aria-label={submitLabel}>
       <div className="field">
-        <label htmlFor={`${uid}-text`}>Question</label>
-        <input id={`${uid}-text`} className="input" required autoFocus maxLength={300} autoComplete="off"
-          placeholder="What matters most to you?" value={text} onChange={(e) => setText(e.target.value)} />
+        {answered ? (
+          <>
+            <span className="sv-label">Question</span>
+            <p className="sv-locked">{text}</p>
+          </>
+        ) : (
+          <>
+            <label htmlFor={`${uid}-text`}>Question</label>
+            <input id={`${uid}-text`} className="input" required autoFocus maxLength={300} autoComplete="off"
+              placeholder="What matters most to you?" value={text} onChange={(e) => setText(e.target.value)} />
+          </>
+        )}
       </div>
       <div className="field">
         <span className="sv-label" id={`${uid}-kind`}>Answer</span>
-        {answered ? (
-          <p className="sv-locked">{KIND_LABEL[kind]} <span className="muted">· has answers</span></p>
+        {kindFixed ? (
+          <p className="sv-locked">
+            {KIND_LABEL[kind]} <span className="muted">· {answered ? 'has answers' : 'turn off Asking now to change'}</span>
+          </p>
         ) : (
           <div className="sv-kinds" role="group" aria-labelledby={`${uid}-kind`}>
             {KINDS.map((k) => (
@@ -78,14 +96,17 @@ function QuestionForm({ initial = null, answered = false, submitLabel, primary =
       )}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="ops-actions">
-        <button type="submit" className={`btn ops-tap ${primary ? 'btn-primary' : 'ops-solid'}`} disabled={busy}>{submitLabel}</button>
+        {editable && <button type="submit" className={`btn ops-tap ${primary ? 'btn-primary' : 'ops-solid'}`} disabled={busy}>{submitLabel}</button>}
+        {answered && onAskNew && (
+          <button type="button" className="btn ops-tap" disabled={busy} onClick={onAskNew}>Add a new question</button>
+        )}
         <button type="button" className="btn btn-quiet ops-tap" onClick={onCancel}>Cancel</button>
       </div>
     </form>
   );
 }
 
-function QuestionRow({ q, index, total, open, locked, busy, onToggle, onSave, onMove, onRemove }) {
+function QuestionRow({ q, index, total, open, locked, asking, busy, onToggle, onSave, onAskNew, onMove, onRemove }) {
   const [confirm, setConfirm] = useState(false);
   const bodyId = `sv-q-${q.id}`;
   const sub = [KIND_LABEL[q.kind], q.answered ? `${q.answered} answered` : null].filter(Boolean).join(' · ');
@@ -105,7 +126,8 @@ function QuestionRow({ q, index, total, open, locked, busy, onToggle, onSave, on
       )}
       {open && (
         <div className="ops-body" id={bodyId}>
-          <QuestionForm initial={q} answered={q.locked} submitLabel="Save" busy={busy} onSubmit={onSave} onCancel={onToggle} />
+          <QuestionForm initial={q} answered={q.locked} asking={asking} submitLabel="Save" busy={busy}
+            onSubmit={onSave} onCancel={onToggle} onAskNew={onAskNew} />
           <div className="ops-actions sv-qmove">
             <button type="button" className="btn ops-tap" disabled={busy || index === 0} onClick={() => onMove(-1)}>Move up</button>
             <button type="button" className="btn ops-tap" disabled={busy || index === total - 1} onClick={() => onMove(1)}>Move down</button>
@@ -183,6 +205,8 @@ export default function SurveysEdit() {
   const adding = params.get('add') === '1';
   const refresh = useSurveyRefresh();
   const [openQ, setOpenQ] = useState(null);
+  // "Add a new question" from an answered one: the add form starts from it.
+  const [start, setStart] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const q = useQuery({ queryKey: ['survey', id], queryFn: () => apiGet(`/surveys/${id}`) });
@@ -217,12 +241,18 @@ export default function SurveysEdit() {
 
   const add = async (input) => {
     const r = await run('survey.question.add', { survey_id: id, ...input });
-    if (r.res) setParams({}, { replace: true });
+    if (r.res) { setStart(null); setParams({}, { replace: true }); }
     return r.error;
   };
+  const askNew = (question) => {
+    setOpenQ(null);
+    setStart({ text: question.text, kind: question.kind, options: question.options });
+    setParams({ add: '1' });
+  };
   const save = (question) => async (input) => {
-    const patch = { id: question.id, text: input.text };
-    if (!question.locked) patch.kind = input.kind;
+    const patch = { id: question.id };
+    if (!question.locked) patch.text = input.text;
+    if (!question.locked && !survey.active) patch.kind = input.kind;
     if (input.options) patch.options = input.options;
     const r = await run('survey.question.update', patch);
     if (r.res) setOpenQ(null);
@@ -249,7 +279,7 @@ export default function SurveysEdit() {
             Bring back
           </button>
         ) : !adding && (
-          <button type="button" className="btn btn-primary ops-tap" onClick={() => { setOpenQ(null); setParams({ add: '1' }); }}>
+          <button type="button" className="btn btn-primary ops-tap" onClick={() => { setOpenQ(null); setStart(null); setParams({ add: '1' }); }}>
             Add question
           </button>
         )}
@@ -275,7 +305,8 @@ export default function SurveysEdit() {
       {error && <p className="error" role="alert">{error}</p>}
 
       {adding && !locked && (
-        <QuestionForm key={`add-${questions.length}`} primary submitLabel="Add question" busy={busy} onSubmit={add} onCancel={() => setParams({})} />
+        <QuestionForm key={`add-${questions.length}-${start?.text || ''}`} initial={start} primary submitLabel="Add question" busy={busy}
+          onSubmit={add} onCancel={() => { setStart(null); setParams({}); }} />
       )}
 
       {questions.length === 0 ? (
@@ -290,9 +321,11 @@ export default function SurveysEdit() {
               total={questions.length}
               open={openQ === question.id}
               locked={locked}
+              asking={survey.active}
               busy={busy}
               onToggle={() => setOpenQ((cur) => (cur === question.id ? null : question.id))}
               onSave={save(question)}
+              onAskNew={() => askNew(question)}
               onMove={(by) => move(i, by)}
               onRemove={() => remove(question)}
             />

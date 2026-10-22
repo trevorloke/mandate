@@ -14,7 +14,7 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
 import RatingButtons, { RatingChip, ratingSay, ratingText, ratingWho } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
-import SurveyQuestions, { answersTail, answersWord, useSurvey } from '../components/SurveyQuestions.jsx';
+import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import { apiGet, action, ApiError } from '../api.js';
@@ -922,16 +922,21 @@ function CallsScreen() {
     if (!p) return;
     const inCard = focusInCard(); // read before the buttons disable for the save
     const answers = outcome === 'contacted' ? survey.take() : [];
-    const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined, answers: answers.length ? answers : undefined }, { who: p.name });
+    // After "Save answers" (then Change), the tap finishes that same contact.
+    const visitOf = survey.visitOf(channel);
+    const res = await act.run('contact.log', {
+      person_id: p.id, channel, outcome, rating: rating || undefined, answers: answers.length ? answers : undefined, visit_of: visitOf,
+    }, { who: p.name });
     if (!res) { survey.restore(answers); return; }
+    survey.logged(res, { channel, outcome, rating, answers, visitOf });
     const next = after(at);
     refocus.current = inCard;
     markDone(p.id, { rating: rating || null, outcome, queued: !!res.queued });
     if (rating) setPicked((m) => ({ ...m, [p.id]: rating }));
     setHeld(null);
     setCurrentId(next?.id ?? null);
-    const what = rating ? `Rated ${ratingText(rating)}${answersTail(answers)}`
-      : answers.length ? `${answersWord(answers.length)} saved` : outcomeWord(outcome, channel);
+    const what = rating ? `Rated ${ratingText(rating)}${answersTail(answers, res.result)}`
+      : answers.length ? answersSaid(answers, res.result) : outcomeWord(outcome, channel);
     // Not reached yet: the same words as the door card ("Saved on this phone — sends soon").
     showToast(`${firstName(p.name)} · ${what}${res.queued ? ` · ${queuedText(res)}` : ''}`, p);
   };
