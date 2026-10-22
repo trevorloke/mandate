@@ -23,6 +23,7 @@ import './people.css';
 import {
   TextingCallButton, TextingRepliesLink, noTexts, textingOn, useTextingStatus, useTextQueue, useTextingPerson,
 } from '../components/TextingCard.jsx';
+import { MyPeopleLink } from '../components/RelationshipsBits.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared widgets + helpers (also used by Person.jsx)
@@ -685,6 +686,7 @@ function PeopleList() {
               { to: '/inbox', label: 'Inbox', icon: 'text', state: { from: { to: '/people', label: 'People' } } },
               desk && { to: '/people/import', label: 'Import', icon: 'upload' },
               desk && { to: '/surveys', label: 'Surveys' },
+              desk && { to: '/people/connected', label: 'Most connected' },
             ]}
           />
           {desk && !showNew && (
@@ -1054,6 +1056,7 @@ function CallsScreen() {
       </div>
 
       {filterChips}
+      <MyPeopleLink me={me} />
       <TextingRepliesLink me={me} />
 
       {listCopy && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}

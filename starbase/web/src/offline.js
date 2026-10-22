@@ -44,7 +44,9 @@ import { action, ApiError } from './api.js';
 // The writes a phone may do with no signal (the door card, walk list, Calls,
 // the map's pins and Shifts). person.addAtDoor: a new housemate at a door
 // already on the list (every role; the server copies the door's address).
-export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.addAtDoor', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave'];
+// relationship.add: someone you know, on My people (its link and person ids
+// are made on the phone, so a replay is the same link).
+export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.addAtDoor', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave', 'relationship.add'];
 // The writes that add a person, on an id made here.
 export const NEW_PERSON = ['person.create', 'person.addAtDoor'];
 // What can be taken back while it waits: a sign request (its cancel is
@@ -381,7 +383,7 @@ export function refusedText(item) {
 }
 
 const SIGN_WORD = Object.fromEntries(SIGN_KINDS.map((s) => [s.code, s.label]));
-const CHANNEL_WORD = { door: 'Knock', phone: 'Call', text: 'Text' };
+const CHANNEL_WORD = { door: 'Knock', phone: 'Call', text: 'Text', in_person: 'Talk' };
 // "2:14 pm" today, "Oct 18" before that — the phone's own clock.
 export const clockText = (iso) => {
   const d = new Date(iso);
@@ -409,9 +411,10 @@ export function itemText(item, nameOf = () => '') {
     case 'sign.cancel': what = 'Sign undo'; break;
     case 'shift.join': what = item.undo ? 'Count me in · undo' : 'Count me in'; break;
     case 'shift.leave': what = 'Can’t make it'; break;
+    case 'relationship.add': what = 'Someone you know'; break;
     default: what = 'Saved';
   }
-  const name = NEW_PERSON.includes(item.name) ? i.name : who;
+  const name = NEW_PERSON.includes(item.name) ? i.name : item.name === 'relationship.add' ? i.person?.name || who : who;
   return [what, name, clockText(item.at)].filter(Boolean).join(' · ');
 }
 

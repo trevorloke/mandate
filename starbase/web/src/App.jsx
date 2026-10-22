@@ -34,6 +34,8 @@ const LaddersFollowups = lazy(() => import('./pages/LaddersFollowups.jsx'));
 const Surveys = lazy(() => import('./pages/Surveys.jsx'));
 const SurveysEdit = lazy(() => import('./pages/SurveysEdit.jsx'));
 const SurveysResults = lazy(() => import('./pages/SurveysResults.jsx'));
+const MyPeople = lazy(() => import('./pages/MyPeople.jsx'));
+const PeopleConnected = lazy(() => import('./pages/PeopleConnected.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -77,8 +79,11 @@ export default function App() {
         {/* Texts: volunteers see the conversations they started; the desk sees all. */}
         <Route path="/inbox" element={<TextingInbox />} />
         <Route path="/inbox/:id" element={<TextingThread />} />
+        {/* The people you know: every role (the server sends only your own). */}
+        <Route path="/my-people" element={<MyPeople />} />
         <Route element={<DeskOnly />}>
           <Route path="/people/import" element={<ImportPeople />} />
+          <Route path="/people/connected" element={<PeopleConnected />} />
           <Route path="/inbox/settings" element={<TextingSettings />} />
           <Route path="/money" element={<Money />} />
           <Route path="/money/receipts" element={<Receipts />} />
