@@ -24,6 +24,22 @@
 //                                   it back — nothing is sent then.
 const registry = { events: [], contactLogged: [], brief: [], textOut: [] };
 
+// People lists, imports and the sample campaign (ext/fields fills these):
+//   personsWhere(db, ctx, query, w) GET /persons: a feature may narrow the
+//                                   list by its own query parameters —
+//                                   w.params.push(value), then append
+//                                   ' and …$n…' to w.where.
+//   importRows(db, ctx, extras)     POST /data/import, once per call: a
+//                                   feature may push { check(raw) →
+//                                   { value } | { error } (refuses the row),
+//                                   apply(tx, personId, value, { write },
+//                                   emit) → [words for what it filled] }.
+//   sampleLoaded(tx, ctx, { people, emit })   the sample is loading;
+//                                   people: { sample name → person id }.
+//   sampleCleared(tx, ctx, { emit, said })    the sample's people are gone;
+//                                   said: sentences for the clear message.
+Object.assign(registry, { personsWhere: [], importRows: [], sampleLoaded: [], sampleCleared: [] });
+
 export const onHook = (name, fn) => {
   if (!registry[name]) throw new Error(`unknown hook ${name}`);
   registry[name].push(fn);
