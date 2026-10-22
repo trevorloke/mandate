@@ -184,6 +184,11 @@ test('People filter: one field’s value, any kind; ":*" is filled in; a bad val
   const list = ok(await staff.get('/api/fields')).fields;
   const hh = list.find((f) => f.id === F.household.id);
   assert.deepEqual(hh.common, [{ value: 3, n: 2 }]);
+  // Text: the most common words, in any case, as one.
+  ok(await setValues(staff, P.cy.id, { union: 'cupe 402' }));
+  const union = ok(await staff.get('/api/fields')).fields.find((f) => f.id === F.union.id);
+  assert.deepEqual(union.common.map((c) => [c.value.toLowerCase(), c.n]), [['cupe 402', 2], ['ufcw 1518', 1]]);
+  ok(await setValues(staff, P.cy.id, { union: null }));
   const lang = list.find((f) => f.id === F.language.id);
   assert.equal(lang.filled, 3);
   assert.deepEqual(lang.uses.map((u) => `${u.value}=${u.n}`).sort(), ['English=1', 'Mandarin=1', 'Punjabi=1']);

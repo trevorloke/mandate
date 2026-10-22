@@ -28,42 +28,42 @@ api.get('/fields', async (c) => {
   const db = c.get('db');
   const ws = ctx.workspaceId;
   const fields = (await db.query(
-    `select f.*, (select count(*)::int from person_field_values v where v.field_id = f.id) as filled
+    `select f.*, (select count(*)::int from person_field_values v
+                  where v.workspace_id = f.workspace_id and v.field_id = f.id) as filled
      from person_fields f where f.workspace_id = $1
      order by (f.retired_at is not null), f.position, f.created_at`,
     [ws],
   )).rows;
+  // Each choice's count (Pick one, Yes/No): a few rows per field.
   const counts = (await db.query(
-    `select field_id, value, count(*)::int as n from person_field_values where workspace_id = $1
-     group by field_id, value`,
-    [ws],
-  )).rows.map((r) => ({ ...r, value: r.value ?? null }));
-  // What a filter can find: values on people still on the list.
-  const live = (await db.query(
     `select v.field_id, v.value, count(*)::int as n from person_field_values v
-     join persons p on p.id = v.person_id and p.deleted_at is null
-     join person_fields f on f.id = v.field_id and f.kind in ('text', 'number')
+     join person_fields f on f.id = v.field_id and f.kind in ('choice', 'yesno')
      where v.workspace_id = $1 group by v.field_id, v.value`,
     [ws],
-  )).rows.map((r) => ({ ...r, value: r.value ?? null }));
+  )).rows;
+  // What a filter can find (Text, Number): the most common values on people
+  // still on the list — text in any case ("punjabi" and "Punjabi" are one).
+  const common = (await db.query(
+    `select field_id, kind, words, n from (
+       select v.field_id, f.kind, min(v.value #>> '{}') as words, count(*)::int as n,
+              row_number() over (partition by v.field_id order by count(*) desc, min(v.value #>> '{}')) as r
+       from person_field_values v
+       join persons p on p.id = v.person_id and p.deleted_at is null
+       join person_fields f on f.id = v.field_id and f.kind in ('text', 'number')
+       where v.workspace_id = $1
+       group by v.field_id, f.kind, case when f.kind = 'text' then lower(v.value #>> '{}') else v.value #>> '{}' end
+     ) t where r <= $2 order by field_id, r`,
+    [ws, COMMON_MAX],
+  )).rows;
   return c.json({
     fields: fields.map((f) => {
       const out = { ...fieldOut(f), filled: f.filled };
       if (f.kind === 'choice' || f.kind === 'yesno') {
-        out.uses = counts.filter((r) => r.field_id === f.id)
-          .map((r) => ({ value: r.value, n: r.n }));
+        out.uses = counts.filter((r) => r.field_id === f.id).map((r) => ({ value: r.value, n: r.n }));
       }
       if (f.kind === 'text' || f.kind === 'number') {
-        // Text matches in any case: "punjabi" and "Punjabi" are one value.
-        const merged = new Map();
-        for (const r of live.filter((x) => x.field_id === f.id)) {
-          const key = f.kind === 'text' ? String(r.value).toLowerCase() : String(r.value);
-          const cur = merged.get(key);
-          if (cur) cur.n += r.n; else merged.set(key, { value: r.value, n: r.n });
-        }
-        out.common = [...merged.values()]
-          .sort((a, b) => b.n - a.n || String(a.value).localeCompare(String(b.value)))
-          .slice(0, COMMON_MAX);
+        out.common = common.filter((r) => r.field_id === f.id)
+          .map((r) => ({ value: r.kind === 'number' ? Number(r.words) : r.words, n: r.n }));
       }
       return out;
     }),
