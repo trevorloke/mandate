@@ -18,6 +18,7 @@ import SurveyQuestions, { answersTail, answersWord, useSurvey } from '../compone
 import { queuedText } from '../components/queued.js';
 import { apiGet, action, ApiError } from '../api.js';
 import './people.css';
+import { TextingCallButton, TextingRepliesLink, noTexts } from '../components/TextingCard.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared widgets + helpers (also used by Person.jsx)
@@ -675,6 +676,7 @@ function PeopleList() {
             items={[
               { to: `/calls${carry(f)}`, label: 'Call list', icon: 'phone' },
               { to: `/calls${carry(f, { channel: 'text' })}`, label: 'Text list', icon: 'text' },
+              { to: '/inbox', label: 'Inbox', icon: 'text' },
               desk && { to: '/people/import', label: 'Import', icon: 'upload' },
               desk && { to: '/surveys', label: 'Surveys' },
             ]}
@@ -841,8 +843,9 @@ function CallsScreen() {
   const seed = me?.user?.id || '';
   const list = persons.data?.persons;
   const rows = useMemo(
-    () => callOrder((list ?? []).filter((p) => p.phone && !isDnc(p)), seed),
-    [list, seed],
+    // Text mode also skips anyone who opted out of texts (replied STOP).
+    () => callOrder((list ?? []).filter((p) => p.phone && !isDnc(p) && !(channel === 'text' && noTexts(p))), seed),
+    [list, seed, channel],
   );
   const offline = noSignal(persons);
 
@@ -963,6 +966,7 @@ function CallsScreen() {
       </div>
 
       {filterChips}
+      <TextingRepliesLink />
 
       {persons.isError && !offline && <p className="error">{persons.error.message}</p>}
 
@@ -1013,15 +1017,18 @@ function CallsScreen() {
               </div>
             </div>
 
-            {channel === 'text' ? (
-              <a className="btn cl-call" href={smsHref(current.phone, textBody(current, me))}>
-                <Icon name="text" size={22} /> Text {firstName(current.name)}
-              </a>
-            ) : (
-              <a className="btn cl-call" href={telHref(current.phone)}>
-                <Icon name="phone" size={22} /> Call {firstName(current.name)}
-              </a>
-            )}
+            {/* Through the campaign's Twilio number when connected; else the phone's own apps. */}
+            <TextingCallButton person={current} me={me} channel={channel}>
+              {channel === 'text' ? (
+                <a className="btn cl-call" href={smsHref(current.phone, textBody(current, me))}>
+                  <Icon name="text" size={22} /> Text {firstName(current.name)}
+                </a>
+              ) : (
+                <a className="btn cl-call" href={telHref(current.phone)}>
+                  <Icon name="phone" size={22} /> Call {firstName(current.name)}
+                </a>
+              )}
+            </TextingCallButton>
 
             <div className="cl-rate">
               <RatingButtons value={mine} onPick={(code) => log('contacted', code)} disabled={act.busy} />

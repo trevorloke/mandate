@@ -13,6 +13,9 @@ import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
 import Today from './pages/Today.jsx';
 const MapPage = lazy(() => import('./pages/Map.jsx'));
+const TextingInbox = lazy(() => import('./pages/TextingInbox.jsx'));
+const TextingThread = lazy(() => import('./pages/TextingThread.jsx'));
+const TextingSettings = lazy(() => import('./pages/TextingSettings.jsx'));
 const People = lazy(() => import('./pages/People.jsx'));
 const Person = lazy(() => import('./pages/Person.jsx'));
 const Shifts = lazy(() => import('./pages/Shifts.jsx'));
@@ -71,8 +74,12 @@ export default function App() {
         <Route path="/turfs/:id" element={<Turfs />} />
         {/* Volunteers get the sign crew's "Signs to put up" view. */}
         <Route path="/signs" element={<Signs />} />
+        {/* Texts: volunteers see the conversations they started; the desk sees all. */}
+        <Route path="/inbox" element={<TextingInbox />} />
+        <Route path="/inbox/:id" element={<TextingThread />} />
         <Route element={<DeskOnly />}>
           <Route path="/people/import" element={<ImportPeople />} />
+          <Route path="/inbox/settings" element={<TextingSettings />} />
           <Route path="/money" element={<Money />} />
           <Route path="/money/receipts" element={<Receipts />} />
           <Route path="/money/receipts/:id" element={<ReceiptsOne />} />
