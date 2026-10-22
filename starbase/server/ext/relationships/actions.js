@@ -8,17 +8,25 @@
 //       person_id: someone on the list already. person: someone they know,
 //       found first by the dedupe rules (match.js) and added new only when
 //       nobody matches — then "Brought in by <from>". A new person needs a
-//       phone or an email. id is the link's, made on the phone (the offline
-//       outbox): a replay is the same link, even after it was removed. The
-//       pair either way round is one link: adding it again answers
-//       duplicate (and takes a new kind or note).
+//       phone or an email. A volunteer's new person keeps the email they
+//       typed in attrs.typed_email; when someone on the list already has that
+//       email, the new person doesn't take it (email stays empty, so nothing
+//       keyed by email — newsletter consent, ladders' email steps — reaches
+//       that address under the name they typed) and attrs.maybe_same_as names
+//       that person (or else someone with the same name) for the desk ("May
+//       be the same person as …" on both profiles). Nothing in the answer
+//       differs either way: the volunteer learns nothing about whose email it
+//       is. id is the link's, made on the phone (the offline outbox): a
+//       replay is the same link, even after it was removed. The pair either
+//       way round is one link: adding it again answers duplicate (and takes
+//       a new kind or note).
 //   relationship.remove  { id }   taken off (kept on the books, removed_at);
 //       a volunteer removes only their own links.
 import { z } from 'zod';
 import { newId } from '../../lib/events.js';
 import { forViewer } from '../../lib/viewer.js';
 import { httpError } from '../../actions/util.js';
-import { findKnown, selfPerson } from './match.js';
+import { findKnown, maybeSame, selfPerson } from './match.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
 export const KINDS = ['family', 'friend', 'neighbour', 'work', 'community', 'other'];
@@ -116,13 +124,23 @@ export const actions = {
         }
         if (!other) {
           const id = p.id || newId();
-          const email = p.email ? p.email.toLowerCase() : null;
+          let email = p.email ? p.email.toLowerCase() : null;
+          const attrs = {};
+          if (vol) {
+            if (email) attrs.typed_email = email;
+            const same = await maybeSame(tx, ctx, p, from.id);
+            if (same) attrs.maybe_same_as = same.id;
+            if (same?.email) email = null;
+          }
           await tx.query(
-            `insert into persons (id, workspace_id, kind, name, email, phone, tags, socials)
-             values ($1, $2, 'person', $3, $4, $5, '[]', '{}')`,
-            [id, ws, p.name, email, p.phone || null],
+            `insert into persons (id, workspace_id, kind, name, email, phone, tags, socials, attrs)
+             values ($1, $2, 'person', $3, $4, $5, '[]', '{}', $6)`,
+            [id, ws, p.name, email, p.phone || null, JSON.stringify(attrs)],
           );
-          emit('person', id, 'create', { id, kind: 'person', name: p.name, email, phone: p.phone || null, tags: [], brought_in_by: from.id });
+          emit('person', id, 'create', {
+            id, kind: 'person', name: p.name, email, phone: p.phone || null, tags: [], brought_in_by: from.id,
+            ...(Object.keys(attrs).length ? { attrs } : {}),
+          });
           other = { id, name: p.name, email, phone: p.phone || null, address: null, unit: null, rating: null, rated_at: null, tags: [] };
           created = true;
         }

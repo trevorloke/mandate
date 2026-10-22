@@ -3,9 +3,14 @@
 //
 // The same keys as the import's dedupe (routes/data.js): email, then name +
 // phone — names compared case-insensitively with runs of spaces as one,
-// phones by their digits (the last ten, so "+1 604…" is "604…"). A volunteer
-// matches on name + email, never on an email alone: a bare email match would
-// tell them whose email it is (they never see anyone else's). Oldest first.
+// phones by their digits (the last ten, so "+1 604…" is "604…"). Oldest first.
+// The desk matches on the email alone. A volunteer never matches on an email
+// the campaign holds — not alone, not with the name: a match (or a miss)
+// would tell them whether their guess at someone's email was right, and they
+// never see anyone else's. They match on name + phone (a phone they see
+// anyway), on name + an email a volunteer typed for someone they added
+// (attrs.typed_email: what was typed, never what the campaign was told), or
+// on their own email (that's them).
 import { newId } from '../../lib/events.js';
 import { loginEmail } from '../../lib/viewer.js';
 
@@ -32,23 +37,42 @@ export const findKnown = async (tx, ctx, { name, phone, email }) => {
   const n = nameKey(name);
   const e = emailKey(email);
   const ph = phoneKey(phone);
-  const desk = ctx.role !== 'volunteer';
-  if (e) {
-    const hit = desk
-      ? await first(tx, 'lower(email) = $2', [ws, e])
-      : await first(tx, `lower(email) = $2 and ${NAME_SQL} = $3`, [ws, e, n]);
+  const vol = ctx.role === 'volunteer';
+  if (e && (!vol || e === loginEmail(ctx))) {
+    const hit = await first(tx, 'lower(email) = $2', [ws, e]);
     if (hit) return hit;
   }
   if (ph.length >= 7) {
     const hit = await first(tx, `${NAME_SQL} = $2 and ${PHONE_SQL} = $3`, [ws, n, ph]);
     if (hit) return hit;
   }
+  // Last, someone a volunteer added with this name and email (not the record
+  // the campaign holds: name + phone finds that one first).
+  if (e && vol) return first(tx, `lower(attrs->>'typed_email') = $2 and ${NAME_SQL} = $3`, [ws, e, n]);
   return null;
+};
+
+// For a volunteer's new person (actions.js): whoever on the list already
+// holds the email they typed — the new person doesn't take it — else someone
+// with the same name; the oldest, or null. The desk is told "May be the same
+// person as …"; the volunteer is told nothing either way.
+export const maybeSame = async (tx, ctx, { name, email }, notId) => {
+  const e = emailKey(email);
+  const pick = (sql, params) => tx.query(
+    `select id from persons where workspace_id = $1 and deleted_at is null and id <> $2 and ${sql}
+     order by created_at, id limit 1`,
+    [ctx.workspaceId, notId, ...params],
+  ).then((r) => r.rows[0] || null);
+  const holder = e ? await pick('lower(email) = $3', [e]) : null;
+  if (holder) return { id: holder.id, email: true };
+  const named = await pick(`${NAME_SQL} = $3`, [nameKey(name)]);
+  return named ? { id: named.id, email: false } : null;
 };
 
 // The signed-in user's own supporter record, matched by login email (oldest
 // first) — the same record Shifts' "Count me in" uses. With create, someone
-// who isn't on the list yet is added (a volunteer, tagged so).
+// who isn't on the list yet is added, tagged 'volunteer' whatever their role
+// — Count me in's rule (actions/field.js), so the order never matters.
 export const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
   const email = loginEmail(ctx);
   if (!email) return null;
@@ -59,7 +83,7 @@ export const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
   )).rows[0];
   if (found || !create) return found || null;
   const id = newId();
-  const tags = ctx.role === 'volunteer' ? ['volunteer'] : [];
+  const tags = ['volunteer'];
   const person = { kind: 'person', name: ctx.user.name || email, email, tags };
   await tx.query(
     'insert into persons (id, workspace_id, kind, name, email, tags) values ($1, $2, $3, $4, $5, $6)',
