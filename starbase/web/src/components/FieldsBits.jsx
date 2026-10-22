@@ -1,20 +1,26 @@
 // Profile fields on the screens that aren't theirs (the manager's own screen
 // is pages/Fields.jsx):
 //
-//   usePersonFields(id) / <PersonFields query personId />
+//   usePersonFields(id) / <PersonFields key={person.id} query personId />
 //       the profile's "More details". The desk fills each field in with the
 //       right control — Yes/No and Pick one as 48px tap buttons, Text, Number
 //       and Date as inputs — and one Save (a field.values.set action, "✓
 //       Saved"). A volunteer gets the filled-in fields a manager marked for
-//       volunteers, read-only: the server sends nothing else.
+//       volunteers, read-only: the server sends nothing else. With no signal
+//       the kept copy shows read-only ("Changing these needs signal"), or
+//       the No signal line when nothing is kept. Keyed by person: nothing
+//       typed or saved on one profile follows a link to the next.
 //   <FieldFilterGroups chip />  People → Filter → More filters: one group per
 //       field (Yes · No, its choices, the most common words, Filled in);
 //       picks ?field=<id>:<value>, the same chip helper as every filter.
-//   <FieldFilterChip value onRemove />  the removable chip for that filter.
+//   <FieldFilterChip value onRemove />  the removable chip for that filter,
+//       "Language at home: Punjabi" — a volunteer reads the one field's name
+//       (only one marked for them); unknown, "Profile field: Yes".
 //   useImportFields() / FIELD_KEY / fieldCell   the import's column choices.
 import { useId, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
+import { NeedsSignalLine, NoSignal, noSignal, useOnline } from './NoSignal.jsx';
 import './survey-questions.css';
 import './fields-bits.css';
 
@@ -114,21 +120,24 @@ function FieldControl({ f, value, onChange, disabled }) {
 
 // saved / setSaved live in PersonFields: the form starts fresh from the
 // server's values after a save, and "✓ Saved" must outlast that.
-function PersonFieldsForm({ fields, personId, saved, setSaved }) {
+// With no signal (online false) it is read-only: what's kept (or typed and
+// not saved yet) stays on screen, every control off, and one line says so.
+function PersonFieldsForm({ fields, personId, saved, setSaved, online }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => Object.fromEntries(fields.map((f) => [f.id, draftOf(f)])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const changed = fields.filter((f) => !sameDraft(f, draft[f.id]));
   const set = (fid, v) => { setSaved(false); setError(null); setDraft((d) => ({ ...d, [fid]: v })); };
+  const off = busy || !online;
 
   const save = async (e) => {
     e.preventDefault();
-    if (!changed.length) return;
+    if (!changed.length || !online) return;
     setBusy(true);
     setError(null);
     try {
-      await action('field.values.set', {
+      const res = await action('field.values.set', {
         person_id: personId,
         values: changed.map((f) => {
           const v = draft[f.id];
@@ -140,6 +149,14 @@ function PersonFieldsForm({ fields, personId, saved, setSaved }) {
         queryClient.invalidateQueries({ queryKey: ['fields'] }),
         queryClient.invalidateQueries({ queryKey: ['persons'] }),
       ]);
+      // Each value as the server stored it ("1,200" is 1200): a save that
+      // changed nothing on file still reads as saved, not as waiting.
+      const stored = new Map((res?.values || []).map((v) => [v.field_id, v.value]));
+      setDraft((d) => {
+        const next = { ...d };
+        for (const f of fields) if (stored.has(f.id)) next[f.id] = draftOf({ ...f, value: stored.get(f.id) });
+        return next;
+      });
       setSaved(true);
     } catch (err) {
       setError(err.message);
@@ -150,11 +167,12 @@ function PersonFieldsForm({ fields, personId, saved, setSaved }) {
 
   return (
     <form className="fd-form" onSubmit={save} aria-label="More details">
+      {!online && <NeedsSignalLine>Changing these needs signal</NeedsSignalLine>}
       {fields.map((f) => (
-        <FieldControl key={f.id} f={f} value={draft[f.id]} disabled={busy} onChange={(v) => set(f.id, v)} />
+        <FieldControl key={f.id} f={f} value={draft[f.id]} disabled={off} onChange={(v) => set(f.id, v)} />
       ))}
       <div className="fd-foot">
-        <button type="submit" className="btn fd-save" disabled={busy || !changed.length}>
+        <button type="submit" className="btn fd-save" disabled={off || !changed.length}>
           {busy ? 'Saving…' : 'Save'}
         </button>
         <span className="fd-said" role="status">{saved && !changed.length ? '✓ Saved' : ''}</span>
@@ -166,6 +184,9 @@ function PersonFieldsForm({ fields, personId, saved, setSaved }) {
 
 export function PersonFields({ query, personId }) {
   const [saved, setSaved] = useState(false);
+  const online = useOnline();
+  // No signal and nothing kept: say so, never a "Loading…" that doesn't end.
+  if (noSignal(query)) return <NoSignal />;
   if (query.isPending) return <p className="muted">Loading…</p>;
   if (query.isError) return <p className="error">{query.error.message}</p>;
   const { fields = [], edit } = query.data || {};
@@ -183,7 +204,7 @@ export function PersonFields({ query, personId }) {
   }
   // A fresh form whenever the saved values change (after Save, or another desk's).
   const version = fields.map((f) => `${f.id}=${JSON.stringify(f.value)}`).join('|');
-  return <PersonFieldsForm key={version} fields={fields} personId={personId} saved={saved} setSaved={setSaved} />;
+  return <PersonFieldsForm key={version} fields={fields} personId={personId} saved={saved} setSaved={setSaved} online={online} />;
 }
 
 // ── People: filter by one field's value ──
@@ -209,19 +230,38 @@ export function FieldFilterGroups({ chip }) {
   ));
 }
 
-// "Language at home: Punjabi" — or the value alone when the field can't be read.
+// "Language at home: Punjabi" — or "Profile field: Yes" when the field's
+// name can't be read here (no signal, or one volunteers can't see).
+const filterId = (value) => {
+  const s = String(value || '');
+  const at = s.indexOf(':');
+  return at < 0 ? s : s.slice(0, at);
+};
 export const fieldFilterLabel = (value, fields) => {
-  const at = String(value || '').indexOf(':');
-  const id = at < 0 ? value : value.slice(0, at);
-  const v = at < 0 ? '*' : value.slice(at + 1);
+  const s = String(value || '');
+  const at = s.indexOf(':');
+  const id = filterId(s);
+  const v = at < 0 ? '*' : s.slice(at + 1);
   const f = (fields || []).find((x) => x.id === id);
-  const word = v === '*' ? 'Filled in' : f?.kind === 'yesno' ? (/^y/i.test(v) ? 'Yes' : 'No') : f ? fieldWords(f.kind, f.kind === 'number' ? Number(v) : v) : v;
-  return f ? `${f.name}: ${word}` : word;
+  if (v === '*') return f ? `${f.name}: Filled in` : 'Profile field: Filled in';
+  if (!f) return `Profile field: ${/^(yes|true)$/i.test(v) ? 'Yes' : /^(no|false)$/i.test(v) ? 'No' : v}`;
+  const word = f.kind === 'yesno' ? (/^y/i.test(v) ? 'Yes' : 'No') : fieldWords(f.kind, f.kind === 'number' ? Number(v) : v);
+  return `${f.name}: ${word}`;
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function FieldFilterChip({ value, onRemove, desk = true }) {
   const list = useFieldsList(desk);
-  const label = fieldFilterLabel(value, list.data?.fields);
+  // A volunteer can't read the desk's list: just this one field's name.
+  const id = filterId(value);
+  const one = useQuery({
+    queryKey: ['fields', 'one', id],
+    queryFn: () => apiGet(`/fields/${id}`),
+    enabled: !desk && UUID_RE.test(id),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const label = fieldFilterLabel(value, desk ? list.data?.fields : one.data?.field ? [one.data.field] : []);
   return (
     <button type="button" className="pp-fchip" aria-label={`Remove filter: ${label}`} onClick={onRemove}>
       {label}
