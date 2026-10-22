@@ -60,6 +60,8 @@ function planFor(key, me) {
   const money = desk ? 'session' : 'local';
   const q = (name, tier) => ({ name: `q:${me.role}:${name}`, tier });
   const [k0, k1, k2] = key;
+  // A profile's Knows (ext/relationships; desk only), kept beside the profile.
+  if (k0 === 'person' && k2 === 'knows' && key.length === 3 && typeof k1 === 'string') return q(`person:${k1}:knows`, money);
   switch (k0) {
     case 'brief': return key.length === 1 ? q('brief', money) : null;
     case 'person': return key.length === 2 && typeof k1 === 'string' ? q(`person:${k1}`, money) : null;

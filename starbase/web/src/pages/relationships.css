@@ -68,7 +68,19 @@
   border-left: 3px solid var(--ok);
   font-size: 16px;
 }
+/* "May be the same person as …": a volunteer's add that may have doubled
+   someone (desk) */
+.rel-same {
+  margin: var(--s-2) 0 0;
+  padding: var(--s-2) var(--s-3);
+  border-left: 3px solid var(--warn);
+  font-size: 16px;
+}
 .rel-by { margin: 0 0 var(--s-2); color: var(--text-2); }
+/* Knows with no signal: "Adding and removing need signal" beside the button */
+.rel-needs { align-self: center; }
+/* My people: a link's note wraps rather than pushing the row wide */
+.rel-note { overflow-wrap: anywhere; }
 .rel-knows { list-style: none; margin: 0; padding: 0; }
 .rel-knows li {
   display: flex;

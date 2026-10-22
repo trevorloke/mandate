@@ -383,7 +383,8 @@ export function refusedText(item) {
   if (e.code === NOT_ADDED.code) return NOT_ADDED.message;
   const said = String(e.message || '').trim();
   if (/^person not found\b/i.test(said)) return 'Not saved — this person isn’t on the list';
-  const t = said.replace(/\s+in this workspace\b/gi, '');
+  // Never the server's field path ("person.email: Invalid email address").
+  const t = said.replace(/^[a-z_][\w.]*: /i, '').replace(/\s+in this workspace\b/gi, '');
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Refused';
 }
 
