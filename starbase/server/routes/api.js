@@ -172,6 +172,10 @@ app.get('/persons', async (c) => {
   if (has === 'phone') where += ' and p.phone is not null';
   if (has === 'email') where += vol ? ` and ${ownEmail}` : ' and p.email is not null';
   if (has === 'location') where += ' and p.lat is not null and p.lng is not null';
+  // Features' own filters (?field= — ext/fields), on the same params.
+  const more = { params, where: '' };
+  await runHooks('personsWhere', c.get('db'), ctx, c.req.query(), more);
+  where += more.where;
   // note: their own words from the volunteer form (attrs.note), so the call
   // card needs no per-person fetch. Nothing else from attrs is exposed.
   const { rows } = await c.get('db').query(

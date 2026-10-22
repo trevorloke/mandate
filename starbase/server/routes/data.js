@@ -8,6 +8,7 @@ import { runAction, newId } from '../lib/events.js';
 import { geocodeAddress } from '../lib/geocode.js';
 import { buildSample } from '../lib/sample.js';
 import { logGift } from '../lib/gifts.js';
+import { runHooks } from '../lib/hooks.js';
 
 const app = new Hono();
 const DESK = ['manager', 'treasurer', 'staff'];
@@ -86,13 +87,26 @@ app.post('/import', async (c) => {
   if (!parsed.success) return c.json({ error: parsed.error.issues[0].message }, 400);
   const { rows, tag, dryRun } = parsed.data;
 
+  // Features' own columns (ext/fields: a person's profile fields), checked
+  // with the row — a cell that doesn't fit refuses it — and filled after it.
+  const extras = [];
+  await runHooks('importRows', c.get('db'), ctx, extras);
+  const fillExtras = async (tx, personId, r, write, emit) => {
+    const out = [];
+    for (const [k, x] of extras.entries()) out.push(...await x.apply(tx, personId, r.extras[k], { write }, emit));
+    return out;
+  };
+
   const errors = [];
   const clean = [];
   const scale = await loadScale(c.get('db'), ctx.workspaceId);
   rows.forEach((raw, i) => {
     const r = cleanRow(raw, i, scale);
+    const more = r.error ? [] : extras.map((x) => x.check(raw));
+    const bad = more.find((m) => m.error);
     if (r.error) errors.push(r.error);
-    else clean.push({ ...r.row, tags: tag ? [...new Set([...r.row.tags, tag])] : r.row.tags, index: i });
+    else if (bad) errors.push(`row ${i + 1}: ${bad.error}`);
+    else clean.push({ ...r.row, tags: tag ? [...new Set([...r.row.tags, tag])] : r.row.tags, index: i, extras: more.map((m) => m.value) });
   });
 
   // write=false is the dry run: identical decisions, no writes.
@@ -128,10 +142,11 @@ app.post('/import', async (c) => {
         const tags = [...new Set([...(match.tags || []), ...r.tags])].slice(0, 50);
         if (tags.length !== (match.tags || []).length) patch.tags = tags;
         if (!match.rating && r.rating) patch.rating = r.rating;
-        if (Object.keys(patch).length === 0) { unchanged += 1; decisions.push({ row: r.index + 1, name: r.name, action: 'unchanged', id: match.id }); continue; }
+        const filled = await fillExtras(tx, match.id, r, write, emit);
+        if (Object.keys(patch).length === 0 && !filled.length) { unchanged += 1; decisions.push({ row: r.index + 1, name: r.name, action: 'unchanged', id: match.id }); continue; }
         merged += 1;
-        decisions.push({ row: r.index + 1, name: r.name, action: 'merged', id: match.id, fields: Object.keys(patch) });
-        if (write) {
+        decisions.push({ row: r.index + 1, name: r.name, action: 'merged', id: match.id, fields: [...Object.keys(patch), ...filled] });
+        if (write && Object.keys(patch).length) {
           const next = { ...match, ...patch };
           await tx.query(
             `update persons set email = $3, phone = $4, address = $5, unit = $6, city = $7, postal = $8, tags = $9,
@@ -158,6 +173,7 @@ app.post('/import', async (c) => {
           );
           emit('person', id, 'create', { ...p, source: 'import' });
         }
+        await fillExtras(tx, id, r, write, emit);
         index(p); // later rows in the same file dedupe against this one
       }
     }
@@ -381,6 +397,8 @@ app.post('/sample', async (c) => {
     await tx.query('insert into turf_members (workspace_id, turf_id, user_id) values ($1, $2, $3)', [W, turfId, ctx.user.id]);
     ids.turfs.push(turfId);
     emit('turf', turfId, 'create', { sample: true });
+    // Features' own sample rows (ext/fields: three profile fields and a few values).
+    await runHooks('sampleLoaded', tx, ctx, { people: id, emit });
 
     await tx.query(
       `update workspaces set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{sample}', $2::jsonb) where id = $1`,
@@ -544,6 +562,9 @@ const clearSample = async (tx, W, emit) => {
   if (del.length) await tx.query('delete from persons where workspace_id = $1 and id = any($2::uuid[])', [W, del]);
   for (const pid of leave) emit('person', pid, 'void', { sample: true });
   removed.people = leave.length;
+  // Features' own sample rows, now the sample's people are gone (ext/fields).
+  const said = [];
+  await runHooks('sampleCleared', tx, { workspaceId: W }, { emit, said });
 
   await tx.query(`update workspaces set settings = settings - 'sample' where id = $1`, [W]);
 
@@ -557,6 +578,7 @@ const clearSample = async (tx, W, emit) => {
   for (const s of told(shifts)) parts.push(`Kept the shift “${s.title}”: ${nOf(s.n, 'booking on it is', 'bookings on it are')} yours.`);
   for (const e of told(events)) parts.push(`Kept the event “${e.title}”: it has ${nOf(e.n, 'RSVP', 'RSVPs')}.`);
   for (const p of told(petitions)) parts.push(`Kept the petition “${p.title}”: it has ${nOf(p.n, 'signature', 'signatures')}.`);
+  parts.push(...said);
   const summary = {
     cleared: leave.length,
     kept: real.size,
