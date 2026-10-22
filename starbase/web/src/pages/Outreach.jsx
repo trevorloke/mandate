@@ -244,7 +244,8 @@ const noProviderNote = (note) => /no email provider/i.test(note || '');
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const countsOf = (b) => {
   if (!b) return null;
-  // sending: the email service never answered for these — not sure they went.
+  // sending: no answer on record for these (the email service never
+  // answered, or the server stopped mid-send) — not sure they went.
   if (b.counts) {
     return {
       total: num(b.counts.total) ?? 0, sent: num(b.counts.sent) ?? 0,
@@ -381,7 +382,7 @@ function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried })
       </div>
       {ab?.status === 'testing' && <div className="ot-result-why">A and B went to {c.sent} of {who(c.total)}.</div>}
       {saved && <div className="ot-result-why">{abPlanLine(abPlan(c.total, ab.pct), ab.wait_hours)}</div>}
-      {c.sending > 0 && <div className="ot-result-why">The email service didn’t answer for {c.sending}.</div>}
+      {c.sending > 0 && <div className="ot-result-why">We don’t know if {c.sending} got it.</div>}
       {!unsent && (c.failed > 0 || c.sent == null) && c.total > 0 && (
         <div className="ot-result-why">
           {plainReason(blast.provider_note)}
@@ -425,13 +426,36 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
   // Without email connected nothing goes out — say so before, not after.
   const offline = emailConfigured === false;
 
+  // A tap that got no answer (the server went down mid-send) may still be on
+  // record, partly sent: look for it — a new send of this kind and subject —
+  // and show it as it stands, so the next tap is its Try again (same people,
+  // same keys), never a second copy. `before`: the sends known at the first
+  // tap since a send last answered.
+  const before = useRef(null);
+  const unanswered = useRef(false);
+  const onRecord = async () => {
+    if (!before.current) return null;
+    const list = await apiGet('/blasts').catch(() => null);
+    return list?.blasts?.find((b) => b.kind === kind && b.subject === subject.trim() && !before.current.has(b.id)) || null;
+  };
   const send = async () => {
+    const known = queryClient.getQueryData(['blasts'])?.blasts;
+    if (!before.current && known) before.current = new Set(known.map((b) => b.id));
+    const kept = unanswered.current ? await onRecord() : null;
+    if (kept) { setConfirming(false); onSent?.(kept); return; }
     const res = await act.run('blast.send', {
       kind, subject: subject.trim(), body: body.trim(),
       ...(testing ? { ab: { ...ab, subject_b: ab.subject_b.trim(), metric: links ? ab.metric : 'opens' } } : {}),
     });
     setConfirming(false);
-    if (!res) return;
+    if (!res) {
+      unanswered.current = true;
+      const late = await onRecord();
+      if (late) onSent?.(late);
+      return;
+    }
+    before.current = null;
+    unanswered.current = false;
     onSent?.(resultOf(res));
   };
 
@@ -508,7 +532,7 @@ function PastRow({ b, showKind, emailConfigured, canWrite }) {
   const canRetry = canWrite && emailConfigured === true && !allSent && retry > 0 && !result;
   let why = null;
   if (!allSent && c.failed > 0) why = plainReason(b.provider_note);
-  else if (!allSent && c.sending > 0 && !held) why = `The email service didn’t answer for ${c.sending}.`;
+  else if (!allSent && c.sending > 0 && !held) why = `We don’t know if ${c.sending} got it.`;
   else if (!allSent && c.sent === 0 && c.failed === 0) why = 'Everyone on it unsubscribed.';
   return (
     <li className="ot-item">

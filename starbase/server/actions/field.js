@@ -14,8 +14,8 @@ import { httpError } from './util.js';
 import { runHooks, hasHook } from '../lib/hooks.js';
 // The tracked newsletter/press send path and A/B subject lines.
 import {
-  AB_MIN, abInput, abGroups, abOf, blastCounts, blastStatus, composeBlast, deliver,
-  findLinks, newToken, openTest, outcomeOf, restReleased, retryable, saveLinks, sendKey, startTest,
+  AB_MIN, NO_PROVIDER, abInput, abGroups, abOf, blastCounts, deliver, finishRun,
+  findLinks, newToken, openTest, restReleased, retryable, saveLinks, startTest,
 } from '../ext/abtests/send.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
@@ -57,6 +57,17 @@ const selfPerson = async (tx, ctx, emit, { create = false } = {}) => {
 // A send's status rule (blastStatus), its counts (blastCounts) and its
 // message (plain text + tracked HTML) live in ext/abtests/send.js, shared
 // with the A/B winner job.
+
+// A newsletter / press send in two phases (the A/B winner job's): the
+// handler commits the send and its list; its `after` step then sends,
+// outside the transaction (send.js deliver). What the handler hands to
+// `after` sits under this key — a Symbol, so it never reaches the reply.
+const SEND = Symbol('send');
+const blastOut = (b) => ({
+  id: b.id, kind: b.kind, subject: b.subject, status: b.status,
+  audience_count: b.audience_count, provider_note: b.provider_note, sent_at: b.sent_at,
+  ...(b.ab_status ? { ab: abOf(b) } : {}),
+});
 
 const ACTIVE_SHIFT_STATUSES = ['assigned', 'confirmed'];
 const activeOnShift = async (tx, workspaceId, shiftId) => (await tx.query(
@@ -468,6 +479,11 @@ export const FIELD_ACTIONS = {
   // email/text is how the 'queued' ones are reached. A text the texting rules
   // hold back records why: 'opted_out' (STOP or do-not-text) or 'quiet'
   // (outside the hours texts may go).
+  // Each email carries an Idempotency-Key: the shift, the assignment and the
+  // round (this shift's notices so far, plus one). The round only moves when
+  // a round commits, so Notify again after a crash mid-round is the same
+  // round with the same keys, and the email service drops the ones it took;
+  // Notify again after a round that went through is a new round.
   'shift.notify': {
     roles: DESK_ROLES,
     input: z.object({ shift_id: uuid() }),
@@ -484,11 +500,21 @@ export const FIELD_ACTIONS = {
         [input.shift_id, ctx.workspaceId],
       )).rows;
 
+      // Read under the campaign lock runAction holds: two taps can't share a round.
+      const round = (await tx.query(
+        `select count(*)::int as n from events
+         where workspace_id = $1 and entity_type = 'shift' and entity_id = $2 and action = 'shift.notify'`,
+        [ctx.workspaceId, shift.id],
+      )).rows[0].n + 1;
+
       const message = shiftMessage(shift, ctx.workspace.name, ctx.workspace.settings?.tz || 'America/Vancouver');
       const results = [];
       for (const a of assignees) {
         const emailRes = a.email
-          ? await sendEmail({ to: a.email, subject: `Your shift: ${shift.title}`, text: message })
+          ? await sendEmail({
+            to: a.email, subject: `Your shift: ${shift.title}`, text: message,
+            idempotencyKey: `shift-${shift.id}-${a.assignment_id}-${round}`,
+          })
           : { status: 'skipped', detail: 'no email on file' };
         // The texting rules (server/ext/texting) apply to notices too: never
         // an opted-out or do-not-text number, never in quiet hours.
@@ -508,7 +534,7 @@ export const FIELD_ACTIONS = {
           ...(['opted_out', 'quiet'].includes(textRes.status) ? { text_note: textRes.detail } : {}),
         });
       }
-      emit('shift', shift.id, 'update', { notified: results.length });
+      emit('shift', shift.id, 'update', { notified: results.length, round });
       return { shift_id: shift.id, notified: results };
     },
   },
@@ -620,6 +646,14 @@ export const FIELD_ACTIONS = {
   },
 
   // ── Email blasts: newsletter → subscribed list; press → media-tagged people ──
+  // The send and every recipient row ('queued', each with its own token for
+  // the open pixel and its links) commit first; then `after` sends them, a
+  // few at a time, each claimed 'sending' before its email goes — so a crash
+  // or a deploy mid-send leaves a true record: who has it ('sent'), who might
+  // ('sending' — not sure; Try again with the same key) and who doesn't
+  // ('queued'), never no record and never a second copy by itself.
+  // Without email connected nothing is sent: the send is saved, and
+  // blast.resend sends it once it is.
   'blast.send': {
     roles: DESK_ROLES,
     input: z.object({
@@ -657,76 +691,70 @@ export const FIELD_ACTIONS = {
       const ab = input.ab && audience.length >= AB_MIN ? input.ab : null;
       const groups = ab ? abGroups(audience.length, ab.pct) : [];
       const live = emailConfigured();
-      const links = findLinks(input.body);
+      const note = live ? null : NO_PROVIDER;
 
       const id = newId();
-      let sent = 0, failed = 0, unsure = 0;
-      const recipientRows = [];
-      // Without email connected sendEmail sends nothing and answers 'queued':
-      // the send is saved, and blast.resend sends those rows once it is.
-      // Each recipient gets its own token for the open pixel and its links,
-      // and its row id up front for the email's idempotency key. One the
-      // service never answered for is 'sending' — not sure it went.
+      await tx.query(
+        `insert into blasts (id, workspace_id, kind, subject, body, status, provider_note, audience_count, created_by)
+         values ($1, $2, $3, $4, $5, 'queued', $6, $7, $8)`,
+        [id, ctx.workspaceId, input.kind, input.subject, input.body, note, audience.length, ctx.user.id],
+      );
+      // The rows `after` sends now. The rest of an A/B send waits for the
+      // winner: nothing goes to them now.
+      const now = [];
       for (const [i, r] of audience.entries()) {
         const group = groups[i] || null;
-        const token = newToken();
         const rowId = newId();
-        // The rest of an A/B send waits for the winner: nothing goes to them now.
-        const res = group === 'rest' && live
-          ? { status: 'queued' }
-          : await sendEmail({
-            to: r.email,
-            subject: group === 'b' ? ab.subject_b : input.subject,
-            ...composeBlast(ctx, { kind: input.kind, body: input.body, subscriptionId: r.id, token, links }),
-            idempotencyKey: sendKey(id, { id: rowId, send_tries: 0 }),
-          });
-        const out = outcomeOf(res);
-        if (out.status === 'sent') sent += 1;
-        else if (out.status === 'failed') failed += 1;
-        else if (out.status === 'sending') unsure += 1;
-        recipientRows.push({ id: rowId, email: r.email, name: r.name, status: out.status, refused: out.refused, detail: res.detail, token, group });
-      }
-      const status = blastStatus({ total: audience.length, sent, failed });
-      const note = recipientRows.find((r) => r.detail)?.detail || null;
-      await tx.query(
-        `insert into blasts (id, workspace_id, kind, subject, body, status, provider_note, audience_count, sent_at, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, case when $6 = 'sent' then now() end, $9)`,
-        [id, ctx.workspaceId, input.kind, input.subject, input.body, status, note, audience.length, ctx.user.id],
-      );
-      for (const r of recipientRows) {
         await tx.query(
-          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group,
-             sent_at, sending_at, send_tries)
-           values ($1, $2, $3, $4, $5, $6, $7, $8,
-             case when $6 = 'sent' then now() end, case when $6 = 'sending' then now() end, $9)`,
-          [r.id, ctx.workspaceId, id, r.email, r.name || null, r.status, r.token, r.group, r.refused ? 1 : 0],
+          `insert into blast_recipients (id, workspace_id, blast_id, email, name, status, token, ab_group)
+           values ($1, $2, $3, $4, $5, 'queued', $6, $7)`,
+          [rowId, ctx.workspaceId, id, r.email, r.name || null, newToken(), group],
         );
+        if (live && group !== 'rest') now.push(rowId);
       }
-      await saveLinks(tx, ctx.workspaceId, id, links);
+      await saveLinks(tx, ctx.workspaceId, id, findLinks(input.body));
       // Not connected: the whole test is saved and starts on Send now.
       const test = ab ? await openTest(tx, ctx, id, ab, live) : null;
       emit('blast', id, 'create', {
-        kind: input.kind, subject: input.subject, audience: audience.length, status,
+        kind: input.kind, subject: input.subject, audience: audience.length, status: 'queued',
         ...(test ? { ab: { subject_b: ab.subject_b, pct: ab.pct, wait_hours: ab.wait_hours, metric: ab.metric, status: test.status } } : {}),
       });
-      const counts = {
-        total: audience.length, sent, failed, queued: audience.length - sent - failed - unsure,
-        ...(unsure ? { sending: unsure } : {}),
-      };
       return {
         blast: {
-          id, kind: input.kind, subject: input.subject, status, audience_count: audience.length, provider_note: note,
+          id, kind: input.kind, subject: input.subject, status: 'queued', audience_count: audience.length, provider_note: note,
           ...(test ? { ab: test } : {}),
         },
-        counts,
+        counts: { total: audience.length, sent: 0, failed: 0, queued: audience.length },
         ...(input.ab && !ab ? { ab_skipped: `A/B needs at least ${AB_MIN}` } : {}),
+        [SEND]: now.length ? {
+          ids: now,
+          blast: { id, kind: input.kind, subject: input.subject, body: input.body, ab_subject_b: ab?.subject_b ?? null, ab_winner: null },
+        } : null,
+      };
+    },
+    // Committed: now the emails. Answers the send as it stands after them.
+    after: async (db, ctx, result) => {
+      const plan = result[SEND];
+      if (!plan) return { result };
+      const run = await deliver(db, ctx, plan.blast, plan.ids, { actorId: ctx.user.id });
+      const done = await finishRun(db, ctx, {
+        actorId: ctx.user.id, action: 'blast.send', blastId: plan.blast.id, note: run.note,
+        payload: {
+          sent: run.sent, failed: run.failed, unsubscribed: run.skipped, ...(run.unsure ? { unsure: run.unsure } : {}),
+        },
+      });
+      const { status, audience_count: audienceCount, provider_note: providerNote } = done.blast;
+      return {
+        result: { ...result, blast: { ...result.blast, status, audience_count: audienceCount, provider_note: providerNote }, counts: done.counts },
+        lastSeq: done.lastSeq,
       };
     },
   },
 
   // "Send now": send one saved blast to everyone on it not yet reached — the
   // 'queued' rows (saved while email wasn't connected) and the 'failed' rows
-  // (the provider turned them down) — through the same path as blast.send.
+  // (the provider turned them down) — through the same two phases as
+  // blast.send (the handler picks them; `after` claims and sends them).
   // A 'sent' row is never touched, so no one gets it twice however often it
   // runs. Refused (409) while email isn't connected: nothing pretends to send.
   // A newsletter subscriber who unsubscribed since is taken off the send
@@ -751,40 +779,37 @@ export const FIELD_ACTIONS = {
       // the service never answered (sent again with the same key, so the
       // service drops it if it did go).
       const waiting = (await tx.query(
-        `select id, email, name, token, ab_group, send_tries from blast_recipients
+        `select id from blast_recipients
          where blast_id = $1 and workspace_id = $2 and ${retryable()}
            and ($3::boolean or ab_group is distinct from 'rest')
          order by created_at, id`,
         [blast.id, ctx.workspaceId, restReleased(blast)],
       )).rows;
-      const pick = (b) => ({
-        id: b.id, kind: b.kind, subject: b.subject, status: b.status,
-        audience_count: b.audience_count, provider_note: b.provider_note, sent_at: b.sent_at,
-        ...(b.ab_status ? { ab: abOf(b) } : {}),
-      });
       const starting = blast.ab_status === 'saved';
       if (waiting.length === 0 && !starting) {
-        return { blast: pick(blast), counts: await blastCounts(tx, ctx.workspaceId, blast.id), resent: { sent: 0, failed: 0, skipped: 0 } };
+        return { blast: blastOut(blast), counts: await blastCounts(tx, ctx.workspaceId, blast.id), resent: { sent: 0, failed: 0, skipped: 0 } };
       }
-
-      const { sent, failed, skipped, note: firstNote } = await deliver(tx, ctx, blast, waiting);
-      let note = firstNote;
+      await saveLinks(tx, ctx.workspaceId, blast.id, findLinks(blast.body));
+      // A saved A/B send starts its test now: A and B go out below.
       const test = starting ? await startTest(tx, ctx, blast.id) : null;
-      const counts = await blastCounts(tx, ctx.workspaceId, blast.id);
-      const status = blastStatus(counts);
-      if (counts.total === 0) note = 'everyone on this send has unsubscribed';
-      const updated = (await tx.query(
-        `update blasts set status = $3, provider_note = $4, audience_count = $5,
-           sent_at = case when $3 = 'sent' then now() else sent_at end
-         where id = $1 and workspace_id = $2
-         returning *`,
-        [blast.id, ctx.workspaceId, status, note, counts.total],
-      )).rows[0];
-      emit('blast', blast.id, 'update', {
-        resent: waiting.length - skipped, sent, failed, unsubscribed: skipped, status,
-        ...(test ? { ab: test.status } : {}),
+      if (test) emit('blast', blast.id, 'update', { ab: test.status });
+      return { blast: blastOut(blast), [SEND]: { ids: waiting.map((r) => r.id), blast, test } };
+    },
+    after: async (db, ctx, result) => {
+      const plan = result[SEND];
+      if (!plan) return { result };
+      const run = await deliver(db, ctx, plan.blast, plan.ids, { actorId: ctx.user.id });
+      const done = await finishRun(db, ctx, {
+        actorId: ctx.user.id, action: 'blast.resend', blastId: plan.blast.id, note: run.note,
+        payload: {
+          resent: run.claimed, sent: run.sent, failed: run.failed, unsubscribed: run.skipped,
+          ...(run.unsure ? { unsure: run.unsure } : {}), ...(plan.test ? { ab: plan.test.status } : {}),
+        },
       });
-      return { blast: pick(updated), counts, resent: { sent, failed, skipped } };
+      return {
+        result: { blast: blastOut(done.blast), counts: done.counts, resent: { sent: run.sent, failed: run.failed, skipped: run.skipped } },
+        lastSeq: done.lastSeq,
+      };
     },
   },
 

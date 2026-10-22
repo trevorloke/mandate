@@ -81,7 +81,10 @@ one tap away under **More**.
   signs to put up.
 - **Outreach → Newsletter** — without email connected, a newsletter is
   *Saved — not sent*; connect email (Resend) and tap *Send now*. A send
-  that partly fails says *Sent to 1 of 2 — 1 failed* with *Try again*.
+  that partly fails says *Sent to 1 of 2 — 1 failed* with *Try again*. If
+  the server stops mid-send, the send is still listed — *Sent to 7 of 20 —
+  10 not sent · 3 not sure* — and *Try again* sends with the same keys
+  (Resend drops a repeat).
 - **Two subject lines** (50+ subscribers) — Write newsletter → *Try two
   subject lines*: A and B each go to a small group; after the wait the better
   one (by opens, or by clicks when the message has a link) goes to everyone

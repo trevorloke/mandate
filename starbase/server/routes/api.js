@@ -103,7 +103,11 @@ app.post('/actions/:name', async (c) => {
       { workspaceId: ctx.workspaceId, actorId: ctx.user.id, action: name },
       (tx, emit) => action.handler(tx, ctx, parsed.data, emit),
     );
-    return c.json({ ...result, seq: lastSeq });
+    if (!action.after) return c.json({ ...result, seq: lastSeq });
+    // Committed: now the work that must never hold the campaign lock (an
+    // email send). Its writes are runActions of their own.
+    const done = await action.after(c.get('db'), ctx, result);
+    return c.json({ ...done.result, seq: done.lastSeq ?? lastSeq });
   } catch (e) {
     if (e.status) return c.json({ error: e.message }, e.status);
     throw e;

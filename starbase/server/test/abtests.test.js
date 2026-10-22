@@ -298,8 +298,11 @@ test('A/B: 20% each to A and B now, the rest held; Send now never reaches the he
     assert.equal(s.ab.result, null, 'no result before the winner');
     assert.deepEqual(s.ab.a, { total: 12, delivered: 12, opened: 0, clicked: 0 });
 
-    const ev = (await events(c, 'blast.send')).at(-1);
+    // Logged as asked (the send and its test), then as it went.
+    const [ev, done] = (await events(c, 'blast.send')).filter((e) => e.entity_id === r.json.blast.id);
+    assert.equal(ev.op, 'create');
     assert.deepEqual(ev.payload.ab, { subject_b: 'Subject B here', pct: 20, wait_hours: 4, metric: 'opens', status: 'testing' });
+    assert.deepEqual(done.payload, { sent: 24, failed: 0, unsubscribed: 0, status: 'queued' });
     const jobs = (await db.query(`select status, payload from jobs where workspace_id = $1 and kind = 'abtests.winner'`, [ws])).rows;
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].payload.blast_id, r.json.blast.id);

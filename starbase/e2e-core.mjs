@@ -6,7 +6,9 @@
 //   · the map's door card offers "+ Person at this door" to a volunteer at a
 //     door in their turf, not elsewhere (and the server refuses elsewhere);
 //   · the volunteer's brief carries no money-derived first steps;
-//   · the export holds every campaign table, with no link tokens.
+//   · the export holds every campaign table, with no link tokens;
+//   · a newsletter send whose answer is lost (the server went down mid-send)
+//     is found on record and shown as it stands, never sent a second time.
 // Every claim on screen is checked against the API; the books verify.
 //
 //   node e2e-core.mjs                           (starts its own server on :4103)
@@ -256,6 +258,34 @@ const ex = (await D.api('/export')).json;
 const want = ['contacts', 'signs', 'turfs', 'receipts', 'survey_responses', 'texting_optouts', 'ladders', 'ladder_runs'];
 check('export: every campaign table, receipts with no token', want.every((k) => Array.isArray(ex?.[k])) && ex.receipts.length >= 1 && ex.receipts.every((r) => !('token' in r)) && !ex.users && !ex.sessions, want.filter((k) => !Array.isArray(ex?.[k])).join(','));
 check('the volunteer cannot export', (await V.api('/export')).status === 403);
+
+// ════════════════════════════════════════════════════════════════════════════
+// Newsletter: a send whose answer never came back (the server went down
+// mid-send) is on record — the screen shows it, never a second copy
+// ════════════════════════════════════════════════════════════════════════════
+for (const who of ['lost.one', 'lost.two']) await D.api('/actions/subscription.add', { email: `${who}+${tag}@example.org` });
+const lostSends = async () => (await D.api('/blasts')).json.blasts.filter((b) => b.subject === 'Lost answer');
+await D.go('/outreach/newsletter');
+await page.click('button:has-text("Write newsletter")');
+await page.waitForSelector('#newsletter-subject', { timeout: 5000 });
+await page.fill('#newsletter-subject', 'Lost answer');
+await page.fill('#newsletter-body', 'Hello neighbours.');
+// The server takes the send; its answer is lost, and so is the first look for it.
+let lostGets = 0;
+await page.route('**/api/actions/blast.send', async (route) => { await route.fetch(); await route.abort('failed'); });
+await page.route('**/api/blasts', (route) => (lostGets++ === 0 ? route.abort('failed') : route.continue()));
+await page.click('form.ot-compose button[type="submit"]');
+await page.click('button:has-text("Yes, send"), button:has-text("Yes, save")');
+await sleep(1200);
+check('no answer: the form stays, with the error; the server has the send once', !!(await page.$('#newsletter-subject')) && !!(await page.$('form.ot-compose .error')) && (await lostSends()).length === 1);
+// Tapping again first looks for it: found, it is shown as it stands — not sent again.
+await page.click('form.ot-compose button[type="submit"]');
+await page.click('button:has-text("Yes, send"), button:has-text("Yes, save")');
+await sleep(1200);
+t = await D.text();
+check('the next tap finds it on record: "Saved for 2 subscribers — not sent", no second send', /Saved for 2 subscribers — not sent/.test(t) && !(await page.$('#newsletter-subject')) && (await lostSends()).length === 1, (t.match(/Saved for.{0,60}/) || [''])[0]);
+await page.unroute('**/api/actions/blast.send');
+await page.unroute('**/api/blasts');
 
 const v = (await D.api('/audit/verify')).json;
 check('hash chain verifies', v.ok === true && v.checked > 10, JSON.stringify(v));

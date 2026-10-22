@@ -21,12 +21,15 @@ import { z } from 'zod';
 import { randomBytes, randomInt } from 'node:crypto';
 import { sendEmail, unsubscribeHeaders } from '../../lib/notify.js';
 import { enqueueJob } from '../../lib/jobs.js';
+import { runAction } from '../../lib/events.js';
 
 export const AB_MIN = 50;
 export const AB_PCTS = [10, 20, 30];
 export const AB_WAITS = [1, 2, 4, 12, 24];
 export const AB_METRICS = ['opens', 'clicks'];
 export const WINNER_JOB = 'abtests.winner';
+// sendEmail's own words when email isn't connected (the screen keys on them).
+export const NO_PROVIDER = 'no email provider configured (set RESEND_API_KEY)';
 
 export const abInput = z.object({
   subject_b: z.string().trim().min(1).max(300),
@@ -232,42 +235,107 @@ export const decide = (groups, metric) => {
   return { winner: rb > ra ? 'b' : 'a', tie: false };
 };
 
-// Send saved rows of one blast (blast.resend). A newsletter subscriber who
-// unsubscribed since is taken off the send, never emailed. Each row's result
-// is stored on it. Answers { sent, failed, skipped, unsure, note }.
-export const deliver = async (tx, ctx, blast, rows) => {
+// Send some of a blast's rows — blast.send's and blast.resend's (actions/
+// field.js, their `after` step) — in the same two phases as the winner job,
+// never holding the campaign lock while the email service is called. `ids`
+// are the rows this run may send, in order, ten at a time:
+//   1. claim   each still waiting → 'sending', committed before the call. A
+//              newsletter subscriber who left the list since is taken off the
+//              send, never emailed. A row someone else claimed or settled
+//              meanwhile is left to them.
+//   2. send    each claimed row, outside any transaction, with its key.
+//   3. record  each answer in its own write; a row someone else settled
+//              meanwhile is left alone.
+// A crash leaves the claimed few 'sending' (not sure — Try again sends them
+// with the same key once they are ten minutes old) and the rest waiting (not
+// sent): never no record, never a second copy by itself. Each write is on
+// the event log as blast.deliver by the person who sent.
+// Answers { sent, failed, skipped, unsure, claimed, note }.
+export const DELIVER_ACTION = 'blast.deliver';
+const BATCH = 10;
+export const deliver = async (db, ctx, blast, ids, { actorId = null } = {}) => {
+  const workspaceId = ctx.workspaceId;
+  const act = (fn) => runAction(db, { workspaceId, actorId, action: DELIVER_ACTION }, fn);
   const links = findLinks(blast.body);
-  await saveLinks(tx, ctx.workspaceId, blast.id, links);
-  let sent = 0, failed = 0, skipped = 0, unsure = 0, note = null;
-  for (const r of rows) {
-    let subscriptionId = null;
-    if (blast.kind === 'newsletter') {
-      const sub = (await tx.query(
-        'select id, status from subscriptions where workspace_id = $1 and email = $2',
-        [ctx.workspaceId, String(r.email).toLowerCase()],
-      )).rows[0];
-      if (!sub || sub.status !== 'subscribed') {
-        await tx.query('delete from blast_recipients where id = $1 and workspace_id = $2', [r.id, ctx.workspaceId]);
-        skipped += 1;
-        continue;
+  const run = { sent: 0, failed: 0, skipped: 0, unsure: 0, claimed: 0, note: null };
+  const left = [...ids];
+  while (left.length) {
+    const batch = left.splice(0, BATCH);
+    const { result: go } = await act(async (tx, emit) => {
+      const rows = (await tx.query(
+        `select id, email, token, ab_group, send_tries from blast_recipients
+         where blast_id = $1 and workspace_id = $2 and id = any($3::uuid[]) and ${retryable()}
+         order by created_at, id for update skip locked`,
+        [blast.id, workspaceId, batch],
+      )).rows;
+      const out = [];
+      let gone = 0;
+      for (const r of rows) {
+        let subscriptionId = null;
+        if (blast.kind === 'newsletter') {
+          const sub = (await tx.query(
+            'select id, status from subscriptions where workspace_id = $1 and email = $2',
+            [workspaceId, String(r.email).toLowerCase()],
+          )).rows[0];
+          if (!sub || sub.status !== 'subscribed') {
+            await tx.query('delete from blast_recipients where id = $1 and workspace_id = $2', [r.id, workspaceId]);
+            gone += 1;
+            continue;
+          }
+          subscriptionId = sub.id;
+        }
+        const token = r.token || newToken();
+        await tx.query(
+          `update blast_recipients set status = 'sending', sending_at = now(), token = $3
+           where id = $1 and workspace_id = $2`,
+          [r.id, workspaceId, token],
+        );
+        out.push({ ...r, token, subscriptionId });
       }
-      subscriptionId = sub.id;
-    }
-    const token = r.token || newToken();
-    const res = await sendEmail({
-      to: r.email,
-      subject: subjectFor(blast, r.ab_group),
-      ...composeBlast(ctx, { kind: blast.kind, body: blast.body, subscriptionId, token, links }),
-      idempotencyKey: sendKey(blast.id, r),
+      if (out.length || gone) emit('blast', blast.id, 'update', { sending: out.length, unsubscribed: gone });
+      return { rows: out, gone };
     });
-    const { status } = outcomeOf(res);
-    if (status === 'sent') sent += 1;
-    else if (status === 'failed') failed += 1;
-    else if (status === 'sending') unsure += 1;
-    if (!note && res.detail) note = res.detail;
-    await recordOutcome(tx, ctx.workspaceId, r.id, res, { token });
+    run.skipped += go.gone;
+    for (const r of go.rows) {
+      run.claimed += 1;
+      const res = await sendEmail({
+        to: r.email,
+        subject: subjectFor(blast, r.ab_group),
+        ...composeBlast(ctx, { kind: blast.kind, body: blast.body, subscriptionId: r.subscriptionId, token: r.token, links }),
+        idempotencyKey: sendKey(blast.id, r),
+      });
+      const { status } = outcomeOf(res);
+      if (status === 'sent') run.sent += 1;
+      else if (status === 'failed') run.failed += 1;
+      else if (status === 'sending') run.unsure += 1;
+      if (!run.note && res.detail) run.note = res.detail;
+      await act(async (tx, emit) => {
+        const n = await recordOutcome(tx, workspaceId, r.id, res, { from: 'sending' });
+        if (n.affectedRows) emit('blast_recipient', r.id, 'update', { blast_id: blast.id, status });
+      });
+    }
   }
-  return { sent, failed, skipped, unsure, note };
+  return run;
+};
+
+// After a run: the whole send's status, counts and note, in one write
+// labelled by the run (blast.send / blast.resend). `payload` adds this run's
+// numbers to its event. Answers { blast (the row), counts, lastSeq }.
+export const finishRun = async (db, ctx, { actorId = null, action, blastId, note = null, payload = {} }) => {
+  const { result, lastSeq } = await runAction(db, { workspaceId: ctx.workspaceId, actorId, action }, async (tx, emit) => {
+    const counts = await blastCounts(tx, ctx.workspaceId, blastId);
+    const status = blastStatus(counts);
+    const row = (await tx.query(
+      `update blasts set status = $3, provider_note = $4, audience_count = $5,
+         sent_at = case when $3 = 'sent' then now() else sent_at end
+       where id = $1 and workspace_id = $2
+       returning *`,
+      [blastId, ctx.workspaceId, status, counts.total === 0 ? 'everyone on this send has unsubscribed' : note, counts.total],
+    )).rows[0];
+    emit('blast', blastId, 'update', { ...payload, status });
+    return { blast: row, counts };
+  });
+  return { ...result, lastSeq };
 };
 
 // A new A/B send: store its two subjects and settings. Saved while email
