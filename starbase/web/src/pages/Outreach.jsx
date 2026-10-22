@@ -14,6 +14,9 @@ import { Link, Navigate, useOutletContext, useParams, useSearchParams } from 're
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { VOLUNTEER_ROLES } from '@starbase/shared/canvass';
 import { apiGet, action, fmtMoney } from '../api.js';
+import {
+  AB_MIN, AbFields, OpensNote, SendStats, TestingList, abAsk, abPlan, abState, useBlastStat,
+} from '../components/AbTests.jsx';
 import './outreach.css';
 
 const TABS = [
@@ -289,7 +292,7 @@ const resultOf = (res) => (res?.blast ? { ...res.blast, counts: res.counts, rese
 // "Send to 3 subscribers now? Yes, send · No" — the quiet way to send a saved
 // one (Send now) or the ones that failed (Try again). blast.resend sends only
 // those, never anyone already sent.
-function ResendButton({ b, n, label, onDone }) {
+function ResendButton({ b, n, label, ask, onDone }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const act = useAction(() => {
@@ -308,7 +311,7 @@ function ResendButton({ b, n, label, onDone }) {
         </button>
       ) : (
         <div className="ot-confirm" role="group" aria-label="Confirm send">
-          <span>Send to <strong>{n}</strong> {nounFor(b.kind, n)} now?</span>
+          <span>{ask || <>Send to <strong>{n}</strong> {nounFor(b.kind, n)} now?</>}</span>
           <button type="button" className="btn ot-solid ot-btn-tap" disabled={act.busy} onClick={go}>
             {act.busy ? 'Sending…' : 'Yes, send'}
           </button>
@@ -324,6 +327,7 @@ function ResendButton({ b, n, label, onDone }) {
 // "Sent to 2 subscribers." · "Sent to 1 of 2 subscribers — 1 failed." ·
 // "Failed — 2 subscribers not reached." · "Saved for 2 subscribers — not sent."
 function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried }) {
+  const stat = useBlastStat(blast?.id);
   if (!blast) return null;
   const c = countsOf(blast);
   const who = (n) => audienceWords(blast.kind, n);
@@ -339,8 +343,14 @@ function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried })
     tone = 'queued';
   } else if (c.failed > 0) { line = `Failed — ${who(c.failed)} not reached.`; tone = 'failed'; }
   else { line = `Saved for ${who(c.total)} — not sent.`; tone = 'queued'; }
+  // A/B (components/AbTests.jsx): a started test says where it stands; the
+  // rest it holds for the winner are not "not sent" and not retried.
+  const ab = stat?.ab || blast.ab || null;
+  const abNow = abState(ab, stat, c);
+  if (abNow) { line = `${abNow.line}.`; tone = abNow.tone; }
+  const held = ab?.status === 'testing' ? (stat?.ab?.rest?.held ?? c.queued) : 0;
   const unsent = c.total > 0 && c.sent === 0 && c.failed === 0;
-  const retry = retryCount(c);
+  const retry = retryCount(c) - held;
   const canRetry = canWrite && emailConfigured === true && !unsent && retry > 0 && !!blast.id;
   return (
     <div className="ot-result" data-status={tone} role="status">
@@ -355,6 +365,8 @@ function BlastResult({ blast, emailConfigured, canWrite, onDismiss, onRetried })
         </strong>
         {onDismiss && <button type="button" className="btn btn-quiet ot-btn-tap" onClick={onDismiss}>OK</button>}
       </div>
+      {ab?.status === 'testing' && <div className="ot-result-why">A and B went to {c.sent} of {who(c.total)}.</div>}
+      {ab?.status === 'saved' && <div className="ot-result-why">The A/B test starts on Send now.</div>}
       {!unsent && (c.failed > 0 || c.sent == null) && c.total > 0 && (
         <div className="ot-result-why">
           {plainReason(blast.provider_note)}
@@ -381,18 +393,26 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [confirming, setConfirming] = useState(false);
+  // Two subject lines (components/AbTests.jsx): null = one; a list under 50 sends normally.
+  const [ab, setAb] = useState(null);
   const act = useAction(() => {
     queryClient.invalidateQueries({ queryKey: ['blasts'] });
   });
 
-  const ready = subject.trim().length > 0 && body.trim().length > 0;
+  const testing = ab != null && audienceCount != null && audienceCount >= AB_MIN;
+  const plan = testing ? abPlan(audienceCount, ab.pct) : null;
+  const ready = subject.trim().length > 0 && body.trim().length > 0
+    && (ab == null || audienceCount != null) && (!testing || ab.subject_b.trim().length > 0);
   const empty = audienceCount === 0;
   const noun = (n) => plural(n, audienceNoun.one, audienceNoun.many);
   // Without email connected nothing goes out — say so before, not after.
   const offline = emailConfigured === false;
 
   const send = async () => {
-    const res = await act.run('blast.send', { kind, subject: subject.trim(), body: body.trim() });
+    const res = await act.run('blast.send', {
+      kind, subject: subject.trim(), body: body.trim(),
+      ...(testing ? { ab: { ...ab, subject_b: ab.subject_b.trim() } } : {}),
+    });
     setConfirming(false);
     if (!res) return;
     onSent?.(resultOf(res));
@@ -401,11 +421,13 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
   return (
     <form className="card ot-compose" onSubmit={(e) => { e.preventDefault(); if (ready && !empty && !confirming) setConfirming(true); }}>
       <div className="field">
-        <label htmlFor={`${kind}-subject`}>Subject</label>
+        <label htmlFor={`${kind}-subject`}>{testing ? 'Subject A' : 'Subject'}</label>
         <input id={`${kind}-subject`} className="input" value={subject} maxLength={300} autoFocus
           onChange={(e) => { setSubject(e.target.value); setConfirming(false); }}
           placeholder={kind === 'press' ? 'Imagine Surrey unveils transit plan' : 'This week on the campaign'} />
       </div>
+      <AbFields idPrefix={kind} audienceCount={audienceCount} noun={noun} value={ab}
+        onChange={(v) => { setAb(v); setConfirming(false); }} />
       <div className="field">
         <label htmlFor={`${kind}-body`}>Message</label>
         <textarea id={`${kind}-body`} className="input" value={body} maxLength={50000}
@@ -417,7 +439,8 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
       <div className="ot-foot">
         {confirming ? (
           <div className="ot-confirm" role="group" aria-label="Confirm send">
-            <span>{offline ? 'Save for' : 'Send to'} <strong>{audienceCount}</strong> {noun(audienceCount)}?</span>
+            <span>{testing && !offline ? abAsk(plan, ab.wait_hours)
+              : <>{offline ? 'Save for' : 'Send to'} <strong>{audienceCount}</strong> {noun(audienceCount)}?</>}</span>
             <button type="button" className="btn btn-primary ot-btn-tap" disabled={act.busy} onClick={send}>
               {act.busy ? (offline ? 'Saving…' : 'Sending…') : offline ? 'Yes, save' : 'Yes, send'}
             </button>
@@ -448,6 +471,7 @@ function ComposeCard({ kind, audienceCount, audienceNoun, emptyReason, emailConf
 // there (this list lives under More, far from the top).
 function PastRow({ b, showKind, emailConfigured, canWrite }) {
   const [result, setResult] = useState(null);
+  const stat = useBlastStat(b.id);
   const c = countsOf(b);
   const allSent = b.status === 'sent' || (c.sent != null && c.total > 0 && c.sent === c.total);
   let reach;
@@ -456,7 +480,12 @@ function PastRow({ b, showKind, emailConfigured, canWrite }) {
   else if (allSent) { reach = audienceWords(b.kind, c.total); chip = { status: 'sent', label: 'sent' }; }
   else if (c.sent === 0 && c.failed === 0) { reach = c.total > 0 ? `saved for ${audienceWords(b.kind, c.total)}` : 'saved'; chip = { status: 'ghost', label: 'not sent' }; }
   else { reach = `${c.sent} of ${c.total} reached`; chip = c.sent > 0 ? { status: 'queued', label: 'partly sent' } : { status: 'failed', label: 'failed' }; }
-  const retry = retryCount(c);
+  // A/B: a running test holds the rest for the winner — not "partly sent", never retried.
+  const ab = stat?.ab || null;
+  const abNow = abState(ab, stat, c);
+  const held = ab?.status === 'testing' ? ab.rest.held : 0;
+  if (ab?.status === 'testing') { reach = audienceWords(b.kind, c.total); chip = { status: 'queued', label: 'testing' }; }
+  const retry = retryCount(c) - held;
   const canRetry = canWrite && emailConfigured === true && !allSent && retry > 0 && !result;
   let why = null;
   if (!allSent && c.failed > 0) why = plainReason(b.provider_note);
@@ -471,6 +500,9 @@ function PastRow({ b, showKind, emailConfigured, canWrite }) {
             <span>{reach}</span>
             <span>{fmtWhen(b.sent_at || b.created_at)}</span>
           </span>
+          {ab && <span className="ab-b">B · {ab.subject_b}</span>}
+          {abNow && <span className="ab-line" data-tone={abNow.tone}>{abNow.line}</span>}
+          <SendStats stat={stat} />
           {why && <span className="ot-row-note">{why}</span>}
         </span>
         <StatusChip status={chip.status} label={chip.label} />
@@ -510,6 +542,10 @@ function PastList({ blasts, loading, kindFilter, emailConfigured, canWrite }) {
 function UnsentRow({ b, emailConfigured, canWrite, onResent }) {
   const n = countsOf(b).queued;
   const canSend = canWrite && emailConfigured === true;
+  // A saved A/B send: Send now starts the test — A and B now, the winner later.
+  const stat = useBlastStat(b.id);
+  const ab = stat?.ab?.status === 'saved' ? stat.ab : null;
+  const notSent = emailConfigured ? 'Not sent' : 'Not sent — email isn’t connected';
   return (
     <li className="ot-item">
       <div className="ot-row ot-row--static ot-row--wrap">
@@ -519,12 +555,16 @@ function UnsentRow({ b, emailConfigured, canWrite, onResent }) {
             <span>{audienceWords(b.kind, n)}</span>
             <span>saved {fmtWhen(b.created_at)}</span>
           </span>
-          <span className="ot-row-note">{emailConfigured ? 'Not sent' : 'Not sent — email isn’t connected'}</span>
+          {ab && <span className="ab-b">B · {ab.subject_b}</span>}
+          <span className="ot-row-note">{ab ? `A/B test · ${notSent.toLowerCase()}` : notSent}</span>
         </span>
       </div>
       {canSend && (
         <div className="ot-body">
-          <ResendButton b={b} n={n} label="Send now" onDone={onResent} />
+          {ab ? (
+            <ResendButton b={b} n={ab.a.total + ab.b.total} label="Send now" onDone={onResent}
+              ask={abAsk({ a: ab.a.total, b: ab.b.total, rest: ab.rest.total }, ab.wait_hours)} />
+          ) : <ResendButton b={b} n={n} label="Send now" onDone={onResent} />}
         </div>
       )}
     </li>
@@ -623,6 +663,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
           </ul>
           <UnsentList blasts={blasts.data?.blasts} kind="newsletter" emailConfigured={emailConfigured}
             canWrite={canWrite} onResent={setResult} />
+          <TestingList blasts={blasts.data?.blasts} kind="newsletter" skip={result?.id} />
         </>
       )}
 
@@ -681,6 +722,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
           {blasts.isError && <p className="error">{blasts.error.message}</p>}
           <PastList blasts={blasts.data?.blasts} loading={blasts.isPending}
             emailConfigured={emailConfigured} canWrite={canWrite} />
+          <OpensNote />
         </section>
       </More>}
     </>
@@ -721,6 +763,7 @@ function PressTab({ canWrite, creating, onClose }) {
           </div>
           <UnsentList blasts={blasts.data?.blasts} kind="press" emailConfigured={emailConfigured}
             canWrite={canWrite} onResent={setResult} />
+          <TestingList blasts={blasts.data?.blasts} kind="press" skip={result?.id} />
         </>
       )}
 
@@ -736,6 +779,7 @@ function PressTab({ canWrite, creating, onClose }) {
           {blasts.isError && <p className="error">{blasts.error.message}</p>}
           <PastList blasts={blasts.data?.blasts} loading={blasts.isPending} kindFilter="press"
             emailConfigured={emailConfigured} canWrite={canWrite} />
+          <OpensNote />
         </section>
       </More>}
     </>
