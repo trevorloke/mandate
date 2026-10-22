@@ -15,39 +15,46 @@
 //       and one quiet "Next →" (onSent / onNext — the Calls screen moves on
 //       and leaves them out of the Text list until they reply).
 //       Phone mode, calls connected: "Call <name>" rings your own phone first
-//       (you enter it once) and connects you from the campaign's number.
+//       and connects you from the campaign's number. The first tap with no
+//       number saved opens "Your phone" (focused, "Add your number first");
+//       it's kept after the first call. Who else sees it is behind a tap.
 //       No signal: the same card with Send / Call off — never the phone's
 //       own Messages or dialler while Twilio is on (the status is kept on
 //       the phone: TextingStatus.js).
 //       Twilio not connected: the children (today's sms: / tel: link) and, in
 //       Text mode, one line — "Texts open on your phone" (volunteers) or
-//       "Texting from the app needs Twilio" (the desk).
+//       "Texting isn't connected · Connect" (the desk: <TextingOff />, the
+//       words Shifts and the Website tab use).
 //   <TextingRepliesLink me />   Calls' quiet "New replies · N" ("New texts" for
-//                            the desk), else "Inbox"
+//                            the desk), else "Inbox" (its back link says "← Calls")
 //   <TextingPersonLink personId />   a profile's "Texts" row (desk)
+//   <TextingOff className />  the desk's "Texting isn't connected · Connect"
 //   noTexts(person)          true when they must not be texted
 //
 // Nothing here says Sent unless the server says Twilio took it.
-import { useId, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, ApiError } from '../api.js';
 import { isDesk } from '../Shell.jsx';
 import { useTextingStatus, statusOffline, textingOn, useTextingPerson, useOnline } from './TextingStatus.js';
+import { fillTemplate } from './TextingWords.js';
 import './texting-card.css';
 
+export { fillTemplate };
 export { useTextingStatus, statusOffline, textingOn, useTextQueue, useTextingPerson, callsCard } from './TextingStatus.js';
 
 export const NO_TEXT_TAGS = ['do-not-text', 'do-not-contact'];
 export const noTexts = (p) => Array.isArray(p?.tags) && p.tags.some((t) => NO_TEXT_TAGS.includes(t));
 export const FOOTER = 'Reply STOP to opt out';
+// Where texting gets connected (the Website tab's "Email & texting").
+export const CONNECT_TO = '/outreach/website?connect=1';
+export function TextingOff({ className = 'tx-line' }) {
+  return <p className={className}>Texting isn’t connected · <Link to={CONNECT_TO}>Connect</Link></p>;
+}
 const first = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 export const namesCampaign = (body, campaign) => String(body || '').toLowerCase().includes(String(campaign || '').trim().toLowerCase());
 const endsWithFooter = (body) => /reply stop to opt out\.?\s*$/i.test(String(body || ''));
-export const fillTemplate = (template, { person, me, campaign }) => String(template || '')
-  .replaceAll('{{first_name}}', first(person?.name))
-  .replaceAll('{{my_name}}', first(me?.user?.name))
-  .replaceAll('{{campaign}}', campaign || me?.workspace?.name || '');
 export const clock = (ts) => {
   const d = new Date(ts || Date.now());
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
@@ -197,7 +204,10 @@ function CampaignCall({ person, status, offline }) {
   const qc = useQueryClient();
   const id = useId();
   const fn = first(person.name);
+  const inputRef = useRef(null);
   const [editing, setEditing] = useState(false);
+  const [asked, setAsked] = useState(0); // taps on Call with no number yet
+  const [who, setWho] = useState(false);
   const [phone, setPhone] = useState('');
   const [callId, setCallId] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -212,8 +222,12 @@ function CampaignCall({ person, status, offline }) {
   const live = LIVE.has(now?.status);
   const needPhone = !status.myPhone || editing;
   const quiet = Boolean(status.quiet?.now);
+  // Ask for your own number on the first tap, not before.
+  const showBox = needPhone && (editing || asked > 0) && !live;
+  useEffect(() => { if (asked) inputRef.current?.focus(); }, [asked]);
 
   const start = async () => {
+    if (needPhone && !phone.trim()) { setError(null); setAsked((n) => n + 1); return; }
     setBusy(true);
     setError(null);
     try {
@@ -230,13 +244,16 @@ function CampaignCall({ person, status, offline }) {
 
   return (
     <div className="tx-call">
-      {needPhone && !live && (
+      {showBox && (
         <div className="tx-myphone">
           <label className="tx-label" htmlFor={id}>Your phone</label>
-          <input id={id} className="input tx-input" type="tel" inputMode="tel" autoComplete="tel" maxLength={40}
-            value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="604-555-0100" />
-          <p className="tx-line">We ring you, then connect you. They see the campaign’s number.</p>
-          <p className="tx-line">Managers can see this number.</p>
+          <input id={id} ref={inputRef} className="input tx-input" type="tel" inputMode="tel" autoComplete="tel" maxLength={40}
+            value={phone} onChange={(e) => setPhone(e.target.value)} />
+          {asked > 0 && !phone.trim() && <p className="tx-line tx-line--warn" role="alert">Add your number first</p>}
+          <p className="tx-line">We ring you first · they see the campaign’s number</p>
+          {who
+            ? <p className="tx-line">Managers can see this number.</p>
+            : <button type="button" className="tx-quiet" onClick={() => setWho(true)}>Who sees it</button>}
         </div>
       )}
       {offline
@@ -245,14 +262,14 @@ function CampaignCall({ person, status, offline }) {
       {live ? (
         <p className="tx-live" role="status" aria-live="polite">{callWords(now, fn)}</p>
       ) : (
-        <button type="button" className="btn cl-call" disabled={busy || offline || quiet || (needPhone && !phone.trim())} onClick={start}>
+        <button type="button" className="btn cl-call" disabled={busy || offline || quiet} onClick={start}>
           <TxIcon name="phone" /> {busy ? 'Calling…' : now ? `Call ${fn} again` : `Call ${fn}`}
         </button>
       )}
       {now && !live && <p className="tx-line tx-line--block" role="status">{callWords(now, fn)}</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {status.myPhone && !needPhone && !live && (
-        <button type="button" className="tx-quiet tx-quiet--block" onClick={() => { setEditing(true); setPhone(''); }}>
+        <button type="button" className="tx-quiet tx-quiet--block" onClick={() => { setEditing(true); setPhone(''); setAsked(0); }}>
           Change my number
         </button>
       )}
@@ -272,7 +289,7 @@ export function TextingCallButton({ person, me, channel, onSent, onNext, childre
       return (
         <>
           {children}
-          <p className="tx-line tx-line--under">{isDesk(me) ? 'Texting from the app needs Twilio' : 'Texts open on your phone'}</p>
+          {isDesk(me) ? <TextingOff className="tx-line tx-line--under" /> : <p className="tx-line tx-line--under">Texts open on your phone</p>}
         </>
       );
     }
@@ -289,12 +306,14 @@ export function TextingCallButton({ person, me, channel, onSent, onNext, childre
 // first, so it says "New texts".
 export function TextingRepliesLink({ me }) {
   const s = useTextingStatus(me).data;
+  const location = useLocation();
   const desk = isDesk(me);
   if (!s || !(s.conversations || s.unread || (desk && s.sms))) return null;
+  const state = { from: { to: `${location.pathname}${location.search}`, label: 'Calls' } };
   return s.unread > 0 ? (
-    <Link className="tx-replies is-new" to="/inbox">{desk ? 'New texts' : 'New replies'} · <span className="mono">{s.unread}</span></Link>
+    <Link className="tx-replies is-new" to="/inbox" state={state}>{desk ? 'New texts' : 'New replies'} · <span className="mono">{s.unread}</span></Link>
   ) : (
-    <Link className="tx-replies" to="/inbox">Inbox</Link>
+    <Link className="tx-replies" to="/inbox" state={state}>Inbox</Link>
   );
 }
 
@@ -307,9 +326,11 @@ export function TextingPersonLink({ personId }) {
   if (!list.length) return null;
   const to = list.length === 1 ? `/inbox/${list[0].id}` : `/inbox?person=${personId}`;
   const count = list.reduce((n, c) => n + (c.messages || 0), 0);
+  // Their texts' Inbox comes back to them ("← Harjit").
+  const state = list.length === 1 ? undefined : { from: { to: `/people/${personId}`, label: first(list[0].person_name) || 'Back' } };
   return (
     <section className="pf-sec">
-      <Link className="tx-pflink" to={to}>
+      <Link className="tx-pflink" to={to} state={state}>
         <span className="pf-sec__title">Texts</span>
         <span className="pf-sec__count">{count}</span>
       </Link>

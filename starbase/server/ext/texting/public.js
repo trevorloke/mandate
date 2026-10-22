@@ -23,9 +23,9 @@
 import { Hono } from 'hono';
 import { getDb } from '../../db/client.js';
 import { runAction, newId } from '../../lib/events.js';
-import { e164, keywordOf, asksToStop, ASKS_STOP_KEYWORD, RECENT_DAYS } from './rules.js';
+import { e164, keywordOf, asksToStop, ASKS_STOP_KEYWORD } from './rules.js';
 import { verifyTwilio, twiml, xmlEsc, publicBase, campaignNumber } from './twilio.js';
-import { applyOptOut, personByPhone } from './store.js';
+import { applyOptOut, personByPhone, replyTarget } from './store.js';
 import { hashToken } from './actions.js';
 
 export const publicRoutes = new Hono();
@@ -42,32 +42,7 @@ const bad = (c) => c.json({ error: 'bad signature' }, 403);
 // Which campaign a reply belongs to: the one that last texted that number,
 // else the last conversation with it, else the only campaign on this server
 // (or TWILIO_WORKSPACE, a slug, when several share one number). Then which
-// conversation in it: see the top of this file.
-const conversationFor = async (db, workspaceId, phone) => {
-  const replied = (await db.query(
-    `select conversation_id from texting_messages
-     where workspace_id = $1 and phone = $2 and direction = 'in' and created_at > now() - interval '${RECENT_DAYS} days'
-     order by created_at desc limit 1`, [workspaceId, phone],
-  )).rows[0];
-  if (replied) return replied.conversation_id;
-  const original = (await db.query(
-    `select c.id from texting_conversations c
-     where c.workspace_id = $1 and c.phone = $2
-       and exists (select 1 from texting_messages m where m.conversation_id = c.id and m.direction = 'out'
-                     and m.created_at > now() - interval '${RECENT_DAYS} days')
-     order by c.created_at limit 1`, [workspaceId, phone],
-  )).rows[0];
-  if (original) return original.id;
-  const sent = (await db.query(
-    `select conversation_id from texting_messages
-     where workspace_id = $1 and phone = $2 and direction = 'out' order by created_at desc limit 1`, [workspaceId, phone],
-  )).rows[0];
-  if (sent) return sent.conversation_id;
-  const conv = (await db.query(
-    'select id from texting_conversations where workspace_id = $1 and phone = $2 order by last_at desc limit 1', [workspaceId, phone],
-  )).rows[0];
-  return conv?.id || null;
-};
+// conversation in it: replyTarget (store.js), as the top of this file says.
 const routeInbound = async (db, phone) => {
   const sent = (await db.query(
     `select workspace_id from texting_messages
@@ -77,7 +52,7 @@ const routeInbound = async (db, phone) => {
     'select workspace_id from texting_conversations where phone = $1 order by last_at desc limit 1', [phone],
   )).rows[0];
   const known = sent?.workspace_id || conv?.workspace_id;
-  if (known) return { workspaceId: known, conversationId: await conversationFor(db, known, phone) };
+  if (known) return { workspaceId: known, conversationId: await replyTarget(db, known, phone) };
   const slug = String(process.env.TWILIO_WORKSPACE || '').trim();
   const ws = slug
     ? (await db.query('select id from workspaces where slug = $1', [slug])).rows

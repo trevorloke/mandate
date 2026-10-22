@@ -14,7 +14,8 @@
 //
 // One campaign conversation per number: while someone else's conversation
 // with a number is recent, text.send refuses ("Already texting with the
-// campaign") — the desk answers in that thread instead.
+// campaign") — the desk answers in that thread instead — and so does
+// text.reply in an older thread whose answer would be filed in that one.
 //
 // Every send checks, on the server: Twilio connected, the number not opted
 // out (STOP) and the person not tagged do-not-text / do-not-contact, inside
@@ -29,11 +30,18 @@ import {
   namesCampaign, withFooter, hasBlanks,
 } from './rules.js';
 import { smsReady, voiceReady, publicBase, sendSms, ringCaller } from './twilio.js';
-import { settingsFor, quietState, isOptedOut, applyOptOut, isFirstOut, tagsOf, inTouch } from './store.js';
+import {
+  settingsFor, quietState, isOptedOut, applyOptOut, isFirstOut, tagsOf, inTouch, answerElsewhere,
+} from './store.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
+// The desk can open the other thread; a volunteer can't.
+export const ALREADY_TEXTING = (ctx) => (ctx.role === 'volunteer'
+  ? 'Already texting with the campaign' : 'Already texting with the campaign — answer in that thread');
 const MANAGER_ONLY = ['manager'];
 const CALL_TOKEN_MINUTES = 2;
+// What the Calls card fills into the first text (web/src/components/TextingWords.js).
+const FILL_CODES = /\{\{\s*(first_name|my_name|campaign)\s*\}\}/gi;
 
 export const firstWord = (name) => String(name || '').trim().split(/\s+/)[0] || 'They';
 export const hashToken = (t) => createHash('sha256').update(String(t)).digest('hex');
@@ -61,7 +69,7 @@ export const visibleConversation = async (q, ctx, id) => {
 };
 
 const checkTextable = async (tx, ctx, { phone, person }) => {
-  if (!smsReady()) throw httpError(409, 'Texting from the app needs Twilio');
+  if (!smsReady()) throw httpError(409, 'Texting isn’t connected');
   if (person) {
     const tags = tagsOf(person);
     if (tags.includes(NO_CONTACT_TAG)) throw httpError(409, `${firstWord(person.name)} is marked do not contact`);
@@ -134,9 +142,7 @@ export const actions = {
       const phone = e164(person.phone);
       if (!phone) throw httpError(400, `No number to text for ${firstWord(person.name)}`);
       await checkTextable(tx, ctx, { phone, person });
-      if (await inTouch(tx, ctx.workspaceId, phone, ctx.user.id)) {
-        throw httpError(409, 'Already texting with the campaign');
-      }
+      if (await inTouch(tx, ctx.workspaceId, phone, ctx.user.id)) throw httpError(409, ALREADY_TEXTING(ctx));
       let conv = (await tx.query(
         `select id, phone from texting_conversations
          where workspace_id = $1 and person_id = $2 and started_by = $3 and phone = $4 order by created_at limit 1`,
@@ -163,6 +169,9 @@ export const actions = {
       if (!conv) throw httpError(404, 'conversation not found');
       const person = conv.person_id ? { name: conv.person_name, tags: conv.person_tags } : null;
       await checkTextable(tx, ctx, { phone: conv.phone, person });
+      // Their answer would be filed in someone else's conversation: refused,
+      // so what they say reaches whoever asked (the desk answers there).
+      if (await answerElsewhere(tx, ctx.workspaceId, conv)) throw httpError(409, ALREADY_TEXTING(ctx));
       const message = await sendIn(tx, ctx, emit, conv, input.body);
       await markRead(tx, ctx, emit, conv.id);
       return { conversation_id: conv.id, message, sent: message.status === 'sent' };
@@ -195,7 +204,7 @@ export const actions = {
     roles: ALL_ROLES,
     input: z.object({ person_id: z.uuid(), my_phone: z.string().max(40).nullish() }),
     handler: async (tx, ctx, input, emit) => {
-      if (!voiceReady()) throw httpError(409, 'Calling through the campaign needs Twilio');
+      if (!voiceReady()) throw httpError(409, 'Calling through the campaign isn’t connected');
       const person = await requirePerson(tx, ctx.workspaceId, input.person_id);
       const to = e164(person.phone);
       if (!to) throw httpError(400, `No number to call for ${firstWord(person.name)}`);
@@ -279,8 +288,12 @@ export const actions = {
         throw httpError(400, 'The first hour must come before the last');
       }
       if (!next.template.includes('{{campaign}}') && !namesCampaign(next.template, ctx.workspace.name)) {
-        throw httpError(400, `Name the campaign — keep {{campaign}} or “${ctx.workspace.name}”`);
+        throw httpError(400, `Name the campaign — use + Campaign or write “${ctx.workspace.name}”`);
       }
+      // A code the card can't fill in would make every first text refused.
+      const rest = next.template.replace(FILL_CODES, '');
+      const stray = rest.match(/\{+[^{}\n]{0,40}\}*/) || rest.match(/[^\s{}]{0,40}\}+/);
+      if (stray) throw httpError(400, `${stray[0].trim()} won’t fill in — use + First name, + Your name or + Campaign`);
       await tx.query(
         `insert into texting_settings (workspace_id, template, allow_from, allow_until, weekend_from, weekend_until)
          values ($1, $2, $3, $4, $5, $6)

@@ -3,8 +3,9 @@
 // PORT) and a stub Twilio REST API it records:
 //
 //   1. Not connected: Calls → Text keeps the phone's own Messages (sms: link)
-//      and says "Texting from the app needs Twilio" once; nothing reaches
-//      Twilio; every webhook is refused.
+//      and says "Texting isn't connected · Connect" once (the link to the
+//      Website tab's Email & texting); nothing reaches Twilio; every webhook
+//      is refused.
 //   2. Connected: a manager sets quiet hours on Texting settings and Calls
 //      refuses to send inside them; the first text (their first name filled
 //      in, editable) must name the campaign and goes out with "Reply STOP to
@@ -219,11 +220,12 @@ let server = await startServer({ TWILIO_API_BASE: STUB });
   let t = await D.text();
   const sms = await page.locator('.cl-card a.cl-call[href^="sms:"]').count();
   check('not connected: Text keeps the phone\'s own Messages (sms: link)', sms === 1 && (await page.locator('.tx-send').count()) === 0, `sms links=${sms}`);
-  check('not connected: says "Texting from the app needs Twilio" once', count(t, 'Texting from the app needs Twilio') === 1, t.slice(0, 200));
+  check('not connected: says "Texting isn’t connected · Connect" once, Connect to the Website tab', count(t, 'Texting isn’t connected · Connect') === 1
+    && (await page.locator('main.page a[href="/outreach/website?connect=1"]').count()) === 1 && !/Twilio/.test(t), t.slice(0, 200));
   const status = (await D.api('/texting/status')).json;
   check('not connected: the server agrees (no texts, no calls)', status?.sms === false && status?.voice === false, JSON.stringify(status));
   const refused = await D.api('/actions/text.send', { person_id: harjit.id, body: `Hi Harjit, it's Riley with ${CAMPAIGN}.` });
-  check('not connected: a send is refused, plainly', refused.status === 409 && /needs Twilio/.test(refused.json?.error), `${refused.status} ${refused.json?.error}`);
+  check('not connected: a send is refused, plainly', refused.status === 409 && refused.json?.error === 'Texting isn’t connected', `${refused.status} ${refused.json?.error}`);
   await D.shot('01-calls-text-not-connected');
   await simple(page, 'Calls · Text, not connected (phone)', CARD + ', .cl-card a.cl-call');
 
@@ -236,7 +238,11 @@ let server = await startServer({ TWILIO_API_BASE: STUB });
     (await page.locator('.pf-acts a[href^="tel:"]').count()) === 1 && (await page.locator('.pf-acts a[href^="sms:"]').count()) === 1);
   await D.go('/inbox');
   t = await D.text();
-  check('not connected: Inbox says it once, with an empty list', count(t, 'Texting from the app needs Twilio') === 1 && /No texts yet\./.test(t), t.slice(0, 160));
+  check('not connected: Inbox says it once, with an empty list', count(t, 'Texting isn’t connected · Connect') === 1 && /No texts yet\./.test(t), t.slice(0, 160));
+  await D.go('/inbox/settings');
+  t = await D.text();
+  check('not connected: Texting settings says "Not connected · Connect" (Twilio only under its setup)', count(t, 'Not connected · Connect') === 2
+    && !/ask whoever/i.test(t) && (t.match(/Twilio/g) || []).length === 1, t.slice(0, 200));
   const hook = await inbound('+16045550141', 'hello', { token: 'any-token' });
   check('not connected: no webhook is accepted (nothing to verify it with)', hook.status === 403, hook.status);
   check('not connected: nothing reached Twilio', twilio.length === 0, twilio.length);
@@ -277,8 +283,24 @@ let t = await D.text();
 check('settings: says what is connected', /Texts\s*On · 604-555-0100/i.test(t) && /Calls\s*Through the campaign/i.test(t), t.slice(0, 200));
 check('settings: weekends have their own hours (10 am–6 pm by default)',
   await page.getByLabel('Sat–Sun from').inputValue().catch(() => '') === '10' && await page.getByLabel('Sat–Sun until').inputValue().catch(() => '') === '18');
+const tpl = page.getByLabel('First text');
+const tplWords = await tpl.inputValue().catch(() => '');
+check('settings: the first text shows its fill-ins as words, never codes',
+  tplWords === "Hi [first name], it's [your name] with [campaign]. Can we count on your support?" && !/[{}]/.test(t), tplWords);
+const tokens = await page.locator('.tx-tokens button').allInnerTexts().catch(() => []);
+check('settings: + First name / + Your name / + Campaign, as on a ladder email', tokens.join('|').toLowerCase() === '+ first name|+ your name|+ campaign', tokens.join('|'));
 await simple(page, 'Texting settings (desk)');
 await D.shot('02-settings');
+await tpl.fill("Hi {first_name}, it's [your name] with [campaign].");
+t = await D.text();
+check('settings: a {…} that won\'t fill in is flagged and Save stays off', /\{first_name\} won’t fill in — use \+ First name/.test(t)
+  && await page.getByRole('button', { name: 'Save', exact: true }).isDisabled().catch(() => false), t.slice(0, 300));
+await tpl.fill('Hi [first name], from [campaign]. ');
+await tpl.press('End');
+await page.getByRole('button', { name: '+ Your name' }).click();
+const tplIns = await tpl.inputValue().catch(() => '');
+check('settings: + Your name goes where the cursor was', tplIns === 'Hi [first name], from [campaign]. [your name]', tplIns);
+await tpl.fill("Hi [first name], it's [your name] with [campaign]. Can we count on your support?");
 for (const days of ['Mon–Fri', 'Sat–Sun']) {
   await page.getByLabel(`${days} from`).selectOption(String(qFrom));
   await page.getByLabel(`${days} until`).selectOption(String(qUntil));
@@ -361,6 +383,12 @@ await page.waitForSelector('.today-rows', { timeout: 8000 }).catch(() => {});
 t = await D.text();
 check('Today: "1 new text" under Needs you, a tap to the Inbox', /1 new text\b/.test(t)
   && await page.locator('a.today-row[href="/inbox"]').count() === 1, t.slice(0, 300));
+await page.locator('a.today-row[href="/inbox"]').click();
+await page.waitForURL(`${BASE}/inbox`, { timeout: 8000 }).catch(() => {});
+await page.waitForSelector('.pf-back', { timeout: 8000 }).catch(() => {});
+const backToday = page.locator('main.page .pf-back').first();
+check('Inbox from Today: "← Today", back to Today', /^← Today$/i.test((await backToday.innerText().catch(() => '')).trim()) && await backToday.getAttribute('href') === '/',
+  await backToday.innerText().catch(() => ''));
 await D.go('/calls?channel=text&q=Harjit');
 await page.waitForSelector('.tx-replies', { timeout: 8000 }).catch(() => {});
 await page.waitForSelector('.tx-recent', { timeout: 8000 }).catch(() => {});
@@ -377,6 +405,9 @@ await page.waitForURL(`${BASE}/inbox`, { timeout: 8000 }).catch(() => {});
 await page.waitForSelector('.tx-row', { timeout: 8000 }).catch(() => {});
 t = await D.text();
 check('Inbox: Harjit, new, with his reply', (await page.locator('.tx-row.is-new').count()) === 1 && /Harjit Example/.test(t) && /Yes, put me down for a sign/.test(t), t.slice(0, 200));
+const backCalls = page.locator('main.page .pf-back').first();
+check('Inbox from Calls: "← Calls", back to the same list', /^← Calls$/i.test((await backCalls.innerText().catch(() => '')).trim())
+  && /^\/calls\?channel=text\b/.test(await backCalls.getAttribute('href').catch(() => '') || ''), `${await backCalls.innerText().catch(() => '')} ${await backCalls.getAttribute('href').catch(() => '')}`);
 const when = await page.locator('.tx-row .tx-when').first().innerText().catch(() => '');
 check('Inbox: a text from today shows the time, not the date', /^\d{1,2}:\d{2}\s?[ap]\.m\.$/i.test(when.trim()), when);
 await simple(page, 'Inbox (desk)');
@@ -525,8 +556,18 @@ t = await V.text();
 check('volunteer Inbox: only Grace', (await vPage.locator('.tx-row').count()) === 1 && /Grace Example/.test(t) && !/Harjit|Maya/.test(t), t.slice(0, 200));
 await simple(vPage, 'Inbox (volunteer, 390px)');
 await V.shot('11-vol-inbox');
+// No signal, never opened on this phone: it's there, it just can't load yet.
+await vPage.evaluate(() => navigator.serviceWorker?.ready.then(() => true)).catch(() => {});
+await volCtx.setOffline(true);
+await sleep(400);
 await vPage.locator('.tx-row').first().click();
 await vPage.waitForURL(`${BASE}/inbox/${graceConv}`, { timeout: 8000 }).catch(() => {});
+await vPage.waitForSelector('.pp-offline', { timeout: 8000 }).catch(() => {});
+t = await V.text();
+check('no signal: their own thread says "No signal — this conversation loads when you’re back online", never "not found"',
+  /No signal — this conversation loads when you’re back online\./.test(t) && !/not found|No conversation/i.test(t), t.slice(0, 200));
+await V.shot('11b-vol-thread-no-signal');
+await volCtx.setOffline(false);
 await vPage.waitForSelector('.tx-reply textarea', { timeout: 8000 }).catch(() => {});
 const vAnswer = "It's Val, a volunteer with Imagine Surrey.";
 await vPage.locator('.tx-reply textarea').fill(vAnswer);
@@ -544,11 +585,22 @@ await vPage.waitForSelector('.cl-card', { timeout: 8000 }).catch(() => {});
 check('Calls tab: opens on Text, as they left it', /^Texts$/.test((await vPage.locator('h1').first().innerText().catch(() => '')).trim()));
 await V.go('/calls?channel=phone&q=Dev');
 await vPage.waitForSelector('.tx-call', { timeout: 8000 }).catch(() => {});
-check('volunteer call: says managers can see their number', /Managers can see this number\./.test(await V.text()));
 const callBtn = vPage.locator('.tx-call button.cl-call');
-check('volunteer call: asks for their own phone once, Call off until then',
-  (await vPage.getByLabel('Your phone').count()) === 1 && await callBtn.isDisabled().catch(() => false) && (await vPage.locator('.cl-card a[href^="tel:"]').count()) === 0);
-await vPage.getByLabel('Your phone').fill('604-555-0177');
+const nCalls0 = calls().length;
+check('volunteer call: one Call button, on — no number box before it is needed',
+  (await vPage.getByLabel('Your phone').count()) === 0 && await callBtn.isEnabled().catch(() => false) && (await vPage.locator('.cl-card a[href^="tel:"]').count()) === 0);
+await callBtn.click();
+await vPage.waitForSelector('.tx-myphone', { timeout: 8000 }).catch(() => {});
+t = await V.text();
+const myPhone = vPage.getByLabel('Your phone');
+check('volunteer call: the first tap asks for their phone — focused, "Add your number first", no call yet',
+  (await myPhone.count()) === 1 && await myPhone.evaluate((el) => el === document.activeElement).catch(() => false)
+  && /Add your number first/.test(t) && !(await myPhone.getAttribute('placeholder').catch(() => '')) && calls().length === nCalls0, t.slice(0, 220));
+check('volunteer call: one short line; who else sees the number is behind a tap',
+  /We ring you first · they see the campaign’s number/.test(t) && !/Managers can see/.test(t), t.slice(0, 220));
+await vPage.getByRole('button', { name: 'Who sees it' }).click();
+check('volunteer call: says managers can see their number', /Managers can see this number\./.test(await V.text()));
+await myPhone.fill('604-555-0177');
 await simple(vPage, 'Calls · Phone card (volunteer, 390px)', CARD);
 await V.shot('13-vol-call-card');
 const nCalls = calls().length;

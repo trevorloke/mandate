@@ -6,13 +6,17 @@
 // stop") is flagged, with "Opt out this number" right above the reply box;
 // otherwise that quiet button sits under it. Any role in the thread may tap
 // it: the same opt-out as a STOP reply.
+// One campaign conversation per number: while someone else's thread with
+// this number is the live one (their answers are filed there), this one
+// says "Already texting with the campaign" instead of a reply box — the
+// desk gets "Open that thread". No signal: it says so, never "not found".
 import { useEffect, useId, useRef, useState } from 'react';
-import { Link, useParams, useOutletContext } from 'react-router-dom';
+import { Link, useLocation, useParams, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, ApiError } from '../api.js';
 import { isDesk } from '../Shell.jsx';
-import { fmtWhen } from './People.jsx';
-import { FOOTER, namesCampaign } from '../components/TextingCard.jsx';
+import { fmtWhen, noSignal } from './People.jsx';
+import { FOOTER, namesCampaign, TextingOff } from '../components/TextingCard.jsx';
 import './people.css';
 import '../components/texting-card.css';
 import './texting.css';
@@ -54,8 +58,18 @@ function ReplyBox({ data, desk, onSent }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const { conversation: conv, quiet, campaign } = data;
-  if (!data.sms) return <p className="tx-line tx-stop">{desk ? 'Texting from the app needs Twilio' : 'Texts open on your phone'}</p>;
+  if (!data.sms) return desk ? <TextingOff className="tx-line tx-stop" /> : <p className="tx-line tx-stop">Texts open on your phone</p>;
   if (conv.opted_out || conv.no_texts) return <p className="tx-line tx-stop">Opted out — no more texts</p>;
+  if (conv.in_touch) {
+    return (
+      <>
+        <p className="tx-line tx-stop" role="note">
+          {desk ? 'Already texting with the campaign — answer in that thread' : 'Already texting with the campaign'}
+        </p>
+        {conv.in_touch_id && <Link className="btn pp-btn" to={`/inbox/${conv.in_touch_id}`}>Open that thread</Link>}
+      </>
+    );
+  }
   const missing = conv.first && body.trim() && !namesCampaign(body, campaign);
   const send = async () => {
     setBusy(true);
@@ -67,6 +81,7 @@ function ReplyBox({ data, desk, onSent }) {
       await onSent();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No signal — not sent');
+      if (e instanceof ApiError && e.status === 409) await onSent(); // e.g. someone else's thread is live now
     } finally {
       setBusy(false);
     }
@@ -92,6 +107,7 @@ function ReplyBox({ data, desk, onSent }) {
 
 export default function TextingThread() {
   const { id } = useParams();
+  const location = useLocation();
   const { me } = useOutletContext() ?? {};
   const desk = isDesk(me);
   const qc = useQueryClient();
@@ -115,12 +131,23 @@ export default function TextingThread() {
   }, [lastIn, id, qc]);
   useEffect(() => { endRef.current?.scrollIntoView?.({ block: 'end' }); }, [messages.length]);
 
+  // Back to the Inbox as it was opened ("← Calls" / "← Today" there).
+  const inboxState = location.state?.inboxFrom ? { from: location.state.inboxFrom } : undefined;
   if (q.isLoading) return <p className="muted">Loading…</p>;
+  // No signal and never opened here: it's there, it just can't load yet.
+  if (noSignal(q)) {
+    return (
+      <div className="tx-page">
+        <Link className="eyebrow pf-back" to="/inbox" state={inboxState}>← Inbox</Link>
+        <p className="pp-offline" role="status">No signal — this conversation loads when you’re back online.</p>
+      </div>
+    );
+  }
   if (q.isError || !q.data?.conversation) {
     return (
       <div className="pp-empty">
-        <p>{q.error?.status === 404 ? 'No conversation here.' : q.error?.message || 'Not found'}</p>
-        <Link className="btn pp-btn" to="/inbox">Inbox</Link>
+        <p>{q.error?.status === 404 || !q.error ? 'No conversation here.' : q.error.message}</p>
+        <Link className="btn pp-btn" to="/inbox" state={inboxState}>Inbox</Link>
       </div>
     );
   }
@@ -135,7 +162,7 @@ export default function TextingThread() {
 
   return (
     <div className="tx-page">
-      <Link className="eyebrow pf-back" to="/inbox">← Inbox</Link>
+      <Link className="eyebrow pf-back" to="/inbox" state={inboxState}>← Inbox</Link>
       <h1 className="tx-who">
         {conv.person_id ? <Link to={`/people/${conv.person_id}`}>{conv.person_name || conv.phone}</Link> : conv.phone}
       </h1>

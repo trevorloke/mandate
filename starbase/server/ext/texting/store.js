@@ -92,6 +92,55 @@ export const inTouch = async (q, workspaceId, phone, exceptUser) => (await q.que
   [workspaceId, phone, exceptUser || null],
 )).rows[0] || null;
 
+// Where a text from this number is filed (public.js): the conversation the
+// voter last replied in (RECENT_DAYS), else the first of the conversations
+// that texted them lately — never a newer duplicate — else the one that
+// texted them last, else the newest. A conversation id, or null.
+export const replyTarget = async (q, workspaceId, phone) => {
+  const replied = (await q.query(
+    `select conversation_id from texting_messages
+     where workspace_id = $1 and phone = $2 and direction = 'in' and created_at > now() - interval '${RECENT_DAYS} days'
+     order by created_at desc limit 1`, [workspaceId, phone],
+  )).rows[0];
+  if (replied) return replied.conversation_id;
+  const original = (await q.query(
+    `select c.id from texting_conversations c
+     where c.workspace_id = $1 and c.phone = $2
+       and exists (select 1 from texting_messages m where m.conversation_id = c.id and m.direction = 'out'
+                     and m.created_at > now() - interval '${RECENT_DAYS} days')
+     order by c.created_at limit 1`, [workspaceId, phone],
+  )).rows[0];
+  if (original) return original.id;
+  const sent = (await q.query(
+    `select conversation_id from texting_messages
+     where workspace_id = $1 and phone = $2 and direction = 'out' order by created_at desc limit 1`, [workspaceId, phone],
+  )).rows[0];
+  if (sent) return sent.conversation_id;
+  const conv = (await q.query(
+    'select id from texting_conversations where workspace_id = $1 and phone = $2 order by last_at desc limit 1', [workspaceId, phone],
+  )).rows[0];
+  return conv?.id || null;
+};
+
+// One campaign conversation per number, for a reply in conv ({ id, phone,
+// started_by }): someone else's conversation with the number is recent and
+// the voter's texts are filed there, not on conv's side — so whatever they
+// answer would reach someone other than who asked. That conversation
+// ({ id, started_by }), or null when a reply in conv is fine. The same
+// member's other conversations with the number (a shared household phone)
+// never count.
+export const answerElsewhere = async (q, workspaceId, conv) => {
+  const other = await inTouch(q, workspaceId, conv.phone, conv.started_by);
+  if (!other) return null;
+  const target = await replyTarget(q, workspaceId, conv.phone);
+  if (target === conv.id) return null;
+  const t = target && (await q.query(
+    'select id, started_by from texting_conversations where id = $1 and workspace_id = $2', [target, workspaceId],
+  )).rows[0];
+  if (!t) return other;
+  return (t.started_by ?? null) === (conv.started_by ?? null) ? null : t;
+};
+
 // The Text list, for one member: who to leave out for now, and who replied.
 //   away     someone else is texting their number (RECENT_DAYS), or you
 //            texted them within awaitHours and they haven't answered yet

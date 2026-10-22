@@ -3,32 +3,14 @@
 // line on screen shows "[first name]" / "[campaign]" instead, and what's
 // typed as those words is stored as the codes underneath. Plain JS (no JSX)
 // so the server's tests can check it against the server's own fill-in.
+// The words, buttons and the won't-fill-in check: FillWords.js.
+import { fillWords } from './FillWords.js';
 
-export const FILLS = [
-  { code: '{{first_name}}', word: '[first name]', button: '+ First name' },
-  { code: '{{campaign}}', word: '[campaign]', button: '+ Campaign' },
-];
-const WORD = { first_name: '[first name]', campaign: '[campaign]' };
-const CODES = /\{\{\s*(first_name|campaign)\s*\}\}/gi;
-
-// "Hi {{ first_name }}" → "Hi [first name]".
-export const toWords = (text) => String(text ?? '').replace(CODES, (_, k) => WORD[k.toLowerCase()]);
-// "Hi [First name]" (or [first_name], [firstname]) → "Hi {{first_name}}".
-export const toCodes = (text) => String(text ?? '')
-  .replace(/\[\s*first[\s_-]*name\s*\]/gi, '{{first_name}}')
-  .replace(/\[\s*campaign\s*\]/gi, '{{campaign}}');
-
-// "{first_name} won't fill in — use + First name": anything in braces that
-// isn't one of the two, or a [name] / [campaign …] that isn't either, would
-// go out as typed. Takes the stored text (codes).
-export const unfilled = (text) => {
-  const rest = String(text || '').replace(CODES, '');
-  const m = rest.match(/\{+[^{}\n]{0,40}\}*/) || rest.match(/[^\s{}]{0,40}\}+/)
-    || rest.match(/\[[^[\]\n]{0,40}(?:name|camp)[^[\]\n]{0,40}\]/i);
-  if (!m) return null;
-  const use = /camp/i.test(m[0]) ? '+ Campaign' : /name/i.test(m[0]) ? '+ First name' : '+ First name or + Campaign';
-  return `${m[0].trim()} won’t fill in — use ${use}`;
-};
+const words = fillWords([
+  { key: 'first_name', word: '[first name]', button: '+ First name', typed: /\[\s*first[\s_-]*name\s*\]/gi, hint: /name/i },
+  { key: 'campaign', word: '[campaign]', button: '+ Campaign', typed: /\[\s*campaign\s*\]/gi, hint: /camp/i, rank: 1 },
+]);
+export const { FILLS, toWords, toCodes, unfilled } = words;
 
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const waitWords = (s) => plural(Number(s.n) || 0, s.unit === 'hours' ? 'hour' : 'day');

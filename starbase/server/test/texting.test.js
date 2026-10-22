@@ -70,8 +70,8 @@ const at = (iso) => _setClockForTest(() => new Date(iso));
 
 let db, ws, campaign, desk, vol, staff, P;
 
-const joinAs = async (client, role) => {
-  const r = await client.signup({ name: role === 'volunteer' ? 'Val Volunteer' : 'Sam Staff', workspaceName: `Temp ${tag}`, email: `${role}+${tag}@texting.example` });
+const joinAs = async (client, role, name = role === 'volunteer' ? 'Val Volunteer' : 'Sam Staff', key = role) => {
+  const r = await client.signup({ name, workspaceName: `Temp ${tag}`, email: `${key}+${tag}@texting.example` });
   await db.query('update memberships set workspace_id = $2, role = $3 where user_id = $1', [r.json.user.id, ws, role]);
   await db.query('update sessions set workspace_id = $2 where user_id = $1', [r.json.user.id, ws]);
   return r.json.user;
@@ -145,10 +145,10 @@ test('without Twilio: the screens are told so and nothing pretends to send', asy
   assert.equal(s.json.voice, false);
   const t = await vol.action('text.send', { person_id: P.harjit.id, body: `Hi Harjit, it's Vol with ${campaign}.` });
   assert.equal(t.status, 409);
-  assert.match(t.json.error, /Texting from the app needs Twilio/);
+  assert.equal(t.json.error, 'Texting isn’t connected');
   const c = await vol.action('call.start', { person_id: P.harjit.id, my_phone: '604-555-0170' });
   assert.equal(c.status, 409);
-  assert.match(c.json.error, /needs Twilio/);
+  assert.equal(c.json.error, 'Calling through the campaign isn’t connected');
   // No auth token: no webhook can be verified, so none is accepted.
   const h = await inbound('+16045550131', 'hello');
   assert.equal(h.status, 403);
@@ -255,6 +255,12 @@ test('quiet hours are enforced on the server; only managers change them', async 
   assert.equal((await staff.action('texting.settings', { allow_until: 24 })).status, 403);
   assert.equal((await desk.action('texting.settings', { allow_from: 22, allow_until: 21 })).status, 400);
   assert.equal((await desk.action('texting.settings', { template: 'Hi {{first_name}}!' })).status, 400, 'the template must name the campaign');
+  // A code the Calls card can't fill in would make every first text refused.
+  r = await desk.action('texting.settings', { template: 'Hi {first_name}, it’s {{my_name}} with {{campaign}}.' });
+  assert.equal(r.status, 400);
+  assert.match(r.json.error, /^\{first_name\} won’t fill in/);
+  assert.equal((await desk.action('texting.settings', { template: 'Hi {{first_name}}, from {{campain}}.' })).status, 400);
+  assert.equal((await desk.get('/api/texting/settings')).json.settings.template.includes('Hi {first_name},'), false, 'nothing saved');
   r = await desk.action('texting.settings', { allow_from: 8, allow_until: 23 });
   assert.equal(r.status, 200);
   assert.equal((await desk.action('text.send', { person_id: P.harjit.id, body: 'Early one' })).status, 200, '8:30 am is inside 8 am–11 pm');
@@ -529,7 +535,9 @@ test('one conversation per number: no second introduction, the Text list leaves 
   const vq = (await vol.get('/api/texting/queue')).json;
   assert.ok(vq.away.includes(lena.id) && !vq.replied.includes(lena.id), 'out of their Text list too');
   assert.deepEqual(Object.keys(vq).sort(), ['away', 'replied']);
-  assert.ok(!/@|555|Lena/.test(JSON.stringify(vq)), 'person ids only');
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  assert.ok([...vq.away, ...vq.replied].every((v) => typeof v === 'string' && UUID.test(v)), 'person ids only');
+  assert.ok(!/@|\d{3}-\d{3}-\d{4}|\+1\d{10}|Lena/.test(JSON.stringify(vq)), 'no email, number or name');
   const n = texts().length;
   r = await vol.action('text.send', { person_id: lena.id, body: `Hi Lena, it's Vol with ${campaign}.` });
   assert.equal(r.status, 409);
@@ -578,6 +586,89 @@ test('one conversation per number: no second introduction, the Text list leaves 
     `select conversation_id from texting_messages where workspace_id = $1 and phone = '+16045550140' and direction = 'in'`, [ws],
   )).rows[0];
   assert.equal(yes.conversation_id, noahDesk);
+});
+
+test('one conversation per number holds for replies too: an older thread cannot answer while another is live', async () => {
+  const volUser = (await vol.get('/api/auth/me')).json.user;
+  // A desk member of its own, so these texts don't count toward anyone else's pace.
+  const kai = new Client();
+  await joinAs(kai, 'staff', 'Kai Desk', 'kai');
+  const ago = async (conv, days) => {
+    await db.query(`update texting_conversations set created_at = now() - interval '${days} days', last_at = now() - interval '${days} days' where id = $1`, [conv]);
+    await db.query(`update texting_messages set created_at = now() - interval '${days} days' where conversation_id = $1`, [conv]);
+  };
+
+  // The desk texted Ola 9 days ago; since then Val texted her and she answered Val.
+  const ola = await kai.createPerson('Ola Example', { phone: '604-555-0153' });
+  let r = await kai.action('text.send', { person_id: ola.id, body: `Hi Ola, it's Kai with ${campaign}.` });
+  const deskOld = r.json.conversation_id;
+  await ago(deskOld, 9);
+  r = await vol.action('text.send', { person_id: ola.id, body: `Hi Ola, it's Val with ${campaign}.` });
+  assert.equal(r.status, 200, 'nine days on, Val may introduce herself');
+  const valConv = r.json.conversation_id;
+  await inbound('+16045550153', 'Maybe, tell me more');
+  let thread = (await kai.get(`/api/texting/conversations/${deskOld}`)).json.conversation;
+  assert.equal(thread.in_touch, true, 'the desk\'s old thread says someone else is texting her');
+  assert.equal(thread.in_touch_id, valConv, 'and which thread to answer in');
+  const n = texts().length;
+  r = await kai.action('text.reply', { conversation_id: deskOld, body: 'Would you donate?' });
+  assert.equal(r.status, 409);
+  assert.equal(r.json.error, 'Already texting with the campaign — answer in that thread');
+  assert.equal(texts().length, n, 'nothing went out from the old thread');
+  // In Val's thread the desk may answer: her reply comes back where Val sees it.
+  assert.equal((await kai.get(`/api/texting/conversations/${valConv}`)).json.conversation.in_touch, false);
+  assert.equal((await vol.get(`/api/texting/conversations/${valConv}`)).json.conversation.in_touch, false);
+  r = await kai.action('text.reply', { conversation_id: valConv, body: 'Happy to — what would you like to know?' });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.sent, true);
+
+  // The reverse: Val's thread with Noah is 8 days old and the desk texts him now.
+  const noah = await kai.createPerson('Noah Example', { phone: '604-555-0154' });
+  r = await vol.action('text.send', { person_id: noah.id, body: `Hi Noah, it's Val with ${campaign}.` });
+  const valOld = r.json.conversation_id;
+  await ago(valOld, 8);
+  r = await kai.action('text.send', { person_id: noah.id, body: `Hi Noah, it's Kai with ${campaign}.` });
+  assert.equal(r.status, 200);
+  const deskNow = r.json.conversation_id;
+  thread = (await vol.get(`/api/texting/conversations/${valOld}`)).json.conversation;
+  assert.equal(thread.in_touch, true);
+  assert.equal(thread.in_touch_id, null, 'a volunteer never gets the desk\'s thread');
+  const m = texts().length;
+  r = await vol.action('text.reply', { conversation_id: valOld, body: 'Still with us, Noah?' });
+  assert.equal(r.status, 409);
+  assert.equal(r.json.error, 'Already texting with the campaign');
+  assert.equal(texts().length, m, 'Noah gets no text from Val in between');
+  await inbound('+16045550154', 'Yes I will donate $50');
+  const answer = (await db.query(
+    `select conversation_id from texting_messages where workspace_id = $1 and phone = '+16045550154' and direction = 'in'`, [ws],
+  )).rows[0];
+  assert.equal(answer.conversation_id, deskNow, 'his answer is the desk\'s');
+  const valView = JSON.stringify([
+    (await vol.get('/api/texting/mine')).json, (await vol.get(`/api/texting/conversations/${valOld}`)).json,
+  ]);
+  assert.ok(!valView.includes('$50'), 'nothing he says to the desk reaches the volunteer');
+
+  // A legacy duplicate (both live, made before the rule): only the side his
+  // texts are filed in may answer — the other is refused, not stuck both ways.
+  const dup = randomUUID();
+  await db.query(
+    `insert into texting_conversations (id, workspace_id, person_id, phone, started_by, created_at, last_at)
+     values ($1, $2, $3, '+16045550154', $4, now(), now())`, [dup, ws, noah.id, volUser.id],
+  );
+  await db.query(
+    `insert into texting_messages (id, workspace_id, conversation_id, direction, phone, body, status, first, sent_by)
+     values ($1, $2, $3, 'out', '+16045550154', 'Hi again', 'sent', true, $4)`, [randomUUID(), ws, dup, volUser.id],
+  );
+  assert.equal((await vol.action('text.reply', { conversation_id: dup, body: 'Hi?' })).status, 409);
+  assert.equal((await kai.action('text.reply', { conversation_id: deskNow, body: 'Thank you, Noah!' })).status, 200);
+
+  // One member's own conversations with a shared household number never block each other.
+  const ida = await kai.createPerson('Ida Example', { phone: '604-555-0155' });
+  const ike = await kai.createPerson('Ike Example', { phone: '604-555-0155' });
+  const idaConv = (await kai.action('text.send', { person_id: ida.id, body: `Hi Ida, it's Kai with ${campaign}.` })).json.conversation_id;
+  assert.equal((await kai.action('text.send', { person_id: ike.id, body: `Hi Ike, it's Kai with ${campaign}.` })).status, 200);
+  assert.equal((await kai.get(`/api/texting/conversations/${idaConv}`)).json.conversation.in_touch, false);
+  assert.equal((await kai.action('text.reply', { conversation_id: idaConv, body: 'And you, Ida?' })).status, 200);
 });
 
 test('a reply asking to stop is flagged; anyone in the thread opts the number out with one tap', async () => {

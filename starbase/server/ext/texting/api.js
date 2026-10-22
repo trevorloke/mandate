@@ -5,7 +5,9 @@
 //                                    your own phone, your unread replies
 //   GET /texting/mine                any role: the conversations you started
 //   GET /texting/all[?person=]       desk: every conversation
-//   GET /texting/conversations/:id   a thread (volunteers: their own only)
+//   GET /texting/conversations/:id   a thread (volunteers: their own only);
+//                                    in_touch: the voter's answers go to
+//                                    someone else's thread now (desk: its id)
 //   GET /texting/people/:id          the Calls card: opted out? your own
 //                                    conversation with them (first text yet?
 //                                    its last texts), and in_touch: someone
@@ -25,7 +27,7 @@ import { NO_TEXT_TAG, NO_CONTACT_TAG, AWAIT_HOURS, e164, showPhone } from './rul
 import { smsReady, voiceReady, publicBase, campaignNumber } from './twilio.js';
 import {
   settingsFor, quietState, isOptedOut, isFirstOut, listConversations, unreadCount, myConversationCount, tagsOf,
-  inTouch, textQueue,
+  inTouch, textQueue, answerElsewhere,
 } from './store.js';
 import { visibleConversation } from './actions.js';
 
@@ -101,6 +103,7 @@ api.get('/texting/conversations/:id', async (c) => {
   const tags = tagsOf({ tags: conv.person_tags });
   const settings = await settingsFor(db, ctx.workspaceId);
   const startedBy = conv.started_by ? (await db.query('select name from users where id = $1', [conv.started_by])).rows[0]?.name : null;
+  const elsewhere = await answerElsewhere(db, ctx.workspaceId, conv);
   return c.json({
     conversation: {
       id: conv.id,
@@ -112,6 +115,10 @@ api.get('/texting/conversations/:id', async (c) => {
       opted_out: await isOptedOut(db, ctx.workspaceId, conv.phone),
       no_texts: tags.includes(NO_TEXT_TAG) || tags.includes(NO_CONTACT_TAG),
       first: await isFirstOut(db, conv.id),
+      // Someone else's conversation with this number is the live one: no
+      // reply here (text.reply refuses). Only the desk gets that thread.
+      in_touch: !!elsewhere,
+      in_touch_id: elsewhere && isDesk(c) ? elsewhere.id : null,
     },
     messages,
     sms: smsReady(),

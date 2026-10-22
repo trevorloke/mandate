@@ -2,13 +2,19 @@
 // and the hours texts and campaign calls may go out (campaign time) — one
 // window Monday to Friday, another on weekends (default 10 am–6 pm, the
 // CRTC's telemarketing hours; the campaign should confirm both with counsel).
-// What's connected is said in the Website tab's words ("not set up — ask
-// whoever set up Starbase"); provider names and addresses sit under "For
-// your Twilio setup", and callers' own phones (managers) under their own row.
-import { useEffect, useId, useState } from 'react';
+// What's connected is said in the words Shifts and the Website tab use ("Not
+// connected · Connect"); provider names and addresses sit under "For your
+// Twilio setup", and callers' own phones (managers) under their own row.
+// The first text shows its fill-ins as words — "[first name]", "[your
+// name]", "[campaign]" — put in with the ladder email's "+ First name /
+// + Your name / + Campaign" buttons; the codes are stored underneath
+// (TextingWords.js), and a {…} that wouldn't fill in is flagged.
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action } from '../api.js';
+import { CONNECT_TO } from '../components/TextingCard.jsx';
+import { FILLS, toCodes, toWords, unfilled } from '../components/TextingWords.js';
 import './people.css';
 import '../components/texting-card.css';
 import './texting.css';
@@ -16,8 +22,8 @@ import './texting.css';
 const HOURS = Array.from({ length: 25 }, (_, h) => h);
 const hourWord = (h) => (h === 0 || h === 24 ? 'Midnight' : h === 12 ? 'Noon' : h < 12 ? `${h} am` : `${h - 12} pm`);
 
-// The Website tab's words for something not switched on here.
-const NOT_SET_UP = 'Not set up — ask whoever set up Starbase';
+// Not switched on here: where it gets connected.
+const NOT_SET_UP = <>Not connected · <Link to={CONNECT_TO}>Connect</Link></>;
 
 // "Mon–Fri  from 9 am  until 9 pm" — the hours texts and calls may go out.
 function HoursRow({ label, fromId, untilId, from, until, onFrom, onUntil, disabled }) {
@@ -61,6 +67,7 @@ export default function TextingSettings() {
   const [said, setSaid] = useState(null);
   const [error, setError] = useState(null);
   const tplId = useId();
+  const tplRef = useRef(null);
   const fromId = useId();
   const untilId = useId();
   const wkFromId = useId();
@@ -70,8 +77,20 @@ export default function TextingSettings() {
   if (q.isLoading || !form) return q.isError ? <p className="error">{q.error.message}</p> : <p className="muted">Loading…</p>;
   const d = q.data;
   const edit = d.canEdit;
-  const set = (k) => (e) => { setForm((f) => ({ ...f, [k]: k === 'template' ? e.target.value : Number(e.target.value) })); setSaid(null); setError(null); };
+  const set = (k) => (e) => { setForm((f) => ({ ...f, [k]: Number(e.target.value) })); setSaid(null); setError(null); };
   const changed = ['template', 'allow_from', 'allow_until', 'weekend_from', 'weekend_until'].some((k) => form[k] !== d.settings[k]);
+  const stray = unfilled(form.template);
+  const setTemplate = (template) => { setForm((f) => ({ ...f, template })); setSaid(null); setError(null); };
+  // "+ First name": the fill-in goes where the cursor was.
+  const insert = (word) => {
+    const el = tplRef.current;
+    const val = toWords(form.template);
+    const at = typeof el?.selectionStart === 'number' ? el.selectionStart : val.length;
+    const end = typeof el?.selectionEnd === 'number' ? el.selectionEnd : at;
+    setTemplate(toCodes(val.slice(0, at) + word + val.slice(end)));
+    const caret = at + word.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange?.(caret, caret); });
+  };
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -97,9 +116,19 @@ export default function TextingSettings() {
 
       <div className="field">
         <label htmlFor={tplId}>First text</label>
-        <textarea id={tplId} className="input tx-tpl" rows={3} maxLength={600} value={form.template}
-          onChange={set('template')} disabled={!edit} />
-        <span className="tx-line">{'{{first_name}}'} becomes their first name. Ends with “Reply STOP to opt out”.</span>
+        <textarea id={tplId} ref={tplRef} className="input tx-tpl" rows={3} maxLength={600} value={toWords(form.template)}
+          onChange={(e) => setTemplate(toCodes(e.target.value))} disabled={!edit} />
+        {edit && (
+          <div className="tx-tokens" role="group" aria-label="Fill in">
+            {FILLS.map((f) => (
+              <button key={f.code} type="button" className="btn btn-quiet tx-token"
+                onMouseDown={(e) => e.preventDefault()} onClick={() => insert(f.word)}>{f.button}</button>
+            ))}
+          </div>
+        )}
+        {stray
+          ? <span className="tx-line tx-line--warn" role="alert">{stray}</span>
+          : <span className="tx-line">Ends with “Reply STOP to opt out”.</span>}
       </div>
       <p className="tx-label">Hours texts and calls go out</p>
       <HoursRow label="Mon–Fri" fromId={fromId} untilId={untilId} from={form.allow_from} until={form.allow_until}
@@ -108,7 +137,7 @@ export default function TextingSettings() {
         onFrom={set('weekend_from')} onUntil={set('weekend_until')} disabled={!edit} />
       {edit ? (
         <div className="tx-save">
-          <button type="button" className="btn btn-primary pp-btn" disabled={busy || !changed} onClick={save}>
+          <button type="button" className="btn btn-primary pp-btn" disabled={busy || !changed || Boolean(stray)} onClick={save}>
             {busy ? 'Saving…' : 'Save'}
           </button>
           {said && !changed && <span className="tx-line" role="status">✓ {said}</span>}

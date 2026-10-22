@@ -39,6 +39,9 @@
 .tx-status span { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
 .tx-status strong { font-weight: 600; text-align: right; }
 .input.tx-tpl { min-height: 96px; font-size: 16px; line-height: 1.45; resize: vertical; }
+/* "+ First name / + Your name / + Campaign" — the ladder email's buttons. */
+.tx-tokens { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-2) 0; }
+.btn.tx-token { min-height: 48px; padding: 0 16px; display: inline-flex; align-items: center; font-size: 12px; }
 .input.tx-select { min-height: 48px; font-size: 16px; }
 .tx-save { display: flex; align-items: center; gap: var(--s-3); margin: 0 0 var(--s-4); }
 .tx-more { --disclose-x: var(--s-1); }

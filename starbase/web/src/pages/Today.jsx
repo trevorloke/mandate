@@ -412,7 +412,7 @@ function NeedsYou({ b, me }) {
             <LinkRow to="/follow-ups" state={FROM_TODAY} main={<><strong className="mono">{followups.n}</strong> {plural(followups.n, 'follow-up')}</>} />
           )}
           {newTexts > 0 && (
-            <LinkRow to="/inbox" main={<><strong className="mono">{newTexts}</strong> new {plural(newTexts, 'text')}</>} />
+            <LinkRow to="/inbox" state={FROM_TODAY} main={<><strong className="mono">{newTexts}</strong> new {plural(newTexts, 'text')}</>} />
           )}
         </ul>
       )}
@@ -724,7 +724,7 @@ function VolunteerToday({ b, me }) {
           <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
         )}
         {replies > 0 && (
-          <LinkRow to="/inbox" main={<><strong className="mono">{replies}</strong> {plural(replies, 'reply', 'replies')}</>} />
+          <LinkRow to="/inbox" state={FROM_TODAY} main={<><strong className="mono">{replies}</strong> {plural(replies, 'reply', 'replies')}</>} />
         )}
       </ul>
 

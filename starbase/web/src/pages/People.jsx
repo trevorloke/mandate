@@ -309,7 +309,7 @@ export function MoreMenu({ items, label = 'More' }) {
       {open && (
         <div className="pp-menu__panel" id={id}>
           {shown.map((it, i) => (
-            <Link key={it.to} ref={i === 0 ? firstRef : undefined} className="pp-menu__item" to={it.to}>
+            <Link key={it.to} ref={i === 0 ? firstRef : undefined} className="pp-menu__item" to={it.to} state={it.state}>
               {it.icon && <Icon name={it.icon} />}
               {it.label}
             </Link>
@@ -684,7 +684,7 @@ function PeopleList() {
             items={[
               { to: `/calls${carry(f, { channel: 'phone' })}`, label: 'Call list', icon: 'phone' },
               { to: `/calls${carry(f, { channel: 'text' })}`, label: 'Text list', icon: 'text' },
-              { to: '/inbox', label: 'Inbox', icon: 'text' },
+              { to: '/inbox', label: 'Inbox', icon: 'text', state: { from: { to: '/people', label: 'People' } } },
               desk && { to: '/people/import', label: 'Import', icon: 'upload' },
               desk && { to: '/surveys', label: 'Surveys' },
             ]}
