@@ -126,6 +126,17 @@ test('renaming keeps the code; adding makes a new one; reorder', async () => {
   assert.equal((await mgr.action('scale.save', { candidates: [...listOf(s), { name: 'bains' }] })).status, 400);
   assert.equal((await mgr.action('scale.save', { candidates: [...listOf(s), { name: 'Lean yes' }] })).status, 400);
   assert.equal((await mgr.action('scale.save', { candidates: [...listOf(s), { name: 'Not sure' }] })).status, 400);
+  // …and a step's default words or label, even once that step says
+  // something else (step 3 says "Not sure yet" now): the import reads
+  // "Undecided" as 3 and "Strong support" as 1, never as a candidate.
+  for (const name of ['Undecided', 'strong support', 'Strong yes']) {
+    const bad = await mgr.action('scale.save', { candidates: [...listOf(s), { name }] });
+    assert.equal(bad.status, 400, name);
+    assert.match(bad.json.error, /a step’s words/, name);
+  }
+  const renameToStep = await mgr.action('scale.save', { candidates: listOf(s).map((c) => (c.code === '4D' ? { ...c, name: 'Undecided' } : c)) });
+  assert.equal(renameToStep.status, 400, 'a rename too');
+  assert.equal(matchRating(s, 'undecided').code, '3', 'what the import does with it');
   // A save that leaves someone out never drops their code.
   const kept = ok(await mgr.action('scale.save', { candidates: [{ code: '4C', name: 'Randhawa' }] })).scale;
   assert.deepEqual(kept.candidates.map((c) => c.code), ['4C', '4BA', '4D', '4B', '4F', '4N']);
@@ -170,6 +181,16 @@ test('a new candidate never reuses a code, even one off the list', async () => {
   const again = await mgr.action('scale.save', { candidates: [...listOf(r.scale), { name: 'brenda locke' }] });
   assert.equal(again.status, 400);
   assert.match(again.json.error, /put them back/);
+  // Renaming someone on the list to the name of someone off it: the same.
+  const brar = r.scale.candidates.find((c) => c.code === '4BR');
+  const renamed = await mgr.action('scale.save', { candidates: listOf(r.scale).map((c) => (c.code === brar.code ? { ...c, name: 'BRENDA LOCKE' } : c)) });
+  assert.equal(renamed.status, 400, JSON.stringify(renamed.json));
+  assert.match(renamed.json.error, /Brenda Locke is off the list — put them back/);
+  assert.equal(ratingByCode(await scaleOf(), '4BR').name, 'Brar', 'nothing changed');
+  // …while putting her back, or renaming her on the way back, works.
+  const back = ok(await mgr.action('scale.save', { candidates: listOf(r.scale).map((c) => (c.code === '4B' ? { ...c, name: 'B. Locke', off: false } : c)) }));
+  assert.deepEqual(back.changes.back, ['4B']);
+  ok(await mgr.action('scale.save', { candidates: listOf(back.scale).map((c) => (c.code === '4B' ? { ...c, name: 'Brenda Locke', off: true } : c)) }), 'and off again');
   // Codes are made from any name, never twice.
   const taken = [];
   for (let i = 0; i < 40; i += 1) taken.push(makeCode('Smith', taken));
@@ -198,10 +219,36 @@ test('a phone’s knock made before someone came off the list is still taken', a
   assert.match(stale.json.error, /off the list — pick again/);
   // …but a replay of a knock already in still answers "already".
   assert.equal(ok(await knock(vol, P.tom, '4B', { client_id: cid })).duplicate, true);
+  // The phone says when it was tapped: a knock tapped while Brenda Locke was
+  // still offered, kept on the phone for over a week, still counts — the
+  // week is counted to the tap, not to when it arrives.
+  const late8 = await mgr.createPerson('Late Example', { phone: '604-555-0134', address: '13450 104 Ave' });
+  const day = 86400000;
+  const offAt = Date.parse(old);
+  const before = new Date(offAt - day).toISOString();
+  const kept = ok(await knock(vol, late8, '4B', { client_id: randomUUID(), client_at: before }), 'tapped the day before she came off');
+  assert.equal(kept.contact.rating, '4B');
+  assert.equal(ok(await mgr.get(`/api/persons/${late8.id}`)).person.rating, '4B');
+  ok(await knock(vol, late8, '4B', { client_id: randomUUID(), client_at: new Date(offAt + 6 * day).toISOString() }), 'tapped 6 days after: that phone still had the old list');
+  // Tapped more than a week after she came off, a time from the future, or
+  // a time with no phone key: the list wins.
+  for (const extra of [
+    { client_id: randomUUID(), client_at: new Date(offAt + 7.5 * day).toISOString() },
+    { client_id: randomUUID(), client_at: new Date(Date.now() + 30 * day).toISOString() },
+    { client_at: before },
+  ]) {
+    const no = await knock(vol, late8, '4B', extra);
+    assert.equal(no.status, 400, JSON.stringify(extra));
+    assert.match(no.json.error, /off the list — pick again/);
+  }
+  assert.equal((await knock(vol, late8, '1', { client_id: randomUUID(), client_at: 'yesterday' })).status, 400, 'not a time');
   // The rule, on its own.
   const s = await scaleOf();
   assert.equal(ratingRefusal(s, '4B', { fromPhone: true }), 'Brenda Locke is off the list — pick again');
   assert.equal(ratingRefusal(s, '4B', { fromPhone: true, now: Date.parse(old) + 1000 }), null);
+  assert.equal(ratingRefusal(s, '4B', { fromPhone: true, tapped: new Date(Date.parse(old) + 1000).toISOString() }), null, 'tapped then, arriving now');
+  assert.match(ratingRefusal(s, '4B', { fromPhone: false, tapped: old }), /off the list/, 'a tap time alone is not a phone');
+  assert.match(ratingRefusal(s, '4B', { fromPhone: true, tapped: 'not a time' }), /off the list/);
   assert.equal(ratingRefusal(s, '4BA', {}), null);
   assert.match(ratingRefusal(s, '4Z', { fromPhone: true }), /not on the scale/);
   // Codes the scale never had are refused at once; anything not a rating too.

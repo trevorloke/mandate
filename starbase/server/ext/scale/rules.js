@@ -7,16 +7,21 @@
 //   - a candidate taken off the list — only from a phone's knock (it
 //     carries the phone's own key, client_id: every tap on the door card,
 //     walk list, Calls and profile goes through the outbox with one) and
-//     only within REPLAY_DAYS of it coming off. That phone showed the old
-//     list when the volunteer tapped it — it may have been offline, or not
-//     yet reloaded — and the knock happened. After that, and always from an
-//     import, the API without a key, or anything else, only codes on the list;
+//     only when it was tapped within REPLAY_DAYS of them coming off (the
+//     outbox sends when it was tapped, client_at; without it, when it
+//     arrives). That phone showed the old list when the volunteer tapped
+//     it — it may have been offline, or not yet reloaded — and the knock
+//     happened, however late it reaches the server. After that, and always
+//     from an import, the API without a key, or anything else, only codes
+//     on the list;
 //   - a code the scale never had — never.
-import { normalizeScale, ratingByCode, makeCode, cleanWord, LIMITS, UNSURE_WORD } from '@starbase/shared/scale';
+import { normalizeScale, ratingByCode, makeCode, cleanWord, DEFAULT_STEPS, LIMITS, UNSURE_WORD } from '@starbase/shared/scale';
 import { httpError } from '../../actions/util.js';
 
 export const REPLAY_DAYS = 7;
 const DAY = 86400000;
+// The steps' default words and labels ("Undecided", "Strong support"…).
+const STEP_WORDS = new Set(DEFAULT_STEPS.flatMap((s) => [s.word, s.label]).map((w) => w.toLowerCase()));
 
 const parseJ = (v, fb) => (typeof v === 'string' ? JSON.parse(v) : (v ?? fb));
 export const settingsOf = (row) => parseJ(row?.settings, {}) || {};
@@ -28,12 +33,17 @@ export const loadScale = async (q, workspaceId) => normalizeScale(settingsOf(
 ).scale);
 
 // null when the rating may be stored; otherwise the reason, in plain words.
-export function ratingRefusal(scale, code, { fromPhone = false, now = Date.now() } = {}) {
+// tapped: when the phone's knock was tapped (never later than now) — the
+// week is counted to the tap, so a knock that waited days on a phone with
+// no signal is still the knock it was.
+export function ratingRefusal(scale, code, { fromPhone = false, now = Date.now(), tapped = null } = {}) {
   const r = ratingByCode(scale, code);
   if (!r || r.unknown) return `rating ${code} is not on the scale`;
   if (!r.off) return null;
   const at = Date.parse(r.off_at || '');
-  if (fromPhone && Number.isFinite(at) && Number(now) - at < REPLAY_DAYS * DAY) return null;
+  const tap = tapped ? Date.parse(tapped) : NaN;
+  const when = Number.isFinite(tap) ? Math.min(Number(now), tap) : Number(now);
+  if (fromPhone && Number.isFinite(at) && when - at < REPLAY_DAYS * DAY) return null;
   return `${r.name} is off the list — pick again`;
 }
 
@@ -100,13 +110,18 @@ export function applyEdit(scale, input, now = new Date()) {
   for (const c of offered) {
     const k = c.name.toLowerCase();
     if (seenWords.has(k)) bad(`“${c.name}” is already a step’s words`);
+    // A step's default words always read as that step in an import
+    // (matchRating), whatever the step says now.
+    if (STEP_WORDS.has(k)) bad(`“${c.name}” is a step’s words — pick another name`);
     if (names.has(k)) bad(`two candidates are called ${c.name}`);
     names.set(k, c);
   }
-  // A new name that matches someone off the list: put them back instead
-  // (their old ratings are theirs).
-  for (const a of changes.added) {
-    const old = out.find((c) => c.off && c.name.toLowerCase() === a.name.toLowerCase());
+  // A new name on the list — added or renamed — that matches someone off
+  // it: put them back instead (their old ratings are theirs).
+  const fresh = new Set([...changes.added, ...changes.renamed].map((c) => c.code));
+  for (const c of offered) {
+    if (!fresh.has(c.code)) continue;
+    const old = out.find((o) => o.off && o.code !== c.code && o.name.toLowerCase() === c.name.toLowerCase());
     if (old) bad(`${old.name} is off the list — put them back instead`);
   }
   return { stored: { v: (scale.version || 0) + 1, words, candidates: out }, changes };
