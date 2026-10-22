@@ -495,3 +495,50 @@ test('a knock on someone added here whose adding was refused: kept, in plain wor
   ob.setOutboxOwner(null);
   net.cookie = c.cookie;
 });
+
+test('two tabs, one outbox: a save, a send or a dismiss here never drops what another tab saved', async () => {
+  ob.setOutboxOwner(null);
+  net.cookie = c.cookie;
+  const here = await c.createPerson('Tab Here', { address: '7301 124 St', lat: 49.1341, lng: -122.8541 });
+  const there = await c.createPerson('Tab There', { address: '7305 124 St', lat: 49.1342, lng: -122.8542 });
+  nav.onLine = false;
+  await ob.logContact({ person_id: here.id, channel: 'door', outcome: 'contacted', rating: '1' }, { who: here.name });
+  // Another tab on this computer saves a knock to the same storage; this tab hasn't heard of it.
+  const cid = '0b6f7a52-5d1e-4c39-9d8e-2f5a1c7e4b90';
+  const shared = JSON.parse(store.get('starbase:outbox:v2'));
+  shared.push({
+    cid, name: 'contact.log', meta: { who: there.name }, at: new Date().toISOString(), tries: 0, state: 'pending',
+    input: { person_id: there.id, channel: 'door', outcome: 'contacted', rating: '4', client_id: cid },
+  });
+  store.set('starbase:outbox:v2', JSON.stringify(shared));
+  // This tab saves again: the other tab's knock is still stored (never overwritten by this tab's older list).
+  await ob.logContact({ person_id: here.id, channel: 'door', outcome: 'contacted', note: 'Second visit' }, { who: here.name });
+  let stored = JSON.parse(store.get('starbase:outbox:v2'));
+  assert.ok(stored.some((i) => i.cid === cid), 'the other tab’s knock survives this tab’s save');
+  assert.equal(stored.filter((i) => i.input?.person_id === here.id).length, 2);
+  // A refused item dismissed here keeps the other tab's too.
+  const junk = 'c9f0e1d2-3b4a-4c5d-8e6f-7a8b9c0d1e2f';
+  stored.push({
+    cid: junk, name: 'contact.log', meta: {}, at: new Date().toISOString(), tries: 1, state: 'refused', error: { status: 400, message: 'nope' },
+    input: { person_id: there.id, channel: 'door', outcome: 'contacted', client_id: junk },
+  });
+  store.set('starbase:outbox:v2', JSON.stringify(stored));
+  ob.dismissItem(junk);
+  stored = JSON.parse(store.get('starbase:outbox:v2'));
+  assert.equal(stored.length, 3);
+  assert.ok(!stored.some((i) => i.cid === junk));
+
+  // Back online: one flush sends all three — this tab's and the other tab's — each once.
+  nav.onLine = true;
+  const r = await ob.flushOutbox();
+  assert.equal(r.sent, 3);
+  assert.equal(r.left, 0);
+  assert.equal(JSON.parse(store.get('starbase:outbox:v2')).length, 0);
+  assert.equal((await contactsOf(here.id)).length, 2);
+  const theirs = await contactsOf(there.id);
+  assert.equal(theirs.length, 1);
+  assert.equal(theirs[0].rating, '4');
+  // The other tab sending it too (no lock in that browser) is recorded once.
+  assert.equal((await c.action('contact.log', { person_id: there.id, channel: 'door', outcome: 'contacted', rating: '4', client_id: cid })).status, 200);
+  assert.equal((await contactsOf(there.id)).length, 1);
+});

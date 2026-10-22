@@ -187,8 +187,8 @@ export async function keptPersister(queryFn, context, query) {
     // it itself; anything else is kept here — for this sign-in only.
     if (plan.keep !== false && query.options.initialData === undefined && copyScope(meNow()) === scope && gen === copyGeneration()) {
       const tier = tierOf(plan, data);
-      // Money in an answer kept in this browser before: that copy goes.
-      if (tier !== plan.tier) removeCopy(copyKey(me, plan.name), otherTier(tier));
+      // One copy, in one place: the other (an answer before the money came or went) goes.
+      if (plan.moneyIn) removeCopy(copyKey(me, plan.name), otherTier(tier));
       writeCopy(copyKey(me, plan.name), data, Date.now(), {
         tier, gen, group: plan.field ? null : { scope, name: 'q:', max: DESK_MAX },
       });

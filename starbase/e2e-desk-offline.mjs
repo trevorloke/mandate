@@ -12,9 +12,20 @@
 //     taken off are saved on this device, shown on the profile ("Not sent
 //     yet") through a reload, and sent once when the signal is back — one
 //     answer lost on the way, replayed, still recorded once;
-//   · sign-out forgets every copy; the next sign-in on this browser sees none;
+//   · screens with nothing kept (Rating scale, Team, Filings) say No signal,
+//     their writes are off, and the strip claims no kept copy;
+//   · wifi with no internet, reloaded: still signed in, on the kept copies,
+//     and it asks again by itself; the server down (502): the kept copies,
+//     never "No people yet" or "No one here";
+//   · a note typed on a profile is sent when you leave it;
+//   · two tabs with no signal: neither drops what the other saved, and the
+//     closed tab's work is sent by the other;
+//   · sign-out forgets every copy — the other open tab's too (it goes to Sign
+//     in); the next sign-in on this browser sees none;
 //   · the volunteer keeps only what a volunteer saw (no money, nobody else's
-//     email), and their profile knock waits and sends once;
+//     email), and their profile knock waits and sends once; made treasurer
+//     with the app open, Today's money stays in the tab; a role change, a day
+//     passing or a session ending without Sign out forgets what was kept;
 //   · storage blocked (a private window): today's No signal, no errors;
 //   · SIMPLE: ≤1 yellow, no sideways scroll, ≥48px field targets.
 //
@@ -185,17 +196,18 @@ const localKeys = Object.keys(kept.local);
 const sessionKeys = Object.keys(kept.session);
 const scopeA = `${meA.workspace.id}:${meA.user.id}:`;
 const has = (keys, end) => keys.some((k) => k.endsWith(end));
-check('kept in this browser: People, Signs, Shifts, the Inbox — keyed to this campaign and person',
-  has(localKeys, ':q:manager:persons:q=&limit=300') && has(localKeys, ':q:manager:signs') && has(localKeys, ':shifts')
+check('kept in this browser: Signs, Shifts, the Inbox — keyed to this campaign and person',
+  has(localKeys, ':q:manager:signs') && has(localKeys, ':shifts')
     && has(localKeys, ':q:manager:texting:inbox:/texting/all') && localKeys.every((k) => k.includes(scopeA)),
   localKeys.map((k) => k.split(':').slice(5).join(':')).join(' | '));
-check('anything with money in it is kept for this tab only: Today, profiles, gifts, pledges',
-  ['q:manager:brief', `q:manager:person:${tom.id}`, `q:manager:person:${maya.id}`, 'q:manager:gifts', 'q:manager:pledges'].every((n) => has(sessionKeys, `:${n}`))
+// People lists carry donor tags (donor-prospect, lapsed): this tab only, like money.
+check('anything with money or donors in it is kept for this tab only: Today, profiles, gifts, pledges, People',
+  ['q:manager:brief', `q:manager:person:${tom.id}`, `q:manager:person:${maya.id}`, 'q:manager:gifts', 'q:manager:pledges', 'q:manager:persons:q=&limit=300'].every((n) => has(sessionKeys, `:${n}`))
     && sessionKeys.every((k) => k.includes(scopeA)),
   sessionKeys.map((k) => k.split(':').slice(5).join(':')).join(' | '));
 const localText = Object.values(kept.local).join('\n');
-check('…and never in the browser’s lasting storage (no gift amounts, no Today, no profiles)',
-  !/amount_cents|totalCents|"gifts"/.test(localText) && !localKeys.some((k) => /:q:manager:(brief|person:|gifts|pledges)/.test(k)));
+check('…and never in the browser’s lasting storage (no gift amounts, no Today, no profiles, no People list)',
+  !/amount_cents|totalCents|"gifts"/.test(localText) && !localKeys.some((k) => /:q:manager:(brief|person:|gifts|pledges|persons:)/.test(k)));
 const tomBefore = (await D.api(`/persons/${tom.id}`)).json;
 const tagEventsBefore = (await D.api('/events?since=0&limit=5000')).json.events.filter((e) => e.action === 'person.tag').length;
 
@@ -286,6 +298,28 @@ check('Inbox with no signal: the kept list, never "your texts load when you’re
 await D.go('/calls');
 await page.waitForSelector('section.cl-card', { timeout: 8000 }).catch(() => {});
 check('Calls with no signal: the list from this device', (await page.locator('section.cl-card').count()) === 1 && KEPT.test(await D.kept()));
+// Screens with nothing kept say so — and the strip claims no copy (the
+// counts they read on the side from Today's copy aren't what they show).
+await D.go('/rating-scale');
+t = await D.main();
+check('Rating scale with no signal: "No signal — this loads…", and the strip shows no "from <time>"',
+  /No signal — this loads when you’re back online/.test(t) && !(await D.kept()), `${await D.kept()} · ${t.slice(0, 120)}`);
+await D.go('/team');
+t = await D.main();
+check('Team with no signal: "No signal", never "Members 0"; Get invite link off — "Inviting and changing roles need signal"',
+  /No signal — this loads when you’re back online/.test(t) && !/Members 0/.test(t) && !(await D.kept())
+    && await page.locator('.ot-invite button[type="submit"]').isDisabled().catch(() => false) && /Inviting and changing roles need signal/.test(t), `${await D.kept()} · ${t.slice(0, 200)}`);
+await simple(D, 'Team, no signal (1360)');
+await D.go('/filings');
+t = await D.main();
+check('Filings with no signal: Add filing off and says so; "No signal", not an endless Loading…',
+  await page.locator('.ops-head button:has-text("Add filing")').isDisabled().catch(() => false) && /Adding or filing a deadline needs signal/.test(t)
+    && /No signal — this loads when you’re back online/.test(t) && !/Loading…/.test(t), t.slice(0, 200));
+await D.go('/');
+await page.waitForSelector('.today-morebox__toggle', { timeout: 8000 }).catch(() => {});
+await page.click('.today-morebox__toggle').catch(() => {});
+check('Today → More with no signal: Clear sample data is off — "Needs signal"',
+  await page.locator('.today-sample-clear button:has-text("Clear sample data")').isDisabled().catch(() => false) && /Needs signal/.test(await page.innerText('.today-sample-clear').catch(() => '')));
 
 // ════════════════════════════════════════════════════════════════════════════
 // 3. No signal, on a profile: a note with a rating, a tag on, a tag off
@@ -405,11 +439,96 @@ t = await D.text();
 check('wifi with no internet: People shows the kept list, "No answer · from <time>", no error line',
   /No answer · from \d{1,2}:\d{2} (am|pm)/i.test(await D.kept()) && (await countOf(page)) === countOnline && !/check your signal|No signal — the list loads/.test(t), `${await D.kept()} · ${t.slice(0, 160)}`);
 await page.unroute('**/api/persons?*');
+// …and reloading there (the sign-in check gets no answer either): never sent to Sign in.
+await page.route('**/api/**', (route) => route.abort('internetdisconnected'));
+await D.go('/people');
+await page.waitForSelector('.pp-table tbody tr', { timeout: 8000 }).catch(() => {});
+t = await D.text();
+check('wifi with no internet, reloaded: still signed in, the kept People list, "No answer · from <time>"',
+  !/\/login/.test(page.url()) && !/Sign in/.test(await D.main()) && (await countOf(page)) === countOnline && /No answer · from/i.test(await D.kept()), `${page.url()} · ${t.slice(0, 160)}`);
+await D.shot('09-no-answer-reload');
+await page.unroute('**/api/**');
+await until(async () => !(await page.$('.offline-strip__kept')), 25000);
+check('…the internet back: it asks again by itself and the strip clears', !(await page.$('.offline-strip__kept')) && (await countOf(page)) === countOnline, await D.kept());
+// The server down behind its proxy (502 while it restarts): the kept copies, never "No people yet".
+await page.route('**/api/**', (route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }));
+await D.go('/people');
+await page.waitForSelector('.pp-table tbody tr', { timeout: 8000 }).catch(() => {});
+t = await D.main();
+check('server down (502): People shows the kept list, "No answer · from <time>" — not "No people yet", not "request failed"',
+  (await countOf(page)) === countOnline && /No answer · from/i.test(await D.kept()) && !/No people yet|Import a list|request failed/i.test(t), `${await D.kept()} · ${t.slice(0, 160)}`);
+await page.evaluate((id) => { history.pushState({}, '', `/people/${id}`); window.dispatchEvent(new PopStateEvent('popstate')); }, dev.id);
+await sleep(2500);
+t = await D.main();
+check('…a profile never opened: "No answer — check your signal", never "No one here — they may have been removed"',
+  /No answer — check your signal/.test(t) && !/No one here/.test(t), t.slice(0, 160));
+await page.unroute('**/api/**');
+// A note typed on a profile, then off to People without a tap: sent anyway (as the door card does).
+const leftNote = `Left on the profile ${tag}`;
+const harjitBefore = (await D.api(`/persons/${harjit.id}`)).json.contacts.length;
+await D.go(`/people/${harjit.id}`);
+await page.waitForSelector('.pf-rate', { timeout: 8000 });
+await page.click('.pf-rate button:has-text("+ Add a note")');
+await page.fill('#contact-note', leftNote);
+await page.click('nav.links a[href="/people"]');
+await sleep(1500);
+const harjitNow = (await D.api(`/persons/${harjit.id}`)).json.contacts;
+check('a note typed on a profile, then People tapped: the note is saved, once', harjitNow.length === harjitBefore + 1
+  && harjitNow.filter((c) => c.note === leftNote).length === 1, `${harjitBefore} → ${harjitNow.length}`);
+
+// ════════════════════════════════════════════════════════════════════════════
+// 4b. Two tabs on one computer, no signal: neither drops what the other saved
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const page2 = await ctx.newPage();
+  page2.on('pageerror', (e) => errors.push('[tab 2] ' + e.message));
+  const D2t = helpers(page2, ctx);
+  await D.go(`/people/${tom.id}`);
+  await page.waitForSelector('.pf-rate', { timeout: 8000 });
+  await D2t.go(`/people/${maya.id}`);
+  await page2.waitForSelector('.pf-page h1', { timeout: 8000 });
+  const tomN = (await D.api(`/persons/${tom.id}`)).json.contacts.length;
+  await ctx.setOffline(true);
+  const tabNote = `Two tabs ${tag}`;
+  await page.click('.pf-rate button:has-text("+ Add a note")');
+  await page.fill('#contact-note', tabNote);
+  await page.click('.pf-rate button[aria-label="2: Lean support"]');
+  await until(async () => /Saved offline/.test(await page.innerText('.pf-rate').catch(() => '')), 6000);
+  const tabTag = `tab2-${tag}`;
+  await page2.click('.pf-sec__btn:has-text("Tags")');
+  await page2.click('.pf-sec button:has-text("Edit tags")');
+  await page2.fill('.tag-editor input[aria-label="Add a tag"]', tabTag);
+  await page2.keyboard.press('Enter');
+  await sleep(700);
+  const both = (await D2t.outbox()).map((i) => i.name).sort().join(',');
+  check('two tabs, no signal: the outbox holds both tabs’ work (the second save didn’t drop the first)', both === 'contact.log,person.tag', both);
+  check('…and each tab’s strip counts both', /^2 saved on this device$/i.test(await D.chip()) && /^2 saved on this device$/i.test(await D2t.chip()), `${await D.chip()} / ${await D2t.chip()}`);
+  // The first tab goes away before the signal is back (closing it would lift "offline" in the test browser).
+  await page.goto('about:blank');
+  await goOnline(ctx, page2);
+  await until(async () => (await D2t.outbox()).length === 0, 25000);
+  const tomAfterTabs = (await D.api(`/persons/${tom.id}`)).json;
+  check('back online in the other tab: the closed tab’s note and rating are sent too, once',
+    tomAfterTabs.contacts.length === tomN + 1 && tomAfterTabs.contacts.filter((c) => c.note === tabNote).length === 1 && tomAfterTabs.person.rating === '2',
+    `${tomN} → ${tomAfterTabs.contacts.length} · ${tomAfterTabs.person.rating}`);
+  check('…and the tag from this tab', (await D.api(`/persons/${maya.id}`)).json.person.tags.includes(tabTag));
+  await page2.close();
+  await D.go('/');
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 5. Sign-out forgets; the next sign-in on this browser sees none of it
 // ════════════════════════════════════════════════════════════════════════════
 const staffInv = (await D.api('/actions/member.invite', { email: `desk.staff+${tag}@example.org`, role: 'staff' })).json;
+// A second tab left open on Money: its copies are kept for that tab only.
+const tabB = await ctx.newPage();
+tabB.on('pageerror', (e) => errors.push('[tab B] ' + e.message));
+const TB = helpers(tabB, ctx);
+await TB.go('/money');
+await tabB.waitForSelector('#gift-list, .ops-rows', { timeout: 8000 }).catch(() => {});
+await sleep(1200);
+const tabBHad = Object.keys((await TB.stored()).session);
+await D.go('/');
 await page.click('.acct-btn');
 await page.click('.acct-panel button:has-text("Sign out")');
 await page.waitForURL(`${BASE}/login`, { timeout: 10000 }).catch(() => {});
@@ -417,6 +536,16 @@ await sleep(500);
 let left = await D.stored();
 check('signed out: no copies left in this browser or this tab', Object.keys(left.local).length === 0 && Object.keys(left.session).length === 0,
   JSON.stringify([...Object.keys(left.local), ...Object.keys(left.session)]).slice(0, 200));
+await tabB.waitForURL(`${BASE}/login`, { timeout: 8000 }).catch(() => {});
+const tabBLeft = await TB.stored();
+check('…the other open tab is told: it goes to Sign in, and its tab-only copies (the ledger) are gone',
+  tabBHad.some((k) => k.endsWith(':q:manager:gifts')) && /\/login$/.test(tabB.url()) && Object.keys(tabBLeft.session).length === 0,
+  JSON.stringify({ had: tabBHad.length, url: tabB.url(), left: Object.keys(tabBLeft.session) }));
+await ctx.setOffline(true);
+await TB.go('/money');
+check('…and with no signal there, Money shows no ledger', !/Arjun Mehta|Raised this year/i.test(await TB.text()), (await TB.text()).slice(0, 120));
+await ctx.setOffline(false);
+await tabB.close();
 await join(page, staffInv.joinUrl, 'Sam Staff');
 const meB = (await D.api('/auth/me')).json;
 check('a second person signs in on the same browser', meB.user.id !== meA.user.id && meB.role === 'staff');
@@ -496,6 +625,70 @@ await goOnline(vctx, vp);
 await until(async () => !(await V.chip()), 20000);
 const vAfter = (await M.api(`/persons/${harjit.id}`)).json;
 check('back online: the volunteer’s knock once', vAfter.contacts.length === vBefore + 1 && vAfter.person.rating === '2', `${vAfter.contacts.length} vs ${vBefore}`);
+
+// Made treasurer while their Starbase is open (this tab still thinks
+// "volunteer"): Today's money lands in this tab only, never in the browser.
+const volUser = (await V.api('/auth/me')).json.user;
+await V.go('/map');
+check('manager makes the volunteer a treasurer', (await M.api('/actions/member.setRole', { user_id: volUser.id, role: 'treasurer' })).status === 200);
+await vp.click('.tabbar a[href="/"]').catch(() => vp.click('nav.links a[href="/"]'));
+await sleep(2000);
+let vs = await V.stored();
+const moneyLocal = Object.entries(vs.local).filter(([, v]) => /totalCents|amount_cents/.test(v)).map(([k2]) => k2.split(':').slice(5).join(':'));
+check('…Today now carries money: kept for this tab only, even under the old role’s name', moneyLocal.length === 0
+  && Object.entries(vs.session).some(([k2, v]) => k2.endsWith(':q:volunteer:brief') && /totalCents/.test(v)), JSON.stringify({ moneyLocal, session: Object.keys(vs.session).map((x) => x.split(':').slice(5).join(':')) }));
+await V.go('/');
+await sleep(1200);
+vs = await V.stored();
+check('…reloaded as treasurer: nothing kept under the old role stays', ![...Object.keys(vs.local), ...Object.keys(vs.session)].some((x) => x.includes(':q:volunteer:')),
+  [...Object.keys(vs.local), ...Object.keys(vs.session)].map((x) => x.split(':').slice(5).join(':')).join(' | '));
+await V.go('/people');
+await V.go('/map');
+await sleep(1200);
+vs = await V.stored();
+const deskShaped = (Object.values({ ...vs.local, ...vs.session }).join('\n').match(/[\w.+-]+@[\w-]+\.[\w.]+/g) || []).filter((e) => e.toLowerCase() !== volEmail).length;
+// Back to volunteer: the desk-shaped copies (everyone's emails on the doors and People) go at the next start.
+check('manager makes them a volunteer again (as treasurer they kept the doors and People with everyone’s email)',
+  deskShaped > 0 && (await M.api('/actions/member.setRole', { user_id: volUser.id, role: 'volunteer' })).status === 200, deskShaped);
+await V.go('/');
+await sleep(1200);
+vs = await V.stored();
+const keptNow = { ...vs.local, ...vs.session };
+const others = [...new Set((Object.values(keptNow).join('\n').match(/[\w.+-]+@[\w-]+\.[\w.]+/g) || []).filter((e) => e.toLowerCase() !== volEmail))];
+check('…as a volunteer again: no treasurer copies, and no one else’s email in anything kept (doors, People)',
+  !Object.keys(keptNow).some((x) => x.includes(':q:treasurer:')) && others.length === 0, `${others.length} emails · ${Object.keys(keptNow).map((x) => x.split(':').slice(5).join(':')).join(' | ')}`);
+// A day old is the most anything is kept — in storage too, not only on screen.
+await V.go('/shifts');
+await sleep(1200);
+await vp.evaluate(() => {
+  for (const s of [localStorage, sessionStorage]) {
+    for (const k of Object.keys(s)) {
+      if (!k.startsWith('starbase:copy:') || k.endsWith(':scale')) continue;
+      const v = JSON.parse(s.getItem(k));
+      v.at -= 3 * 24 * 3600 * 1000;
+      s.setItem(k, JSON.stringify(v));
+    }
+  }
+});
+const aged = Object.keys((await V.stored()).local).filter((x) => !x.endsWith(':scale')).length;
+await vctx.setOffline(true);
+await V.go('/');
+vs = await V.stored();
+const stale = Object.keys({ ...vs.local, ...vs.session }).filter((x) => !x.endsWith(':scale'));
+check('copies three days old are gone at the next start (only the rating scale stays)', aged > 0 && stale.length === 0, `${aged} aged · left ${stale.join(' | ')}`);
+await vctx.setOffline(false);
+// The session ends without Sign out (cookie gone): the next start forgets every copy.
+await V.go('/shifts');
+await V.go('/map');
+await sleep(1200);
+const before401 = Object.keys((await V.stored()).local).length;
+await vctx.clearCookies();
+await V.go('/');
+await vp.waitForURL(`${BASE}/login`, { timeout: 8000 }).catch(() => {});
+await sleep(600);
+vs = await V.stored();
+check('a sign-in the server says is over: on Sign in, and nothing kept is left', before401 > 0 && /\/login$/.test(vp.url())
+  && Object.keys(vs.local).length === 0 && Object.keys(vs.session).length === 0, `${before401} → ${Object.keys(vs.local).join(' | ')}`);
 await vctx.close();
 
 // ════════════════════════════════════════════════════════════════════════════

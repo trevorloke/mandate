@@ -385,6 +385,30 @@ await page.unroute('**/api/map/config');
 await dropTilesCopy();
 await D.go('/map');
 
+// A knock, then the map reopened at once — before the phone's copy caught up,
+// while it's still young: the map asks the server, never shows the doors
+// from before the knock.
+{
+  const who = P.maya;
+  await D.go(`/map?person=${who.id}`);
+  await page.waitForSelector('aside.door-card', { timeout: 8000 }).catch(() => {});
+  const was = (await D.api(`/persons/${who.id}`)).json.person.rating;
+  const pick = was === '2' ? '3' : '2';
+  await page.click(`aside.door-card button[aria-label^="${pick}:"]`);
+  await sleep(350);
+  const saved = (await D.api(`/persons/${who.id}`)).json.person.rating;
+  const asked = [];
+  const onReq = (r) => { if (r.url().includes('/api/map/doors')) asked.push(r.url()); };
+  page.on('request', onReq);
+  await page.goto(`${BASE}/map?person=${who.id}`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('aside.door-card', { timeout: 8000 }).catch(() => {});
+  await sleep(1500);
+  const pressed = await page.$$eval('aside.door-card button[aria-pressed="true"]', (els) => els.map((e) => e.getAttribute('aria-label') || '')).catch(() => []);
+  page.off('request', onReq);
+  check('a knock, then the map reopened at once: the doors are asked for again and the card shows the knock',
+    saved === pick && asked.length >= 1 && pressed.some((a) => a.startsWith(`${pick}:`)), JSON.stringify({ saved, asked: asked.length, pressed }));
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 2. Volunteer on a phone
 // ════════════════════════════════════════════════════════════════════════════
