@@ -28,12 +28,12 @@ import { Link, useLocation, useNavigate, useOutletContext, useParams } from 'rea
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, ApiError } from '../api.js';
 import { logContact, pendingKnocks, pendingPeopleIn, queueAction, undoQueued, useOutbox } from '../offline.js';
-import { queuedChip, queuedText } from '../components/queued.js';
+import { queuedChip, queuedSaid, queuedText } from '../components/queued.js';
 import { AddPersonInline, SIGN_LABEL, SignAsk, signCancelOffered } from '../components/DoorCard.jsx';
 import RatingButtons, {
   More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
 } from '../components/RatingButtons.jsx';
-import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
+import SurveyQuestions, { answersSaid, answersTail, answersWord, useSurvey } from '../components/SurveyQuestions.jsx';
 import './turfs.css';
 
 const DESK_ROLES = ['manager', 'treasurer', 'staff'];
@@ -616,7 +616,10 @@ function WalkList({ id }) {
           ? `Rated ${ratingText(rating)}`
           : outcome === 'contacted' ? 'Note saved' : OUTCOME_LABEL[outcome];
         const said = answers?.length && !rating && !note ? answersSaid(answers, r.result) : `${what}${answersTail(answers, r.result)}`;
-        toast(r.queued ? `${queuedText(r)}${answersTail(answers)}` : `${who}${said}`, { tone: r.queued ? 'queued' : 'ok', act });
+        // On the phone: what was saved, then where ("Rated 1 · Strong yes · 3 answers · Saved offline").
+        const onPhone = () => queuedSaid(r, rating || outcome !== 'contacted' ? what : note ? 'Note' : null,
+          answers?.length ? answersWord(answers.length) : null);
+        toast(r.queued ? `${who}${onPhone()}` : `${who}${said}`, { tone: r.queued ? 'queued' : 'ok', act });
       }
       if (!r.queued && !batch) refresh();
       return { ok: true, queued: r.queued, signedOut: r.signedOut, client_id: r.client_id, result: r.result };
@@ -647,7 +650,7 @@ function WalkList({ id }) {
     const change = { label: 'Change', onClick: () => reopen(door.key) };
     if (failed) toast(`${plural(failed, 'knock', 'knocks')} not saved — try again`, { tone: 'error' });
     else {
-      toast(queued ? queuedText(queued) : OUTCOME_LABEL.no_answer, { tone: queued ? 'queued' : 'ok', act: change });
+      toast(queued ? queuedSaid(queued, OUTCOME_LABEL.no_answer) : OUTCOME_LABEL.no_answer, { tone: queued ? 'queued' : 'ok', act: change });
       if (openRef.current === door.key) advanceFrom(door.key);
     }
   };

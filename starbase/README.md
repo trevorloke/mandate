@@ -114,7 +114,9 @@ election week should switch to a paid provider.
 | `STARBASE_TILE_ATTRIBUTION` | the provider's credit line (text and links) | the OpenStreetMap credit (none for another provider unless set) |
 | `STARBASE_TILE_MAX_ZOOM` | deepest zoom the provider serves, 1–22 | `19` |
 
-A bad value falls back to the default (and logs once). The service worker
+A bad value falls back to the default (and logs once); desk roles see which
+tiles took on the map's filter sheet (*Map tiles: OpenStreetMap — custom
+address ignored*). The service worker
 keeps the tiles a phone has already looked at (about 1,500, oldest out), so a
 turf viewed with signal still draws offline; it never fetches tiles ahead.
 

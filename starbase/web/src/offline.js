@@ -11,7 +11,8 @@
 //   flushOutbox()      → replays waiting items in order (safe to call anytime).
 //   useOutbox()        → { pending, refused, flushing, lastError, items, flush }.
 //   dismissItem(cid) / retryItem(cid)   a refused item: drop it, or send it again.
-//   undoQueued(cid)    a sign request still on the phone: take it back.
+//   undoQueued(cid)    a sign request or a "Count me in" still on the phone:
+//                      take it back.
 //   clearOutbox()      → discard this sign-in's items (sign-out on a shared phone).
 //   setOutboxOwner(me) → whose items these are (Shell): each item belongs to
 //                        the sign-in that saved it and is only shown to and
@@ -43,6 +44,9 @@ import { action, ApiError } from './api.js';
 export const FIELD_ACTIONS = ['contact.log', 'person.create', 'person.addAtDoor', 'person.locate', 'sign.place', 'sign.cancel', 'shift.join', 'shift.leave'];
 // The writes that add a person, on an id made here.
 export const NEW_PERSON = ['person.create', 'person.addAtDoor'];
+// What can be taken back while it waits: a sign request (its cancel is
+// sign.cancel) and "Count me in" (shift.leave).
+const UNDOABLE = ['sign.place', 'shift.join'];
 
 const KEY = 'starbase:outbox:v2';
 const V1_KEY = 'starbase:outbox:v1'; // knocks only (before this outbox)
@@ -237,12 +241,16 @@ async function runFlush() {
     try {
       let done = next;
       let result = await send(next, { replay: true });
-      // A sign request taken back (Undo) after it may already have gone —
-      // even while it was on its way just now: the request lands, then its
-      // cancel goes straight after.
-      if (next.name === 'sign.place' && find(next.cid)?.undo && result?.sign?.id) {
+      // A sign request or a "Count me in" taken back (Undo / Take back) after
+      // it may already have gone — even while it was on its way just now: it
+      // lands, then its cancel (sign.cancel / shift.leave) goes straight after.
+      const undone = find(next.cid)?.undo;
+      const follow = undone && next.name === 'sign.place' && result?.sign?.id ? { name: 'sign.cancel', input: { id: result.sign.id } }
+        : undone && next.name === 'shift.join' ? { name: 'shift.leave', input: { shift_id: next.input.shift_id } }
+          : null;
+      if (follow) {
         told(next, result, true);
-        done = { ...next, name: 'sign.cancel', input: { id: result.sign.id }, undo: false, tries: 1 };
+        done = { ...next, ...follow, undo: false, tries: 1 };
         update(next.cid, done);
         result = await send(done, { replay: true });
       }
@@ -253,6 +261,8 @@ async function runFlush() {
     } catch (err) {
       if (isNetworkFailure(err)) { lastError = 'Still offline — will retry'; break; }
       if (isSignedOut(err)) { lastError = 'Sign in again to send what’s saved'; signedOutNow = true; break; }
+      // Taken back, and the server said no to it anyway: nothing to keep.
+      if (find(next.cid)?.undo && UNDOABLE.includes(find(next.cid).name)) { remove(next.cid); continue; }
       // Refused: kept, with the server's reason, until dismissed or retried.
       update(next.cid, { state: 'refused', error: { status: err.status, message: err.message || 'refused' } });
     }
@@ -279,7 +289,7 @@ export function retryItem(cid) {
   return offlineNow() ? Promise.resolve({ sent: 0, left: pendingCount() }) : flushOutbox();
 }
 
-// Take back a sign request saved on this phone:
+// Take back a sign request or a "Count me in" saved on this phone:
 //   'removed' — it never left the phone; now it never will.
 //   'queued'  — it may have reached the server, so its cancel follows it.
 //   { sent }  — it already went (sent's result has the sign): cancel that one.
@@ -290,7 +300,7 @@ export function undoQueued(cid) {
     const sentResult = results.get(cid);
     return sentResult ? { sent: sentResult } : null;
   }
-  if (it.name !== 'sign.place') return null;
+  if (!UNDOABLE.includes(it.name) || it.undo) return it.undo ? 'queued' : null;
   // tries counts every send that may have reached the server; a refused one
   // never did.
   if (!it.tries || it.state === 'refused') {
@@ -366,7 +376,7 @@ export function itemText(item, nameOf = () => '') {
     case 'person.locate': what = 'Pin'; break;
     case 'sign.place': what = item.undo ? `${SIGN_WORD[i.kind] || 'Sign'} · undo` : (SIGN_WORD[i.kind] || 'Sign'); break;
     case 'sign.cancel': what = 'Sign undo'; break;
-    case 'shift.join': what = 'Count me in'; break;
+    case 'shift.join': what = item.undo ? 'Count me in · undo' : 'Count me in'; break;
     case 'shift.leave': what = 'Can’t make it'; break;
     default: what = 'Saved';
   }

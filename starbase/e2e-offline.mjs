@@ -316,6 +316,32 @@ await D.go('/map');
 m = await D.measure('main.page');
 check('desk map: one yellow button at most', m.yellow <= 1, JSON.stringify(m));
 
+// Desk: the map's sheet names the tiles that took — and a setting that didn't.
+const tilesNote = async () => {
+  await page.click('.map-filter-btn');
+  await page.waitForSelector('.map-fsheet', { timeout: 3000 }).catch(() => {});
+  const line = await page.$eval('.map-fsheet__tiles', (el) => el.innerText.trim()).catch(() => '');
+  const y = (await D.measure('.map-fsheet')).yellow;
+  await page.click('.map-fsheet .mapsheet-close').catch(() => {});
+  return { line, y };
+};
+let tn = await tilesNote();
+check('desk map sheet: "Map tiles: tiles.example" (the configured provider)', tn.line === 'Map tiles: tiles.example' && tn.y <= 1, JSON.stringify(tn));
+// The server's answer when STARBASE_TILE_URL was mistyped (unit-tested in offline.test.js).
+const dropTilesCopy = () => page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.endsWith(':mapConfig')) localStorage.removeItem(k); });
+await dropTilesCopy();
+await page.route('**/api/map/config', async (route) => {
+  const res = await route.fetch();
+  const body = await res.json();
+  await route.fulfill({ response: res, json: { ...body, setup: { ...body.setup, source: 'OpenStreetMap', custom: false, ignored: ['url'] } } });
+});
+await D.go('/map');
+tn = await tilesNote();
+check('…a mistyped address is said on the map, not only in the server log', tn.line === 'Map tiles: OpenStreetMap — custom address ignored', tn.line);
+await page.unroute('**/api/map/config');
+await dropTilesCopy();
+await D.go('/map');
+
 // ════════════════════════════════════════════════════════════════════════════
 // 2. Volunteer on a phone
 // ════════════════════════════════════════════════════════════════════════════
@@ -440,6 +466,55 @@ await V.shot('6-vol-refused');
 await vp.keyboard.press('Escape').catch(() => {});
 await V.go(`/shifts/${roomy.id}`);
 check('Saturday canvass: "You’re on this shift" once the server says so', /You’re on this shift/i.test(await V.text()) && !/Not sent yet/i.test(await V.text()));
+
+// ── With no signal: a knock on the map, a profile, a sign-up taken back ──
+const lit = (await D.api('/actions/shift.create', { title: 'Sunday lit drop', starts_at: soon(72), ends_at: soon(74), capacity: 4 })).json.shift;
+await V.go(`/shifts/${lit.id}`); // opened once with signal: kept on the phone
+await sleep(1200);
+check('volunteer: no tile settings in what their browser gets', (await V.api('/map/config')).json?.setup === undefined);
+await V.go(`/map?person=${P.harjit.id}`);
+await vp.waitForSelector('aside.door-card', { timeout: 8000 }).catch(() => {});
+await sleep(1200);
+await vctx.setOffline(true);
+await vp.tap('aside.door-card button[aria-label="1: Strong support"]').catch(() => vp.click('aside.door-card button[aria-label="1: Strong support"]'));
+await sleep(500);
+t = await V.text();
+check('door card knock offline: "Rated 1 · Strong yes · Saved offline"', /Rated 1 · Strong yes · Saved offline/.test(t), (t.match(/[^.]{0,40}Saved offline/) || [''])[0]);
+const hHead = await vp.$eval('aside.door-card .mapsheet-head', (el) => el.innerText.replace(/\s+/g, ' ')).catch(() => '');
+check('…and the card says so while it waits: "Saved offline"', /Harjit Gill/.test(hHead) && /Saved offline/i.test(hHead), hHead);
+await V.shot('8-vol-door-card-waiting');
+await vp.tap('aside.door-card .fk-more__btn').catch(() => vp.click('aside.door-card .fk-more__btn'));
+await vp.click('aside.door-card a:has-text("Profile")');
+await sleep(600);
+t = await V.text();
+check('profile with no signal: "No signal — this profile loads when you’re back online", never "No one here"',
+  /No signal — this profile loads when you’re back online/.test(t) && !/No one here/.test(t), t.slice(0, 160));
+await V.shot('9-vol-profile-no-signal');
+await V.go(`/shifts/${lit.id}`);
+await vp.click('button:has-text("Count me in")');
+await sleep(400);
+t = await V.text();
+check('Count me in offline: "Not sent yet" with "Take back"', /Count me in\s*Not sent yet/i.test(t) && !!(await vp.$('button:has-text("Take back")')), t.slice(0, 200));
+m = await V.measure('main.page');
+check('…no yellow, field-size Take back', m.yellow === 0 && !m.small.some((x) => /Take back/.test(x.t)), JSON.stringify(m));
+await V.shot('10-vol-take-back');
+await vp.click('button:has-text("Take back")');
+await sleep(300);
+check('Take back: off the phone, "Count me in" again', !(await V.outbox()).some((i) => i.name === 'shift.join' && i.input.shift_id === lit.id)
+  && !!(await vp.$('button:has-text("Count me in")')) && !/Not sent yet/.test(await V.text()));
+check('volunteer chip: the knock waiting (and the refused sign-up)', /^1 saved on this phone · 1 refused$/i.test(await V.chip()), await V.chip());
+await vctx.setOffline(false);
+await vp.evaluate(() => window.dispatchEvent(new Event('online')));
+for (let i = 0; i < 20 && /saved on this phone/i.test(await V.chip()); i += 1) await sleep(250);
+const stripNow = await vp.innerText('.offline-strip').catch(() => '');
+check('back online: the strip says "1 sent"', /✓ 1 sent/i.test(stripNow), stripNow.replace(/\s+/g, ' '));
+await V.shot('11-vol-sent');
+const harjitNow = (await D.api(`/persons/${P.harjit.id}`)).json;
+check('server: the knock on Harjit once, rated 1', harjitNow.contacts.filter((x) => x.channel === 'door' && x.rating === '1').length === 1 && harjitNow.person.rating === '1');
+check('server: Jas never on the lit drop (taken back before it went)', !(await D.api(`/shifts/${lit.id}`)).json.assignees.some((a) => a.name === 'Jas Volunteer')
+  && !(await D.api('/events?since=0&limit=5000')).json.events.some((e) => e.action === 'shift.join' && e.payload?.shift_id === lit.id));
+await sleep(4200);
+check('…and "1 sent" goes by itself', !/1 sent/i.test(await vp.innerText('.offline-strip').catch(() => '')));
 
 // Sign-out asks about what's still on the phone, then forgets everything.
 await vp.click('.acct-btn');

@@ -242,6 +242,79 @@ test('a volunteer’s shift sign-up replays as done; a full shift is refused, wi
   assert.equal((await c.get('/api/audit/verify')).json.ok, true);
 });
 
+test('Take back on a "Count me in" still on the phone: never sent, or "Can’t make it" follows it', async () => {
+  net.cookie = vol.cookie;
+  const shift = (await c.action('shift.create', { title: 'Lit drop', starts_at: new Date(Date.now() + 86400_000).toISOString(), capacity: 2 })).json.shift;
+  const joins = async () => (await c.get('/api/events?since=0&limit=5000')).json.events
+    .filter((e) => e.action === 'shift.join' && e.payload.shift_id === shift.id).length;
+  const activeOn = async () => (await c.get(`/api/shifts/${shift.id}`)).json.assignees
+    .filter((x) => x.status === 'assigned' || x.status === 'confirmed').length;
+
+  // Never left the phone: it just goes.
+  nav.onLine = false;
+  const a = await ob.queueAction('shift.join', { shift_id: shift.id }, { who: 'Lit drop' });
+  assert.equal(a.queued, true);
+  assert.equal(ob.undoQueued(a.client_id), 'removed');
+  assert.equal(ob.unsentCount(), 0);
+  nav.onLine = true;
+  await ob.flushOutbox();
+  assert.equal(await joins(), 0, 'nothing reached the server');
+
+  // Maybe sent (the answer was lost): "Can't make it" goes straight after it.
+  net.loseNext = 1;
+  const b = await ob.queueAction('shift.join', { shift_id: shift.id }, { who: 'Lit drop' });
+  assert.equal(b.queued, true);
+  assert.equal(ob.undoQueued(b.client_id), 'queued');
+  assert.equal(ob.undoQueued(b.client_id), 'queued', 'a second tap changes nothing');
+  assert.match(ob.itemText(JSON.parse(store.get('starbase:outbox:v2'))[0]), /^Count me in · undo · Lit drop/);
+  assert.equal((await ob.flushOutbox()).sent, 1);
+  assert.equal(ob.unsentCount(), 0);
+  assert.equal(await joins(), 1, 'joined once (the lost answer)');
+  assert.equal(await activeOn(), 0, 'then dropped out');
+
+  // Taken back while it was on its way: it lands, then the leave follows.
+  nav.onLine = false;
+  const d = await ob.queueAction('shift.join', { shift_id: shift.id }, { who: 'Lit drop' });
+  nav.onLine = true;
+  const going = ob.flushOutbox(); // in flight now
+  assert.equal(ob.undoQueued(d.client_id), 'queued');
+  await going;
+  assert.equal(ob.unsentCount(), 0);
+  assert.equal(await activeOn(), 0);
+
+  // Taken back, and the server refuses the sign-up anyway (full): nothing is kept.
+  net.offline = true;
+  const e = await ob.queueAction('shift.join', { shift_id: shift.id }, { who: 'Lit drop' });
+  assert.equal(e.queued, true);
+  for (const name of ['Spot One', 'Spot Two']) {
+    const p = await c.createPerson(name);
+    assert.equal((await c.action('shift.assign', { shift_id: shift.id, person_id: p.id })).status, 200);
+  }
+  assert.equal(ob.undoQueued(e.client_id), 'queued');
+  net.offline = false;
+  await ob.flushOutbox();
+  assert.equal(ob.unsentCount(), 0, 'not listed as refused: it was taken back');
+  assert.equal(await activeOn(), 2);
+
+  // Already sent: Take back hands back what the server said, for the screen's own "Can't make it".
+  const shift2 = (await c.action('shift.create', { title: 'Sign crew', starts_at: new Date(Date.now() + 86400_000).toISOString() })).json.shift;
+  net.loseNext = 1;
+  const f = await ob.queueAction('shift.join', { shift_id: shift2.id });
+  await ob.flushOutbox();
+  assert.ok(ob.undoQueued(f.client_id)?.sent, 'sent: the screen sends shift.leave itself');
+  net.cookie = c.cookie;
+  assert.equal((await c.get('/api/audit/verify')).json.ok, true);
+});
+
+test('a knock kept on the phone says what was saved, then where', async () => {
+  const { queuedSaid } = await import('../../web/src/components/queued.js');
+  nav.onLine = false;
+  assert.equal(queuedSaid({ queued: true }, 'Rated 1 · Strong yes', '3 answers'), 'Rated 1 · Strong yes · 3 answers · Saved offline');
+  assert.equal(queuedSaid({ queued: true }, null, '2 answers'), '2 answers · Saved offline');
+  nav.onLine = true;
+  assert.equal(queuedSaid({ queued: true, signedOut: true }, 'No answer'), 'No answer · Saved on this phone — sign in to send');
+});
+
 test('signed out: kept on the phone, sent after signing back in', async () => {
   const p = await c.createPerson('After Sign In', { address: '7210 124 St', lat: 49.1322, lng: -122.8527 });
   net.cookie = 'starbase_session=nope';

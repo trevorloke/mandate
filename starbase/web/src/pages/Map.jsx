@@ -763,11 +763,22 @@ function NameTurfForm({ points, doors, takenNames, busy, error, onSave, onBack, 
   );
 }
 
+// Desk: which tiles took (GET /api/map/config's setup) — "Map tiles:
+// OpenStreetMap", "Map tiles: tiles.example", or a setting that didn't:
+// "Map tiles: OpenStreetMap — custom address ignored".
+const tilesLine = (setup) => {
+  if (!setup?.source) return null;
+  const ignored = Array.isArray(setup.ignored) ? setup.ignored : [];
+  const off = [ignored.includes('url') && 'custom address ignored', ignored.includes('maxZoom') && 'max zoom ignored'].filter(Boolean);
+  return `Map tiles: ${setup.source}${off.length ? ` — ${off.join(', ')}` : ''}`;
+};
+
 // The filter pill's sheet. "Show" — which doors, one at a time. "On the
 // map" (desk) — the turf outlines switch. Then the turf tools (walk lists,
-// "Draw turf"); a volunteer's walk list has its own chip on the map.
+// "Draw turf"); a volunteer's walk list has its own chip on the map. Last,
+// for desks, one quiet line naming the map tiles (tilesNote).
 function FilterSheet({
-  filters, filter, onFilter, counts, showTurfs, onTurfs, turfCount, desk, onDraw, unlocated, onPlace, onClose,
+  filters, filter, onFilter, counts, showTurfs, onTurfs, turfCount, desk, onDraw, unlocated, onPlace, onClose, tilesNote = null,
 }) {
   return (
     <>
@@ -821,6 +832,7 @@ function FilterSheet({
             )}
           </div>
         )}
+        {desk && tilesNote && <p className="map-fsheet__tiles">{tilesNote}</p>}
       </div>
     </>
   );
@@ -1673,6 +1685,7 @@ export default function MapPage() {
           unlocated={unlocated}
           onPlace={() => { setFilterOpen(false); setPickerOpen(true); setAddAt(null); cancelMode(); }}
           onClose={closeFilter}
+          tilesNote={canCreate ? tilesLine(tilesQ.data?.setup) : null}
         />
       )}
 

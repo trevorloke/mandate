@@ -413,6 +413,8 @@
 .map-fsheet__acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--rule); }
 .btn.map-fsheet__act { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); min-height: 48px; padding: 0 var(--s-2); }
 .map-fsheet__acts > :only-child { grid-column: 1 / -1; }
+/* Desk: "Map tiles: OpenStreetMap — custom address ignored" — one quiet line. */
+.map-fsheet__tiles { margin: var(--s-3) 0 0; font-size: 13px; color: var(--text-3); overflow-wrap: anywhere; }
 
 .map-mode {
   display: flex;

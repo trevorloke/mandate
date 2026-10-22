@@ -126,8 +126,9 @@ one tap away under **More**.
 - **Shifts** — *Count me in* on an open shift; *Can't make it* to drop out.
 - **Signs** (from Today when there are signs to put up) — *Put up ✓*.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved
-  offline*), *Count me in* on a shift, turn it off — they send once, never
-  twice. The strip's *saved on this phone* chip lists what's waiting.
+  offline*), *Count me in* on a shift (*Take back* undoes it before it
+  sends), turn it off — they send once, never twice, and the strip says
+  *4 sent*. The strip's *saved on this phone* chip lists what's waiting.
 - Confirm a volunteer **never sees money or the supporter list**: no Money,
   People or Outreach; typing those addresses lands back on Today. (The
   server enforces this too: their browser never receives other people's

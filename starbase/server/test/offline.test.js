@@ -7,7 +7,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { freshDb, Client } from './helpers.js';
-import { tileConfig, TILE_DEFAULTS } from '../ext/offline/index.js';
+import { tileConfig, tileSource, TILE_DEFAULTS } from '../ext/offline/index.js';
 
 const tag = Math.random().toString(36).slice(2, 8);
 let c; let other; let vol; let ws;
@@ -159,6 +159,9 @@ test('GET /api/map/config: OpenStreetMap by default, for every signed-in role', 
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.tiles, { ...TILE_DEFAULTS });
   assert.match(r.json.tiles.attribution, /OpenStreetMap/);
+  assert.equal(r.json.setup, undefined, 'a volunteer gets the tiles, not the setup');
+  assert.deepEqual((await c.get('/api/map/config')).json.setup,
+    { source: 'OpenStreetMap', custom: false, ignored: [], maxZoom: 19 });
   const signedOut = await new Client().get('/api/map/config');
   assert.equal(signedOut.status, 401);
 });
@@ -184,4 +187,29 @@ test('STARBASE_TILE_* choose the provider; a bad value falls back to OpenStreetM
     'an OpenStreetMap mirror keeps the OpenStreetMap credit');
   setEnv({ STARBASE_TILE_URL: null, STARBASE_TILE_MAX_ZOOM: null });
   assert.ok(ws);
+});
+
+test('a mistyped STARBASE_TILE_* is shown to desk roles, not only logged', async () => {
+  // Taken: the desk sees the provider by its host (never the key in the address).
+  setEnv({ STARBASE_TILE_URL: 'https://tiles.example/streets/{z}/{x}/{y}.png?key=abc', STARBASE_TILE_MAX_ZOOM: '18', STARBASE_TILE_ATTRIBUTION: null });
+  let setup = (await c.get('/api/map/config')).json.setup;
+  assert.deepEqual(setup, { source: 'tiles.example', custom: true, ignored: [], maxZoom: 18 });
+  assert.ok(!JSON.stringify(setup).includes('key=abc'));
+
+  // Mistyped: OpenStreetMap is drawn, and the desk is told which setting didn't take.
+  setEnv({ STARBASE_TILE_URL: 'tiles.example/{z}/{x}/{y}.png', STARBASE_TILE_MAX_ZOOM: '25' });
+  const r = (await c.get('/api/map/config')).json;
+  assert.equal(r.tiles.url, TILE_DEFAULTS.url);
+  assert.equal(r.tiles.maxZoom, 19);
+  assert.deepEqual(r.setup, { source: 'OpenStreetMap', custom: false, ignored: ['url', 'maxZoom'], maxZoom: 19 });
+  // A volunteer's browser never gets it.
+  const v = (await vol.get('/api/map/config')).json;
+  assert.equal(v.setup, undefined);
+  assert.deepEqual(Object.keys(v), ['tiles']);
+
+  setEnv({ STARBASE_TILE_URL: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', STARBASE_TILE_MAX_ZOOM: null });
+  setup = (await c.get('/api/map/config')).json.setup;
+  assert.equal(setup.source, 'OpenStreetMap', 'an OpenStreetMap mirror is still OpenStreetMap');
+  assert.equal(tileSource('https://a.tiles.example:8443/{z}/{x}/{y}.png'), 'a.tiles.example');
+  setEnv({ STARBASE_TILE_URL: null });
 });

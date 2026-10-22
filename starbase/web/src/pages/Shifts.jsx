@@ -29,7 +29,7 @@
 // "Offline copy" when there's no signal), and "Count me in" / "Can't make
 // it" go through the outbox (src/offline.js) — saved here, sent once when
 // the signal is back; until then the screen says "Not sent yet", never
-// "You're on".
+// "You're on", with "Take back" on a "Count me in" still waiting.
 //
 // Also exports two small building blocks:
 //   <PersonPicker onPick={(person) => …} />   type-ahead over /api/persons?q= (Signs uses it)
@@ -39,7 +39,7 @@ import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { VOLUNTEER_ROLES, SHIFT_STATUSES } from '@starbase/shared/canvass';
 import { apiGet, action } from '../api.js';
-import { queueAction, useOutbox } from '../offline.js';
+import { queueAction, undoQueued, useOutbox } from '../offline.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import './shifts.css';
 
@@ -772,6 +772,13 @@ function ShiftDetail({ id, canDesk, me }) {
       setJoining(false);
     }
   };
+  // "Take back" on a "Count me in" still on the phone: it never goes, or
+  // (it may already have reached the server) "Can't make it" follows it.
+  const takeBack = async () => {
+    setJoinError(null);
+    const u = waiting ? undoQueued(waiting.cid) : null;
+    if (u?.sent) await selfAction('shift.leave'); // it went just now: drop out again
+  };
 
   // A copy kept on the phone still opens when the signal is gone; a shift
   // the server says is gone is gone.
@@ -1009,8 +1016,13 @@ function ShiftDetail({ id, canDesk, me }) {
 
       {!canDesk && (
         <section className="ops-notify" aria-label="Your spot">
-          {waiting?.name === 'shift.join' && !onIt ? (
-            <p className="ops-pending" role="status">Count me in <span className="chip obx-chip">Not sent yet</span></p>
+          {waiting?.name === 'shift.join' && waiting.undo ? (
+            <p className="ops-pending" role="status">Taken back <span className="chip obx-chip">Not sent yet</span></p>
+          ) : waiting?.name === 'shift.join' && !onIt ? (
+            <div className="ops-confirm">
+              <p className="ops-pending" role="status">Count me in <span className="chip obx-chip">Not sent yet</span></p>
+              <button type="button" className="btn btn-quiet ops-tap" disabled={joining} onClick={takeBack}>Take back</button>
+            </div>
           ) : onIt ? (
             <>
               <span className="ops-onit" role="status"><span aria-hidden="true">✓</span> You’re on this shift</span>

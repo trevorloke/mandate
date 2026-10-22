@@ -91,7 +91,7 @@ const leftOutLine = (who, result) => {
   return n ? `${who ? `${who} · ` : ''}${n} ${n === 1 ? 'answer' : 'answers'} not saved — question changed` : null;
 };
 
-function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice }) {
+function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDismissNotice, sent = 0 }) {
   const { pending, refused, flushing, lastError } = outbox;
   const [open, setOpen] = useState(false);
   const chipRef = useRef(null);
@@ -105,13 +105,16 @@ function OfflineBanner({ online, outbox, onSend, onRetry, nameOf, notice, onDism
   // "Still offline" is the outbox's retry note (the chip already says it's
   // saved); a lapsed sign-in is worth saying.
   const stuck = lastError && !/still offline/i.test(lastError) ? lastError : null;
-  if (online && items === 0 && !notice) return null;
+  // "4 sent": what was on the phone just reached the server (said for a moment).
+  const justSent = online && sent > 0;
+  if (online && items === 0 && !notice && !justSent) return null;
 
   return (
-    <div className={`offline-strip${online ? '' : ' is-offline'}${online && !pending && refused ? ' is-refused' : ''}`} role="status" aria-live="polite">
+    <div className={`offline-strip${online ? '' : ' is-offline'}${online && !pending && refused ? ' is-refused' : ''}${justSent && !pending ? ' is-sent' : ''}`} role="status" aria-live="polite">
       <div className="offline-strip__inner">
         <span className="offline-strip__dot" aria-hidden="true" />
         {!online && <span className="offline-strip__text">{items ? 'Offline' : 'Offline — field work saves on this phone'}</span>}
+        {justSent && <span className="offline-strip__text offline-strip__sent">✓ {sent} sent</span>}
         {items > 0 && (
           <button type="button" ref={chipRef} className="offline-strip__chip" aria-haspopup="dialog" aria-expanded={open}
             onClick={() => (open ? close() : setOpen(true))}>
@@ -271,16 +274,24 @@ function SignedInShell({ me }) {
   const outboxRef = useRef(outbox);
   outboxRef.current = outbox;
   const [notice, setNotice] = useState(null);
+  // How many items the last send got through ("4 sent"), for a few seconds.
+  const [sentNote, setSentNote] = useState(0);
+  useEffect(() => {
+    if (!sentNote) return undefined;
+    const t = setTimeout(() => setSentNote(0), 4000);
+    return () => clearTimeout(t);
+  }, [sentNote]);
   // A knock sent later from the phone whose answer the server left out (its
   // question changed meanwhile): said once, until dismissed.
   const [leftOut, setLeftOut] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
   const [confirmLeft, setConfirmLeft] = useState(0);
   const cancelSignOut = useCallback(() => setConfirmLeft(0), []);
-  const onFlushed = useCallback(() => {
+  const onFlushed = useCallback((r) => {
     for (const queryKey of FLUSHED_KEYS) queryClient.invalidateQueries({ queryKey });
     // Knocks just went out, so the signal is back: an old "needs signal" note is stale.
     setNotice(null);
+    if (r?.sent) setSentNote(r.sent);
   }, [queryClient]);
   // "Sign out needs signal" / "Couldn't sign out — check your signal" are
   // about the signal: they go by themselves once the phone is back online.
@@ -408,6 +419,7 @@ function SignedInShell({ me }) {
           nameOf={nameOf}
           notice={notice || leftOut}
           onDismissNotice={() => { setNotice(null); setLeftOut(null); }}
+          sent={sentNote}
         />
       </header>
       <main className="page">

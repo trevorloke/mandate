@@ -73,6 +73,11 @@
 .offline-strip.is-refused { background: var(--paper-1); }
 .offline-strip.is-refused .offline-strip__dot { background: var(--danger); }
 
+/* "4 sent": everything on the phone reached the server — quiet paper, green dot. */
+.offline-strip.is-sent { background: var(--paper-1); }
+.offline-strip.is-sent .offline-strip__dot { background: var(--ok); }
+.offline-strip__sent { color: var(--ok); }
+
 @media (max-width: 480px) {
   .offline-strip__hint { display: none; }
 }

@@ -16,6 +16,10 @@ export function queuedText(r, what = '') {
   return what ? `${what} ${tail}` : tail.charAt(0).toUpperCase() + tail.slice(1);
 }
 
+// A knock's toast when it's on the phone: what was saved first, then where —
+// "Rated 1 · Strong yes · 3 answers · Saved offline".
+export const queuedSaid = (r, ...said) => [...said.filter(Boolean), queuedText(r)].join(' · ');
+
 // The chip on a row whose knock hasn't reached the server yet; `short` for a
 // list row, where the address and names need the room.
 export const queuedChip = (short = false) => (isOffline()

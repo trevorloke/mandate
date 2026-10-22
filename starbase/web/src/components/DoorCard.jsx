@@ -23,7 +23,8 @@
 // order, exactly once.
 // The card shows it straight away (queued.js has the words, shared with the
 // walk list, Calls and the profile); a person or sign not sent yet says
-// "Not sent yet" (the map lays the outbox over its doors).
+// "Not sent yet" (the map lays the outbox over its doors), and so does a
+// person whose knock is still on the phone ("Saved offline" with no signal).
 //
 // A sign request's toast offers Undo only when the server has sign.cancel
 // (GET /api/actions): it takes the request back — off every list and count —
@@ -42,11 +43,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiGet, ApiError } from '../api.js';
-import { logContact, queueAction, undoQueued } from '../offline.js';
-import { isOffline, queuedText } from './queued.js';
+import { logContact, queueAction, undoQueued, useOutbox } from '../offline.js';
+import { isOffline, queuedChip, queuedSaid, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
-import SurveyQuestions, { answersSaid, answersTail, useSurvey } from './SurveyQuestions.jsx';
+import SurveyQuestions, { answersSaid, answersTail, answersWord, useSurvey } from './SurveyQuestions.jsx';
 import { callsCard, noTexts, textingOn, useTextingStatus } from './TextingCard.jsx';
 import '../pages/map.css';
 
@@ -361,6 +362,10 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
 
   const persons = door.persons;
   const sel = persons.find((p) => p.id === selectedId) || persons[0];
+  // A knock on them still on this phone: the rating shown isn't on the server yet.
+  const outbox = useOutbox();
+  const knockWaiting = Boolean(sel) && outbox.items.some((i) => i.state === 'pending' && i.name === 'contact.log' && i.input?.person_id === sel.id);
+  const waitChip = sel?.pending ? 'Not sent yet' : knockWaiting ? queuedChip() : null;
   const ratingOf = (p) => (p.id in local ? local[p.id] : p.rating);
   const noteText = note.trim();
   const multi = persons.length > 1;
@@ -452,7 +457,10 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       if (r.queued) {
         // Keep the optimistic rating; Shell refreshes everything once the
         // outbox sends. Refetching now would only pause (offline) or fail.
-        toast(`${queuedText(r)}${answersTail(answers)}`, change);
+        const saidQ = rating ? `Rated ${ratingText(rating)}`
+          : outcome !== 'contacted' ? OUTCOME_LABEL[outcome]
+            : sentNote ? 'Note' : ({ phone: 'Call', text: 'Text' })[via] || null;
+        toast(`${multi ? `${firstName(person.name)} · ` : ''}${queuedSaid(r, saidQ, answers.length ? answersWord(answers.length) : null)}`, change);
         return;
       }
       const who = multi ? `${firstName(person.name)} · ` : '';
@@ -561,7 +569,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           <h2 className="mapsheet-title door-head__name">
             {multi ? doorTitle(door) : sel?.name}
             {!multi && dnc && <span className="chip chip-danger door-dnc">Do not contact</span>}
-            {!multi && sel?.pending && <span className="chip fk-wait door-dnc">Not sent yet</span>}
+            {!multi && waitChip && <span className="chip fk-wait door-dnc">{waitChip}</span>}
           </h2>
           {!multi && <span className="door-head__addr">{doorTitle(door)}</span>}
         </div>
@@ -572,7 +580,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         <section className="door-rate" ref={rateRef} aria-label={`Rate ${sel.name}`}>
           <PersonTabs persons={persons} value={sel.id} onPick={pickPerson} ratingOf={ratingOf} />
           {multi && dnc && <p className="door-dnc-line"><span className="chip chip-danger">Do not contact</span> {firstName(sel.name)}</p>}
-          {multi && sel.pending && <p className="door-dnc-line"><span className="chip fk-wait">Not sent yet</span> {firstName(sel.name)}</p>}
+          {multi && waitChip && <p className="door-dnc-line"><span className="chip fk-wait">{waitChip}</span> {firstName(sel.name)}</p>}
           {channel !== 'door' && (
             <p className="door-via">
               <span className="chip fk-wait">{CHANNEL_CHIP[channel]}</span>

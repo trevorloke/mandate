@@ -24,7 +24,7 @@ import { queuedText } from '../components/queued.js';
 import { useOutbox } from '../offline.js';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
-  canDesk, invalidatePersonData, isDnc, tagWord, RatingTag,
+  canDesk, invalidatePersonData, isDnc, tagWord, RatingTag, noSignal,
 } from './People.jsx';
 import './people.css';
 import {
@@ -799,6 +799,15 @@ export default function Person() {
   };
 
   if (profile.isLoading) return <p className="muted">Loading…</p>;
+  // No signal and never opened here: they're there, it just can't load yet.
+  if (noSignal(profile)) {
+    return (
+      <div className="pf-page">
+        <BackLink desk={desk} />
+        <p className="pp-offline" role="status">No signal — this profile loads when you’re back online.</p>
+      </div>
+    );
+  }
   if (profile.isError || !profile.data?.person) {
     return (
       <div className="pp-empty">
