@@ -14,6 +14,7 @@ import {
   SIGN_KINDS, SIGN_STATUSES, DONOR_TIERS,
 } from '@starbase/shared/canvass';
 import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText } from '../components/RatingButtons.jsx';
+import SurveyQuestions, { PersonAnswers, answersTail, usePersonAnswers, useSurvey } from '../components/SurveyQuestions.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import { queuedText } from '../components/queued.js';
 import { useOutbox } from '../offline.js';
@@ -215,16 +216,21 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
   // Contacts are kept as they were logged: "Change" (as on the field toasts)
   // brings you back to the rating row, and the next tap logs the fix.
   const change = () => { setSaid(null); focusRating(cardRef.current); };
+  // The active survey's questions (door, or calls when reached by phone/text).
+  const survey = useSurvey({ context: channel === 'door' ? 'door' : 'calls', personId: person.id, lat: person.lat, lng: person.lng });
 
   const log = async (outcome, rating) => {
+    const answers = outcome === 'contacted' ? survey.take() : [];
     const res = await act.run('contact.log', {
       person_id: person.id, channel, outcome, rating: rating || undefined, note: note.trim() || undefined,
+      answers: answers.length ? answers : undefined,
     });
+    if (!res) survey.restore(answers);
     if (res) {
       setNote('');
       setNoteOpen(false);
       // Not reached yet: the door card's words ("Saved on this phone — sends soon").
-      const what = `${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}`;
+      const what = `${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}${answersTail(answers)}`;
       setSaid({ text: res.queued ? `${queuedText(res)} · ${what}` : `✓ ${what}`, what, queued: Boolean(res.queued) });
     }
   };
@@ -233,6 +239,7 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
     <section className="card pf-rate" ref={cardRef} aria-label="Rate">
       <RatingButtons value={person.rating} onPick={(code) => log('contacted', code)} disabled={act.busy} />
       <OutcomeButtons onPick={(o) => log(o)} disabled={act.busy} />
+      <SurveyQuestions key={`questions-${person.id}`} survey={survey} disabled={act.busy} onSave={() => log('contacted')} />
       <div className="pf-rate__foot">
         {noteOpen ? (
           <div className="field pf-note">
@@ -741,6 +748,7 @@ export default function Person() {
     queryKey: ['person', id],
     queryFn: () => apiGet(`/persons/${id}`),
   });
+  const answers = usePersonAnswers(id, desk); // survey answers (desk only)
 
   // Awaited by useAction so controls stay disabled until the profile refetches.
   // Covers the map (['doors']: pins, ratings, unlocated count after an address
@@ -817,6 +825,11 @@ export default function Person() {
           <Section title="Gifts" count={thisYear ? fmtMoney(Number(thisYear.total_cents)) : gifts.length || ''}
             open={!!open.gifts} onToggle={toggle('gifts')}>
             <Gifts person={person} gifts={gifts} totals={totals} />
+          </Section>
+        )}
+        {desk && answers.data?.answers?.length > 0 && (
+          <Section title="Answers" count={answers.data.answers.length} open={!!open.answers} onToggle={toggle('answers')}>
+            <PersonAnswers query={answers} />
           </Section>
         )}
         {desk && (

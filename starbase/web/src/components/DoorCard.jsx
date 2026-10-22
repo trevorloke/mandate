@@ -32,6 +32,7 @@ import { logContact } from '../offline.js';
 import { isOffline, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
+import SurveyQuestions, { answersTail, answersWord, useSurvey } from './SurveyQuestions.jsx';
 import '../pages/map.css';
 
 // "Wants a sign?" — one tap files a request (Undo is on the toast). A kind
@@ -298,6 +299,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const ratingOf = (p) => (p.id in local ? local[p.id] : p.rating);
   const noteText = note.trim();
   const multi = persons.length > 1;
+  // The active door survey's questions for the selected person (answers ride along with the next tap).
+  const survey = useSurvey({ context: 'door', personId: sel?.id, lat: door.lat, lng: door.lng });
 
   // The note lives in a ref too, so closing the card (unmount) can still send
   // it. A note that goes out with a tap is cleared at once (and put back if
@@ -359,6 +362,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
     if (rating) setRating(person, rating, new Date().toISOString());
     const sentNote = noteRef.current.trim();
     if (sentNote) setNote('');
+    const answers = outcome === 'contacted' && person.id === sel?.id ? survey.take() : [];
     try {
       // The outbox: sends now when there's signal, saves on the phone when
       // there isn't (and replays exactly once — the server dedupes on its id).
@@ -368,6 +372,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         outcome,
         rating: rating || undefined,
         note: sentNote || undefined,
+        answers: answers.length ? answers : undefined,
       });
       if (pending) backToDoor(); // the call/text is logged — the next tap is back at the door
       // Append-only: "Change" brings the rating row back; the next tap logs the fix.
@@ -375,7 +380,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       if (r.queued) {
         // Keep the optimistic rating; Shell refreshes everything once the
         // outbox sends. Refetching now would only pause (offline) or fail.
-        toast(queuedText(r), change);
+        toast(`${queuedText(r)}${answersTail(answers)}`, change);
         return;
       }
       const who = multi ? `${firstName(person.name)} · ` : '';
@@ -384,11 +389,13 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
         : outcome === 'contacted'
           ? (via === 'door' ? 'Note saved' : via === 'phone' ? 'Call logged' : 'Text logged')
           : `${OUTCOME_LABEL[outcome]}${via !== 'door' ? ` (${via})` : ''}`;
-      toast(`${who}${what}`, change);
+      const only = answers.length && !rating && !sentNote && via === 'door';
+      toast(`${who}${only ? `${answersWord(answers.length)} saved` : `${what}${answersTail(answers)}`}`, change);
       refresh();
     } catch (err) {
       // Only a refusal lands here (bad input, no permission) — network
       // trouble is queued above, never thrown.
+      survey.restore(answers);
       if (rating) setRating(person, prev.code, prev.at);
       if (sentNote && !noteRef.current) setNote(sentNote);
       toast(refusalMsg(err, 'Not saved — try again'));
@@ -490,6 +497,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
             onPick={(code) => log(sel, channel, 'contacted', code)}
           />
           <OutcomeButtons disabled={busy} onPick={(code) => log(sel, channel, code)} />
+          <SurveyQuestions key={`questions-${sel.id}`} survey={survey} disabled={busy} onSave={() => log(sel, channel, 'contacted')} />
         </section>
       )}
 

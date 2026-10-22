@@ -14,6 +14,7 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
 import RatingButtons, { RatingChip, ratingSay, ratingText, ratingWho } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
+import SurveyQuestions, { answersTail, answersWord, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
 import { apiGet, action, ApiError } from '../api.js';
 import './people.css';
@@ -675,6 +676,7 @@ function PeopleList() {
               { to: `/calls${carry(f)}`, label: 'Call list', icon: 'phone' },
               { to: `/calls${carry(f, { channel: 'text' })}`, label: 'Text list', icon: 'text' },
               desk && { to: '/people/import', label: 'Import', icon: 'upload' },
+              desk && { to: '/surveys', label: 'Surveys' },
             ]}
           />
           {desk && !showNew && (
@@ -872,6 +874,8 @@ function CallsScreen() {
   const at = current ? queue.indexOf(current) : -1; // -1: a held person outside the list
   const calledHere = rows.length - queue.length;
   const mine = (current && picked[current.id]) || null;
+  // The active calls survey's questions for this person (answers go with the next tap).
+  const survey = useSurvey({ context: 'calls', personId: current?.id, lat: current?.lat, lng: current?.lng });
   const after = (i) => (i < 0 ? queue[0] || null : queue.length > 1 ? queue[(i + 1) % queue.length] : null);
   const upNext = at < 0 ? queue : queue.slice(at + 1).concat(queue.slice(0, at));
 
@@ -907,15 +911,17 @@ function CallsScreen() {
     const p = current;
     if (!p) return;
     const inCard = focusInCard(); // read before the buttons disable for the save
-    const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined });
-    if (!res) return;
+    const answers = outcome === 'contacted' ? survey.take() : [];
+    const res = await act.run('contact.log', { person_id: p.id, channel, outcome, rating: rating || undefined, answers: answers.length ? answers : undefined });
+    if (!res) { survey.restore(answers); return; }
     const next = after(at);
     refocus.current = inCard;
     markDone(p.id, { rating: rating || null, outcome, queued: !!res.queued });
     if (rating) setPicked((m) => ({ ...m, [p.id]: rating }));
     setHeld(null);
     setCurrentId(next?.id ?? null);
-    const what = rating ? `Rated ${ratingText(rating)}` : outcomeWord(outcome, channel);
+    const what = rating ? `Rated ${ratingText(rating)}${answersTail(answers)}`
+      : answers.length ? `${answersWord(answers.length)} saved` : outcomeWord(outcome, channel);
     // Not reached yet: the same words as the door card ("Saved on this phone — sends soon").
     showToast(`${firstName(p.name)} · ${what}${res.queued ? ` · ${queuedText(res)}` : ''}`, p);
   };
@@ -1030,6 +1036,7 @@ function CallsScreen() {
                 Skip <Icon name="next" size={18} />
               </button>
             </div>
+            <SurveyQuestions survey={survey} disabled={act.busy} onSave={() => log('contacted')} />
             {act.error && <p className="error" role="alert">{act.error}</p>}
           </section>
 
