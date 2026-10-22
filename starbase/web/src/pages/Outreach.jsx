@@ -14,6 +14,7 @@ import { Link, Navigate, useOutletContext, useParams, useSearchParams } from 're
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { VOLUNTEER_ROLES } from '@starbase/shared/canvass';
 import { apiGet, action, fmtMoney } from '../api.js';
+import LaddersLink from '../components/LaddersLink.jsx';
 import './outreach.css';
 
 const TABS = [
@@ -1724,6 +1725,7 @@ export default function Outreach() {
       {tab === 'petitions' && <PetitionsTab {...tabProps} />}
       {tab === 'events' && <EventsTab {...tabProps} />}
       {tab === 'website' && <WebsiteTab {...tabProps} />}
+      {canWrite && !creating && <LaddersLink />}
 
       {toast.msg && (
         <div className="toast ot-toast" role="status">

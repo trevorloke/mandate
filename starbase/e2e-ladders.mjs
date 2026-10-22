@@ -1,0 +1,373 @@
+// Ladders E2E — one fresh in-memory campaign: a desk user finds Ladders
+// under Outreach, builds "Thank petition signers" (pick the petition; steps
+// as cards: Tag · Email · Follow-up, one moved up, a Wait), turns it on; a
+// visitor signs the petition on the public page; the job runner tags them,
+// adds the follow-up and — email not connected — the run says "Waiting —
+// email isn't connected" on screen exactly as the server has it. Today's
+// "Needs you" has "1 follow-up"; the follow-up is done and undone; the
+// profile shows the engagement chip and the Ladders section; off holds the
+// run in place and on resumes it. A volunteer on a 390×844 phone rates a
+// door 1 (which puts that person on a ladder) and can reach none of it —
+// screens, API, or the JSON their browser receives. The unsubscribe link
+// works, and the books still verify. New screens are measured (visible
+// words, yellow buttons, sideways scroll, 48px field targets).
+//
+//   STARBASE_DATA=memory PORT=4103 STARBASE_JOBS_EVERY_MS=1000 node server/index.js &
+//   BASE=http://127.0.0.1:4103 SHOTS=/tmp/ladders node e2e-ladders.mjs
+import { chromium } from 'playwright-core';
+import { mkdirSync } from 'node:fs';
+
+const BASE = process.env.BASE || 'http://localhost:3200';
+const SHOTS = process.env.SHOTS || '/tmp/starbase-ladders';
+mkdirSync(SHOTS, { recursive: true });
+const results = [];
+const check = (name, ok, extra = '') => {
+  results.push(!!ok);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  — ' + String(extra).slice(0, 220) : ''}`);
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const tag = Date.now().toString(36);
+
+const tileSvg = (z, x, y) => {
+  const lines = [];
+  for (let i = 0; i <= 256; i += 32) {
+    const major = ((x * 256 + i) / 32) % 4 === 0;
+    lines.push(`<line x1="${i}" y1="0" x2="${i}" y2="256" stroke="#fff" stroke-width="${major ? 5 : 2}"/>`);
+  }
+  for (let j = 0; j <= 256; j += 32) {
+    const major = ((y * 256 + j) / 32) % 4 === 0;
+    lines.push(`<line x1="0" y1="${j}" x2="256" y2="${j}" stroke="#fff" stroke-width="${major ? 5 : 2}"/>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#e7e3d6"/>${lines.join('')}</svg>`;
+};
+const tiles = (ctx) => ctx.route(/tile\.openstreetmap\.org\/(\d+)\/(\d+)\/(\d+)\.png/, (route) => {
+  const [, z, x, y] = route.request().url().match(/\/(\d+)\/(\d+)\/(\d+)\.png/);
+  route.fulfill({ status: 200, contentType: 'image/svg+xml', body: tileSvg(+z, +x, +y) });
+});
+
+const browser = await chromium.launch({
+  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  args: ['--no-sandbox', '--disable-dev-shm-usage'],
+});
+const errors = [];
+const helpers = (page, who) => {
+  page.on('pageerror', (e) => errors.push(`[${who}] ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error' && /key|unique|warning/i.test(m.text())) errors.push(`[${who}] ${m.text()}`); });
+  return {
+    shot: (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: false }),
+    full: (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: true }),
+    text: async () => ((await page.innerText('main.page').catch(() => page.innerText('body').catch(() => ''))) || '').replace(/\s+/g, ' '),
+    api: (path, body) => page.evaluate(async ([p, b]) => {
+      const r = await fetch('/api' + p, b === undefined ? {} : {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b),
+      });
+      const raw = await r.text();
+      let json = null;
+      try { json = JSON.parse(raw); } catch { /* not json */ }
+      return { status: r.status, json, raw };
+    }, [path, body]),
+    go: async (path) => { await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' }); await sleep(900); },
+  };
+};
+// Simplicity: words on the screen (not the nav/tab bar), yellow buttons,
+// sideways scroll, and the smallest tap target among `sel`.
+const measure = (page, sel = null) => page.evaluate((targets) => {
+  const main = document.querySelector('main.page') || document.body;
+  const words = (main.innerText || '').split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length;
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
+  const yellow = [...document.querySelectorAll('.btn-primary')].filter(visible).length;
+  const overflow = document.documentElement.scrollWidth - window.innerWidth;
+  let minTap = null;
+  let minWho = '';
+  if (targets) {
+    for (const el of document.querySelectorAll(targets)) {
+      if (!visible(el)) continue;
+      const h = el.getBoundingClientRect().height;
+      if (minTap == null || h < minTap) { minTap = h; minWho = el.outerHTML.slice(0, 80); }
+    }
+  }
+  return { words, yellow, overflow, minTap, minWho };
+}, sel);
+const FIELDS = 'main.page input:not([type=checkbox]), main.page select, main.page textarea, main.page button, main.page a.btn';
+const simple = async (page, name, sel = FIELDS) => {
+  const m = await measure(page, sel);
+  check(`${name}: ≤1 yellow, no sideways scroll, targets ≥48px`, m.yellow <= 1 && m.overflow <= 0 && (m.minTap == null || m.minTap >= 47.5),
+    `words=${m.words} yellow=${m.yellow} overflow=${m.overflow} minTap=${m.minTap} ${m.minTap < 47.5 ? m.minWho : ''}`);
+  return m;
+};
+const until = async (fn, ms = 20000) => {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() - t0 > ms) return null;
+    await sleep(500);
+  }
+};
+
+// ── 1. Desk: sign up, a petition, a few people ──
+const desk = await browser.newContext({ viewport: { width: 1360, height: 900 }, timezoneId: 'America/Vancouver' });
+await tiles(desk);
+const page = await desk.newPage();
+const D = helpers(page, 'desk');
+await D.go('/signup');
+await page.fill('#su-name', 'Ladder Organizer');
+await page.fill('#su-email', `organizer.${tag}@example.org`);
+await page.fill('#su-password', 'surrey-forward-2026');
+await page.fill('#su-workspace', 'Imagine Surrey Ladders');
+await page.click('button[type="submit"]');
+await page.waitForURL(`${BASE}/`, { timeout: 15000 });
+const me = (await D.api('/auth/me')).json;
+const slug = me.workspace.slug;
+check('desk signed up', !!slug, slug);
+const pet = await D.api('/actions/petition.create', { slug: 'fix-72-ave', title: 'Fix 72 Ave' });
+check('petition created', pet.status === 200);
+const dora = (await D.api('/actions/person.create', { name: 'Dora Door', phone: '604-555-0161', address: '12345 72 Ave', city: 'Surrey', lat: 49.133, lng: -122.851, email: `dora.${tag}@example.org` })).json.person;
+
+// ── 2. Outreach → Ladders ──
+await D.go('/outreach/newsletter');
+const link = page.locator('a.lad-link');
+check('Outreach has a Ladders row', await link.isVisible().catch(() => false), await D.text().then((t) => t.slice(-120)));
+await link.click();
+await page.waitForURL(`${BASE}/ladders`, { timeout: 8000 }).catch(() => {});
+await sleep(600);
+let t = await D.text();
+check('Ladders opens empty: one line + one button', /No ladders yet\./.test(t) && (await page.locator('.btn-primary:visible').count()) === 1, t.slice(0, 160));
+await D.shot('1-ladders-empty');
+
+// ── 3. New ladder: name + Starts when (the petition) ──
+await page.getByRole('button', { name: 'New ladder' }).click();
+await page.fill('#lad-new-name', 'Thank petition signers');
+await page.selectOption('#lad-new-kind', 'petition');
+await page.selectOption('#lad-new-ref', 'fix-72-ave');
+check('new-ladder form: one yellow (the header button gives way)', (await page.locator('.btn-primary:visible').count()) === 1);
+await D.shot('2-new-ladder');
+await page.getByRole('button', { name: 'Create ladder' }).click();
+await page.waitForURL(/\/ladders\/[0-9a-f-]{36}$/, { timeout: 8000 }).catch(() => {});
+await sleep(700);
+const ladderId = page.url().split('/').pop();
+let L = (await D.api(`/ladders/${ladderId}`)).json;
+check('ladder created off, starting on the petition', L?.ladder?.active === false && L.ladder.trigger.kind === 'petition' && L.ladder.trigger.ref === 'fix-72-ave', JSON.stringify(L?.ladder?.trigger));
+t = await D.text();
+check('builder says what starts it', /Starts when/i.test(t) && /Signed a petition · Fix 72 Ave/.test(t), t.slice(0, 200));
+check('Turn on waits for a step', await page.getByRole('button', { name: 'Turn on' }).isDisabled() && /Add a step, then turn it on\./.test(t));
+
+// ── 4. Steps as cards ──
+const addStep = async (label, fill) => {
+  await page.getByRole('button', { name: `+ ${label}` }).click();
+  await fill();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await sleep(700);
+};
+await addStep('Tag', () => page.getByLabel('Add tag').fill('thanked'));
+await addStep('Email', async () => {
+  await page.getByLabel('Subject').fill('Thanks, {{first_name}}');
+  await page.getByLabel('Message').fill('Thank you for signing for 72 Ave. — {{campaign}}');
+});
+await addStep('Follow-up', () => page.getByLabel('Follow-up for staff').fill('Call {{first_name}} to say thanks'));
+// Open the follow-up card and move it above the email.
+await page.locator('.lad-step .ops-row', { hasText: 'Follow-up · Call' }).click();
+await page.getByRole('button', { name: 'Move up' }).click();
+await sleep(700);
+await addStep('Wait', async () => {
+  await page.getByLabel('Wait').fill('1');
+  await page.getByRole('button', { name: 'Days' }).click();
+});
+L = (await D.api(`/ladders/${ladderId}`)).json;
+const kinds = L.ladder.steps.map((s) => s.kind).join(',');
+check('steps saved in order (follow-up moved up)', kinds === 'tag,followup,email,wait', kinds);
+const cards = (await page.locator('.lad-step .lad-step__line').allInnerTexts()).join(' | ');
+check('cards read as the server has them', cards === 'Tag · thanked | Follow-up · Call {{first_name}} to say thanks | Email · Thanks, {{first_name}} | Wait 1 day', cards);
+// Field targets inside an open email editor.
+await page.getByRole('button', { name: '+ Email' }).click();
+await sleep(300);
+await simple(page, 'builder with an email step open (desktop)');
+await page.locator('.lad-new-step').getByRole('button', { name: 'Cancel' }).click();
+t = await D.text();
+check('email not connected is said once', /Email isn’t connected — email steps wait\./.test(t));
+await D.full('3-builder-steps');
+
+await page.getByRole('button', { name: 'Turn on' }).click();
+await sleep(800);
+L = (await D.api(`/ladders/${ladderId}`)).json;
+t = await D.text();
+const statusChip = (await page.locator('.lad-status .chip').innerText().catch(() => '')).trim();
+check('Turn on → On (server and screen)', L.ladder.active === true && /^on$/i.test(statusChip) && !(await page.getByRole('button', { name: 'Turn on' }).count()), `${statusChip} · ${t.slice(0, 120)}`);
+
+// ── 5. A visitor signs the petition ──
+const visitor = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const vp = await visitor.newPage();
+vp.on('pageerror', (e) => errors.push(`[visitor] ${e.message}`));
+await vp.goto(`${BASE}/p/${slug}/fix-72-ave`, { waitUntil: 'domcontentloaded' });
+await vp.fill('#name', 'Ana Souza');
+await vp.fill('#email', `ana.${tag}@example.org`);
+await vp.click('button[type="submit"]');
+await vp.waitForSelector('text=/Thank you, Ana/', { timeout: 8000 }).catch(() => {});
+check('visitor signed', /Thank you, Ana/.test(await vp.innerText('body')));
+
+// The job runner takes her through Tag and Follow-up; Email waits.
+const run = await until(async () => {
+  const j = (await D.api(`/ladders/${ladderId}`)).json;
+  const r = j?.people?.find((p) => p.person.name === 'Ana Souza');
+  return r && r.wait === 'email' ? r : null;
+});
+check('run reached the email step and waits (email not connected)', run && run.step === 2 && run.status === 'active', JSON.stringify(run || {}).slice(0, 200));
+await D.go(`/ladders/${ladderId}`);
+t = await D.text();
+check('screen: "Waiting — email isn’t connected" for Ana', /Ana Souza Waiting — email isn’t connected/.test(t), t.slice(t.indexOf('People'), t.indexOf('People') + 120));
+check('screen: 1 in progress · 0 finished', /1 in progress · 0 finished/.test(t));
+await page.locator('.lad-sec .ops-row', { hasText: 'Ana Souza' }).click();
+await sleep(300);
+const log = (await page.locator('.lad-log li').allInnerTexts()).map((s) => s.replace(/\s+/g, ' '));
+check('her row opens on what each step did', log.length === 3 && /^Tag · thanked/.test(log[0]) && /^Follow-up added/.test(log[1]) && /^Email waiting — not connected/.test(log[2]), log.join(' | '));
+await D.full('4-builder-people');
+const ana = (await D.api(`/persons?q=${encodeURIComponent('Ana Souza')}`)).json.persons[0];
+const prof = (await D.api(`/persons/${ana.id}`)).json;
+check('the Tag step really tagged her', prof.person.tags.includes('thanked'), prof.person.tags.join(','));
+
+// ── 6. Today → 1 follow-up → done, undone ──
+await D.go('/');
+t = await D.text();
+check('Today Needs you: 1 follow-up', /Needs you.*?\b1 follow-up\b/i.test(t), t.slice(0, 300));
+await D.shot('5-today-needs-you');
+await page.locator('a.today-row', { hasText: 'follow-up' }).click();
+await page.waitForURL(`${BASE}/follow-ups`, { timeout: 8000 }).catch(() => {});
+await sleep(700);
+let FU = (await D.api('/ladders/followups')).json;
+t = await D.text();
+check('follow-up reads as the server has it', FU.open.length === 1 && FU.open[0].text === 'Call Ana to say thanks' && t.includes('Call Ana to say thanks') && /1 to do/.test(t), t.slice(0, 200));
+await simple(page, 'follow-ups (desktop)');
+await D.shot('6-follow-ups');
+await page.getByRole('button', { name: 'Done' }).click();
+await sleep(800);
+FU = (await D.api('/ladders/followups')).json;
+t = await D.text();
+check('Done → done on the server, toast says so', FU.open.length === 0 && FU.done[0]?.status === 'done' && /Done · Ana Souza/.test(await page.innerText('body')) && /0 to do/.test(t));
+await page.locator('.toast').getByRole('button', { name: 'Undo' }).click();
+await sleep(800);
+FU = (await D.api('/ladders/followups')).json;
+check('Undo → open again', FU.open.length === 1 && /1 to do/.test(await D.text()));
+
+// ── 7. Profile: engagement chip + Ladders section ──
+await D.go(`/people/${ana.id}`);
+const lev = (await D.api(`/persons/${ana.id}/ladders`)).json;
+const chip = await page.locator('.lad-level').innerText().catch(() => '');
+check('profile: engagement chip = server level', chip.trim().toLowerCase() === lev.level.label.toLowerCase() && lev.level.code === 'signer', `${chip} vs ${lev.level.label}`);
+await page.getByRole('button', { name: /^Ladders/ }).click();
+await sleep(300);
+t = await D.text();
+check('profile: Ladders section says where she is', /Thank petition signers Waiting — email isn’t connected/.test(t) && /Call Ana to say thanks/.test(t), t.slice(t.indexOf('Ladders'), t.indexOf('Ladders') + 160));
+await D.shot('7-profile');
+
+// ── 8. The list + engagement ──
+await D.go('/ladders');
+t = await D.text();
+const rowText = (await page.locator('.ops-rows .ops-item', { hasText: 'Thank petition signers' }).innerText()).replace(/\s+/g, ' ').trim();
+check('list row: trigger, counts, On', /^Thank petition signers Signed a petition · Fix 72 Ave 1 in progress · 0 finished On$/i.test(rowText), rowText);
+check('list: follow-ups row and email note', /1 follow-up to do/.test(t) && /Email isn’t connected — email steps wait\./.test(t));
+await page.getByRole('button', { name: 'Engagement' }).click();
+await sleep(300);
+const LS = (await D.api('/ladders')).json;
+const bars = (await page.locator('.lad-levels__row').allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim());
+const want = LS.levels.map((l) => `${l.label} ${l.n}`);
+check('engagement bars = server counts', JSON.stringify(bars) === JSON.stringify(want), `${bars.join(' | ')} vs ${want.join(' | ')}`);
+await D.full('8-ladders-list');
+
+// ── 9. Off holds her place; On resumes ──
+await D.go(`/ladders/${ladderId}`);
+await page.getByRole('button', { name: 'Turn off' }).click();
+await sleep(800);
+let r = (await D.api(`/ladders/${ladderId}`)).json.people[0];
+t = await D.text();
+check('Off → paused at the same step (server and screen)', r.status === 'paused' && r.step === 2 && /Ana Souza Paused · step 3 of 4/.test(t) && /Off · 1 paused in place/.test(t), t.slice(0, 200));
+await page.getByRole('button', { name: 'Turn on' }).click();
+await sleep(800);
+r = (await D.api(`/ladders/${ladderId}`)).json.people[0];
+check('On → active again, same step', r.status === 'active' && r.step === 2 && /On · 1 picked up where they were/.test(await D.text()));
+await until(async () => (await D.api(`/ladders/${ladderId}`)).json.people[0].wait === 'email', 8000);
+
+// ── 10. Phone, desk: the new screens measured at 390px ──
+await page.setViewportSize({ width: 390, height: 844 });
+for (const [path, name] of [['/ladders', 'ladders list (phone)'], [`/ladders/${ladderId}`, 'builder (phone)'], ['/follow-ups', 'follow-ups (phone)']]) {
+  await D.go(path);
+  const m = await simple(page, name);
+  console.log(`      words on ${path}: ${m.words}`);
+}
+await D.go(`/ladders/${ladderId}`);
+await page.getByRole('button', { name: '+ Wait' }).click();
+await sleep(300);
+await simple(page, 'builder, wait editor open (phone)');
+await D.shot('9-builder-phone');
+await page.locator('.lad-new-step').getByRole('button', { name: 'Cancel' }).click();
+await page.setViewportSize({ width: 1360, height: 900 });
+
+// ── 11. Volunteer on a phone: rates a door 1, sees nothing of ladders ──
+const yes = (await D.api('/actions/ladder.create', {
+  name: 'Rated yes', trigger: { kind: 'rating' }, steps: [{ kind: 'tag', tag: 'said-yes' }],
+})).json.ladder;
+await D.api('/actions/ladder.setActive', { id: yes.id, active: true });
+const inv = (await D.api('/actions/member.invite', { email: `jas.${tag}@example.org`, role: 'volunteer' })).json;
+const vctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'America/Vancouver' });
+await tiles(vctx);
+const vol = await vctx.newPage();
+const V = helpers(vol, 'volunteer');
+await vol.goto(inv.joinUrl.replace(/^https?:\/\/[^/]+/, BASE), { waitUntil: 'domcontentloaded' });
+await vol.waitForSelector('#join-name', { timeout: 8000 }).catch(() => {});
+await vol.fill('#join-name', 'Jas Volunteer');
+await vol.fill('#join-password', 'knock-knock-2026');
+await vol.click('button[type="submit"]');
+await vol.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
+check('volunteer joined', new URL(vol.url()).pathname === '/');
+await V.go(`/map?person=${dora.id}`);
+await vol.waitForSelector('aside.door-card', { timeout: 8000 }).catch(() => {});
+await vol.tap('aside.door-card button[aria-label="1: Strong support"]').catch(() => vol.click('aside.door-card button[aria-label="1: Strong support"]'));
+await sleep(900);
+const vt = ((await vol.innerText('body')) || '').replace(/\s+/g, ' ');
+check('volunteer rated the door; the toast says only that', /Rated 1/.test(vt) && !/ladder|follow-up/i.test(vt), vt.slice(0, 160));
+const doraRun = await until(async () => (await D.api(`/ladders/${yes.id}`)).json.people.find((p) => p.person.id === dora.id && p.status === 'done'));
+check('…which put Dora on "Rated yes" (desk sees it)', !!doraRun);
+for (const path of ['/ladders', `/ladders/${ladderId}`, '/follow-ups']) {
+  await V.go(path);
+  check(`volunteer typing ${path} lands on Today`, new URL(vol.url()).pathname === '/', vol.url());
+}
+const vapi = [];
+for (const path of ['/ladders', `/ladders/${ladderId}`, '/ladders/followups', '/ladders/followups/count', `/persons/${ana.id}/ladders`]) {
+  const res = await V.api(path);
+  vapi.push(`${path}=${res.status}`);
+  check(`volunteer API ${path} → 403, nothing in it`, res.status === 403 && !/Thank|Ana|follow/i.test(res.raw), res.raw.slice(0, 100));
+}
+const created = await V.api('/actions/ladder.create', { name: 'x', trigger: { kind: 'rating' } });
+check('volunteer cannot make a ladder', created.status === 403);
+const vprof = await V.api(`/persons/${dora.id}`);
+check('volunteer’s profile JSON carries nothing of ladders', vprof.status === 200 && !/ladder|said-yes|engagement/i.test(vprof.raw.replace(/"tags":\[[^\]]*\]/, '')), vprof.raw.slice(0, 120));
+await V.go(`/people/${dora.id}`);
+const vpt = ((await vol.innerText('main.page').catch(() => '')) || '').replace(/\s+/g, ' ');
+check('volunteer profile: no engagement chip, no Ladders section', !(await vol.locator('.lad-level').count()) && !/\bLadders\b/.test(vpt), vpt.slice(0, 160));
+const overflow = await vol.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+check('volunteer: no sideways scroll at 390px', overflow <= 0, overflow);
+await V.shot('10-volunteer-profile');
+await V.go('/');
+await V.shot('11-volunteer-today');
+check('volunteer Today: no follow-ups row', !/follow-up/i.test(await V.text()));
+await vctx.close();
+
+// ── 12. The unsubscribe link in her email works, and is honoured ──
+await vp.goto(`${BASE}/lu/${run.id}`, { waitUntil: 'domcontentloaded' });
+const ut = await vp.innerText('body');
+check('unsubscribe page: Unsubscribed, names the campaign', /Unsubscribed\./.test(ut) && /Imagine Surrey Ladders/.test(ut), ut.slice(0, 120));
+await vp.screenshot({ path: `${SHOTS}/12-unsubscribed.png` });
+const subs = (await D.api('/subscriptions')).json.subscriptions.filter((s) => s.email === `ana.${tag}@example.org`);
+check('on the newsletter list as unsubscribed', subs.length === 1 && subs[0].status === 'unsubscribed', JSON.stringify(subs));
+await visitor.close();
+
+// ── 13. The books still verify ──
+const v = (await D.api('/audit/verify')).json;
+check('hash chain verifies (ladder steps included)', v.ok === true && v.checked > 10, JSON.stringify(v));
+const ev = (await D.api('/events?since=0&limit=1000')).json.events;
+check('ladder steps are on the chain as the system', ev.some((e) => e.action === 'ladder.step' && e.actor_id === null && e.entity_type === 'ladder_followup'));
+check('no page errors', errors.length === 0, errors.join(' | '));
+
+await browser.close();
+const fails = results.filter((x) => !x).length;
+console.log(`\n${results.length - fails}/${results.length} checks passed`);
+process.exit(fails ? 1 : 0);

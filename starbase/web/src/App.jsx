@@ -23,6 +23,9 @@ const Filings = lazy(() => import('./pages/Filings.jsx'));
 const Team = lazy(() => import('./pages/Team.jsx'));
 const ImportPeople = lazy(() => import('./pages/ImportPeople.jsx'));
 const Turfs = lazy(() => import('./pages/Turfs.jsx'));
+const Ladders = lazy(() => import('./pages/Ladders.jsx'));
+const LaddersEdit = lazy(() => import('./pages/LaddersEdit.jsx'));
+const LaddersFollowups = lazy(() => import('./pages/LaddersFollowups.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -70,6 +73,9 @@ export default function App() {
           <Route path="/outreach/:tab" element={<Outreach />} />
           <Route path="/filings" element={<Filings />} />
           <Route path="/team" element={<Team />} />
+          <Route path="/ladders" element={<Ladders />} />
+          <Route path="/ladders/:id" element={<LaddersEdit />} />
+          <Route path="/follow-ups" element={<LaddersFollowups />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
