@@ -1,0 +1,9 @@
+/* The campaign's own words on the rating buttons (Rating scale): a long one
+   wraps onto a second line, never cut off with "…" — every word on a field
+   button must be readable whole. (The rest of the buttons: pages/map.css.) */
+.rb .rb-btn__sub, .rb .rb-who__name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}

@@ -29,9 +29,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { RATINGS } from '@starbase/shared/canvass';
+import { allCodes, bandOf, ratingByCode } from '@starbase/shared/scale';
 import { ApiError, apiGet, apiPost, fmtMoney } from '../api.js';
-import { ratingWho } from '../components/RatingButtons.jsx';
+import { ratingWho, useScale } from '../components/RatingButtons.jsx';
 import { useFollowupCount } from '../components/LaddersCount.js';
 import { useTextingStatus } from '../components/TextingStatus.js';
 import './today.css';
@@ -215,13 +215,18 @@ const BANDS = [
   { band: 'opposed', label: 'Opposed' },
 ];
 
-function supportPicture(ratings) {
+// The campaign's scale (its words and "Voting for?" list): every code it
+// has, those off the list too, in list order — then any it doesn't know.
+function supportPicture(scale, ratings) {
   const counts = { support: 0, undecided: 0, opposed: 0 };
   const variants = [];
-  for (const r of RATINGS) {
-    const n = Number(ratings?.[r.code]) || 0;
-    counts[r.band] += n;
-    if (r.band === 'opposed' && n > 0) variants.push({ code: r.code, label: r.label, n });
+  const codes = allCodes(scale);
+  for (const code of [...codes, ...Object.keys(ratings || {}).filter((c) => !codes.includes(c))]) {
+    const n = Number(ratings?.[code]) || 0;
+    const band = bandOf(code);
+    if (!band) continue;
+    counts[band] += n;
+    if (band === 'opposed' && n > 0) variants.push({ code, label: ratingByCode(scale, code)?.label, who: ratingWho(scale, code), n });
   }
   // Opposed, by who they back: biggest first, "Not sure" (plain 4) last.
   variants.sort((a, b) => (a.code === '4') - (b.code === '4') || b.n - a.n);
@@ -265,7 +270,7 @@ function SupportDetail({ pic, id }) {
           {showVariants && (
             <ul className="today-variants" aria-label="Opposed, by who they vote for">
               {variants.map((v) => (
-                <li key={v.code} title={v.label}>{ratingWho(v.code)} <span className="mono">{num(v.n)}</span></li>
+                <li key={v.code} title={v.label}>{v.who} <span className="mono">{num(v.n)}</span></li>
               ))}
             </ul>
           )}
@@ -763,7 +768,8 @@ function DeskToday({ b, me, toast }) {
   const events = b.events ?? [];
   const peopleTotal = Number(b.people?.total) || 0;
   const offerSample = isManager && !b.sampleLoaded && peopleTotal < 5;
-  const pic = supportPicture(b.ratings);
+  const scale = useScale();
+  const pic = supportPicture(scale, b.ratings);
   const statsById = useTurfStats(myTurfs.length > 0);
   const f = b.field ?? {};
 

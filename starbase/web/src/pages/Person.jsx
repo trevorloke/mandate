@@ -13,10 +13,11 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useParams, useOutletContext, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ratingByCode, VOLUNTEER_ROLES, SOCIAL_PLATFORMS, SUGGESTED_TAGS,
+  VOLUNTEER_ROLES, SOCIAL_PLATFORMS, SUGGESTED_TAGS,
   SIGN_KINDS, SIGN_STATUSES, DONOR_TIERS,
 } from '@starbase/shared/canvass';
-import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText } from '../components/RatingButtons.jsx';
+import { ratingByCode } from '@starbase/shared/scale';
+import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, ratingText, useScale } from '../components/RatingButtons.jsx';
 import SurveyQuestions, { PersonAnswers, answersTail, usePersonAnswers, useSurvey } from '../components/SurveyQuestions.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import { EngagementChip, PersonLadders, usePersonLadders } from '../components/LaddersBits.jsx';
@@ -45,7 +46,7 @@ const OUTCOME_LABEL = {
 };
 const CHANNEL_LABEL = { door: 'Door', phone: 'Phone', text: 'Text' };
 // "Rated 2 · Lean yes", "Rated 4 · Locke" or "No answer" — the field's own words.
-const contactWord = (c) => (c.rating ? `Rated ${ratingText(c.rating)}` : OUTCOME_LABEL[c.outcome] || c.outcome);
+const contactWord = (scale, c) => (c.rating ? `Rated ${ratingText(scale, c.rating)}` : OUTCOME_LABEL[c.outcome] || c.outcome);
 
 // How this person is being reached (Door · Phone · Text), per person, kept for
 // this tab: a phone may reload the page after the dialer or messages app.
@@ -145,7 +146,8 @@ function Header({ person, donor, me, desk, onLog, contacted, level }) {
   const on = textingOn(texting);
   const txPerson = useTextingPerson(person.id, Boolean(on.sms && person.phone));
   const canText = Boolean(person.phone) && !noTexts(person) && !txPerson.data?.opted_out;
-  const r = ratingByCode(person.rating);
+  const scale = useScale();
+  const r = ratingByCode(scale, person.rating);
   const named = r?.band === 'opposed' && r.code !== '4'; // "4 · Locke" says it all
   // The date of the rating only when no contact says it below.
   const when = contacted ? '' : fmtShort(person.rated_at);
@@ -169,7 +171,7 @@ function Header({ person, donor, me, desk, onLog, contacted, level }) {
         {r && <RatingChip code={person.rating} who />}
         {(!r || !named || when) && (
           <span className="pf-word">
-            {r ? <>{!named && ratingSay(person.rating)}{when && <span className="pf-when">{named ? '' : ' · '}{when}</span>}</> : 'Not rated'}
+            {r ? <>{!named && ratingSay(scale, person.rating)}{when && <span className="pf-when">{named ? '' : ' · '}{when}</span>}</> : 'Not rated'}
           </span>
         )}
         {isDnc(person) && <span className="chip chip-danger">Do not contact</span>}
@@ -235,6 +237,7 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
   const reachId = useId();
   const act = useAction(refresh);
   const outbox = useOutbox();
+  const scale = useScale();
   useEffect(() => {
     if (!said?.queued || outbox.pending > 0 || outbox.flushing) return;
     setSaid(outbox.lastError
@@ -261,7 +264,7 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
       setNote('');
       setNoteOpen(false);
       // Not reached yet: the door card's words ("Saved on this phone — sends soon").
-      const what = `${CHANNEL_LABEL[channel]} · ${contactWord({ rating, outcome })}${answersTail(answers, res.result)}`;
+      const what = `${CHANNEL_LABEL[channel]} · ${contactWord(scale, { rating, outcome })}${answersTail(answers, res.result)}`;
       setSaid({ text: res.queued ? `${queuedText(res)} · ${what}` : `✓ ${what}`, what, queued: Boolean(res.queued) });
     }
   };
@@ -778,6 +781,7 @@ export default function Person() {
   const [open, setOpen] = useState(() => (desk ? { history: true } : { details: true }));
   const ratingRef = useRef(null);
   const toggle = (key) => () => setOpen((o) => ({ ...o, [key]: !o[key] }));
+  const scale = useScale();
 
   const profile = useQuery({
     queryKey: ['person', id],
@@ -826,7 +830,7 @@ export default function Person() {
   const channel = savedChannel || firstChannel(person);
   // The header already shows the rating: the line adds when and how.
   const lastWhat = last && (last.rating
-    ? (last.rating === person.rating ? '' : ratingText(last.rating))
+    ? (last.rating === person.rating ? '' : ratingText(scale, last.rating))
     : OUTCOME_LABEL[last.outcome] || last.outcome);
 
   return (

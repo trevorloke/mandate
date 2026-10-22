@@ -36,9 +36,9 @@ import { apiGet, action } from '../api.js';
 import { applyOutbox, queueAction, useOutbox } from '../offline.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import { queuedText } from '../components/queued.js';
-import { ratingByCode } from '@starbase/shared/canvass';
+import { bandOf, offTail, ratingByCode } from '@starbase/shared/scale';
 import DoorCard, { AddDoorForm, SIGN_LABEL, doorTitle, patchDoors } from '../components/DoorCard.jsx';
-import { More, ratingWho } from '../components/RatingButtons.jsx';
+import { More, useScale } from '../components/RatingButtons.jsx';
 import GeocodeButton from '../components/GeocodeButton.jsx';
 import { cachedWalkLists, useOnline } from './Turfs.jsx';
 import './map.css';
@@ -127,7 +127,7 @@ function householdBand(persons) {
   let support = false;
   let undecided = false;
   for (const p of persons) {
-    const band = ratingByCode(p.rating)?.band;
+    const band = bandOf(p.rating);
     if (band === 'opposed') return 'opposed';
     if (band === 'support') support = true;
     else if (band === 'undecided') undecided = true;
@@ -235,11 +235,11 @@ const SIGN_STATUS = { installed: 'Installed', requested: 'Requested', removed: '
 const HOUSE_SVG = '<svg viewBox="0 0 12 10" aria-hidden="true"><path d="M6 0 0 5h1.6v5h3.2V7h2.4v3h3.2V5H12z"/></svg>';
 const PEOPLE_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1"/><path d="M1.8 15.5c0-3.6 2.8-6.2 6.2-6.2s6.2 2.6 6.2 6.2z"/></svg>';
 
-// "Rosa Delgado (4 · Locke)" for a pin's title.
-function personTitle(p) {
-  const r = ratingByCode(p.rating);
+// "Rosa Delgado (4 · Locke)" for a pin's title (the campaign's scale).
+function personTitle(scale, p) {
+  const r = ratingByCode(scale, p.rating);
   if (!r) return p.name;
-  return `${p.name} (${r.band === 'opposed' && r.code !== '4' ? `4 · ${ratingWho(r.code)}` : r.short})`;
+  return `${p.name} (${r.band === 'opposed' && r.code !== '4' ? `4 · ${r.name}${offTail(r)}` : r.short})`;
 }
 
 // A door pin; its signs fly as little flags at the top-right, inside the
@@ -841,6 +841,7 @@ function FilterSheet({
 export default function MapPage() {
   const { me } = useOutletContext();
   const queryClient = useQueryClient();
+  const scale = useScale();
   const [params, setParams] = useSearchParams();
   const personParam = params.get('person');
   const turfParam = params.get('turf');
@@ -1409,7 +1410,7 @@ export default function MapPage() {
       const selected = door.key === selectedKeyRef.current;
       const marker = L.marker([door.lat, door.lng], {
         icon: pinIcon(door, selected),
-        title: `${doorTitle(door)} — ${door.persons.map(personTitle).join(', ')}`,
+        title: `${doorTitle(door)} — ${door.persons.map((p) => personTitle(scale, p)).join(', ')}`,
         riseOnHover: true,
         zIndexOffset: selected ? 1000 : 0,
       });
@@ -1444,7 +1445,7 @@ export default function MapPage() {
           .addTo(layers.signs);
       }
     }
-  }, [groups, pulledKey, orphanSigns, filter]);
+  }, [groups, pulledKey, orphanSigns, filter, scale]);
 
   // Highlight the selected pin without rebuilding every marker.
   useEffect(() => {

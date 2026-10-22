@@ -32,7 +32,7 @@ import { queuedChip, queuedSaid, queuedText, thisDevice } from '../components/qu
 import { useOnline } from '../components/NoSignal.jsx';
 import { AddPersonInline, SIGN_LABEL, SignAsk, signCancelOffered } from '../components/DoorCard.jsx';
 import RatingButtons, {
-  More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal,
+  More, OutcomeButtons, OUTCOMES, OUTCOME_LABEL, PersonTabs, RatingChip, focusRating, ratingText, reveal, useScale,
 } from '../components/RatingButtons.jsx';
 import SurveyQuestions, { answersSaid, answersTail, answersWord, useSurvey } from '../components/SurveyQuestions.jsx';
 import './turfs.css';
@@ -290,6 +290,7 @@ function WalkList({ id }) {
   const { me } = useOutletContext();
   const desk = DESK_ROLES.includes(me?.role);
   const queryClient = useQueryClient();
+  const scale = useScale();
   const outbox = useOutbox();
   const online = useOnline();
   const rootRef = useRef(null);
@@ -608,7 +609,7 @@ function WalkList({ id }) {
         }
         const who = multi ? `${firstName(person.name)} · ` : '';
         const what = rating
-          ? `Rated ${ratingText(rating)}`
+          ? `Rated ${ratingText(scale, rating)}`
           : outcome === 'contacted' ? 'Note saved' : OUTCOME_LABEL[outcome];
         const said = answers?.length && !rating && !note ? answersSaid(answers, r.result) : `${what}${answersTail(answers, r.result)}`;
         // On the phone: what was saved, then where ("Rated 1 · Strong yes · 3 answers · Saved offline").

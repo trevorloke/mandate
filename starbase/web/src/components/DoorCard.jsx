@@ -46,7 +46,7 @@ import { apiGet, ApiError } from '../api.js';
 import { logContact, queueAction, undoQueued, useOutbox } from '../offline.js';
 import { isOffline, queuedChip, queuedSaid, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
-import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
+import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText, useScale } from './RatingButtons.jsx';
 import SurveyQuestions, { answersSaid, answersTail, answersWord, useSurvey } from './SurveyQuestions.jsx';
 import { callsCard, noTexts, textingOn, useTextingStatus } from './TextingCard.jsx';
 import '../pages/map.css';
@@ -371,6 +371,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const multi = persons.length > 1;
   // The active door survey's questions for the selected person (answers ride along with the next tap).
   const survey = useSurvey({ context: 'door', personId: sel?.id, lat: door.lat, lng: door.lng });
+  const scale = useScale();
 
   // The note lives in a ref too, so closing the card (unmount) can still send
   // it. A note that goes out with a tap is cleared at once (and put back if
@@ -457,7 +458,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       if (r.queued) {
         // Keep the optimistic rating; Shell refreshes everything once the
         // outbox sends. Refetching now would only pause (offline) or fail.
-        const saidQ = rating ? `Rated ${ratingText(rating)}`
+        const saidQ = rating ? `Rated ${ratingText(scale, rating)}`
           : outcome !== 'contacted' ? OUTCOME_LABEL[outcome]
             : sentNote ? 'Note' : ({ phone: 'Call', text: 'Text' })[via] || null;
         toast(`${multi ? `${firstName(person.name)} · ` : ''}${queuedSaid(r, saidQ, answers.length ? answersWord(answers.length) : null)}`, change);
@@ -465,7 +466,7 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       }
       const who = multi ? `${firstName(person.name)} · ` : '';
       const what = rating
-        ? `Rated ${ratingText(rating)}`
+        ? `Rated ${ratingText(scale, rating)}`
         : outcome === 'contacted'
           ? (via === 'door' ? 'Note saved' : via === 'phone' ? 'Call logged' : 'Text logged')
           : `${OUTCOME_LABEL[outcome]}${via !== 'door' ? ` (${via})` : ''}`;

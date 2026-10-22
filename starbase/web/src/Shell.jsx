@@ -212,6 +212,7 @@ function AccountMenu({ me, signingOut, confirmLeft, onSignOut, onCancelSignOut }
           <span className="acct-ws">{me.workspace.name}</span>
         </div>
         {me.role === 'manager' && <NavLink to="/team" ref={firstRef} className="acct-item">Team</NavLink>}
+        {me.role === 'manager' && <NavLink to="/rating-scale" className="acct-item">Rating scale</NavLink>}
         {confirmLeft > 0 ? (
           <div className="acct-confirm" role="group" aria-label="Sign out">
             <p>{confirmLeft} not sent yet. Sign out and delete {confirmLeft === 1 ? 'it' : 'them'}?</p>

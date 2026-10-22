@@ -4,15 +4,17 @@
 // up. Filters live in the URL (?q=&tag=&rating=&role=&has=) so any list is
 // shareable; People's "More" opens the same filters as a call or text list.
 // Rating filters are bands (?rating=1,2 · 3 · 4,4D,… · unrated) or one code
-// (?rating=4B, "Voting for…"); the server takes the same value.
+// (?rating=4B, "Voting for…"); the server takes the same value. The bands and
+// "Voting for…" come from the campaign's scale (those off the list too).
 // People is a desk screen: volunteers' /people opens Calls.
 // Shared widgets + helpers are exported from here for Person.jsx.
 // Ratings always render with the shared RatingChip / ratingSay words.
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useSearchParams, useLocation, Link, Navigate, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { RATINGS, ratingByCode, VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
-import RatingButtons, { RatingChip, ratingSay, ratingText, ratingWho } from '../components/RatingButtons.jsx';
+import { VOLUNTEER_ROLES, SUGGESTED_TAGS } from '@starbase/shared/canvass';
+import { bandOf, codesInBand, offTail, ratingByCode } from '@starbase/shared/scale';
+import RatingButtons, { RatingChip, ratingSay, ratingText, useScale } from '../components/RatingButtons.jsx';
 import { logContact } from '../offline.js';
 import SurveyQuestions, { answersSaid, answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { queuedText } from '../components/queued.js';
@@ -85,24 +87,25 @@ export const tagWord = (t) => {
 };
 
 // A past rating in words, the same words as the buttons: "Lean yes",
-// "Undecided", "Opposed", "Opposed · Locke".
-export const ratingLine = (code) => {
-  const r = ratingByCode(code);
+// "Undecided", "Opposed", "Opposed · Locke" (the campaign's scale).
+export const ratingLine = (scale, code) => {
+  const r = ratingByCode(scale, code);
   if (!r) return '';
-  return r.band === 'opposed' && r.code !== '4' ? `Opposed · ${ratingWho(code)}` : ratingSay(code);
+  return r.band === 'opposed' && r.code !== '4' ? `${scale.steps[3].word} · ${r.name}${offTail(r)}` : r.word;
 };
 
 // A rating where there's room for its meaning: the chip plus the button's
 // word in small text — "1 Strong yes", "3 Undecided". "4 · Locke" already
 // says who, so it stays a chip.
 export function RatingTag({ code }) {
-  const r = ratingByCode(code);
+  const scale = useScale();
+  const r = ratingByCode(scale, code);
   if (!r) return null;
   const named = r.band === 'opposed' && r.code !== '4';
   return (
     <span className="pp-rtag">
       <RatingChip code={code} who />
-      {!named && <span className="pp-rtag__word" aria-hidden="true">{ratingSay(code)}</span>}
+      {!named && <span className="pp-rtag__word" aria-hidden="true">{ratingSay(scale, code)}</span>}
     </span>
   );
 }
@@ -326,22 +329,28 @@ const FILTER_KEYS = ['q', 'tag', 'rating', 'role'];
 
 // Rating filter: three bands + Unrated on the first look; who an opposed
 // voter backs ("Voting for…") under More. The value goes to the server as is.
-const OPPOSED_CODES = RATINGS.filter((r) => r.band === 'opposed').map((r) => r.code);
-const RATING_BANDS = [
-  { value: RATINGS.filter((r) => r.band === 'support').map((r) => r.code).join(','), label: 'Support', band: 'support' },
-  { value: RATINGS.filter((r) => r.band === 'undecided').map((r) => r.code).join(','), label: 'Undecided', band: 'undecided' },
-  { value: OPPOSED_CODES.join(','), label: 'Opposed', band: 'opposed' },
+// A band is every code of the campaign's scale in it, those off the list too.
+const BAND_LABEL = { support: 'Support', undecided: 'Undecided', opposed: 'Opposed' };
+const ratingBands = (scale) => [
+  ...Object.entries(BAND_LABEL).map(([band, label]) => ({ value: codesInBand(scale, band).join(','), label, band })),
   { value: 'unrated', label: 'Unrated', band: 'none' },
 ];
-const WHO_CODES = OPPOSED_CODES.filter((c) => c !== '4'); // 4D 4B 4F 4N 4C
-// "Support", "Voting for Locke", "Rated 2 · Lean yes" (an old one-code link).
-const ratingFilterLabel = (v) => {
-  const band = RATING_BANDS.find((b) => b.value === v);
-  if (band) return band.label;
-  if (WHO_CODES.includes(v)) return `Voting for ${ratingWho(v)}`;
-  return ratingByCode(v) ? `Rated ${v} · ${ratingSay(v)}` : v;
+// A comma list of one band's codes (an older link of a band, say) is that band.
+const bandOfList = (v) => {
+  const codes = String(v || '').split(',');
+  if (v === 'unrated') return 'none';
+  const b = bandOf(codes[0]);
+  return b && codes.every((c) => bandOf(c) === b) ? b : null;
 };
-const ratingFilterBand = (v) => RATING_BANDS.find((b) => b.value === v)?.band || ratingByCode(v)?.band || 'none';
+// "Support", "Voting for Locke", "Rated 2 · Lean yes" (an old one-code link).
+const ratingFilterLabel = (scale, v) => {
+  const band = ratingBands(scale).find((b) => b.value === v)?.band || (/,|^unrated$/.test(v) ? bandOfList(v) : null);
+  if (band) return BAND_LABEL[band] || 'Unrated';
+  const r = ratingByCode(scale, v);
+  if (r?.name) return `Voting for ${r.name}${offTail(r)}`;
+  return r ? `Rated ${v} · ${r.word}` : v;
+};
+const ratingFilterBand = (v) => bandOfList(v) || 'none';
 
 function useFilters() {
   const [params, setParams] = useSearchParams();
@@ -375,12 +384,13 @@ const carry = (f, extra = {}) => {
 
 // Active filters as removable chips (search lives in its own box).
 function FilterChips({ f, update, keys = ['rating', 'tag', 'role', 'has'], extra = null }) {
+  const scale = useScale();
   const roleLabel = VOLUNTEER_ROLES.find((r) => r.code === f.role)?.label || f.role;
   const chips = [
     keys.includes('rating') && f.rating && {
       key: 'rating',
-      label: <><span className="pp-dot" data-band={ratingFilterBand(f.rating)} aria-hidden="true" />{ratingFilterLabel(f.rating)}</>,
-      name: ratingFilterLabel(f.rating),
+      label: <><span className="pp-dot" data-band={ratingFilterBand(f.rating)} aria-hidden="true" />{ratingFilterLabel(scale, f.rating)}</>,
+      name: ratingFilterLabel(scale, f.rating),
     },
     keys.includes('tag') && f.tag && { key: 'tag', label: tagWord(f.tag), name: `tag ${tagWord(f.tag)}` },
     keys.includes('role') && f.role && { key: 'role', label: roleLabel, name: roleLabel },
@@ -402,6 +412,9 @@ function FilterChips({ f, update, keys = ['rating', 'tag', 'role', 'has'], extra
 }
 
 function FilterSheet({ f, update, tagOptions, onClose, phone }) {
+  const scale = useScale();
+  // "Voting for…": the list's candidates, then anyone taken off it.
+  const who = [...scale.candidates.filter((c) => !c.off), ...scale.candidates.filter((c) => c.off)];
   const titleId = useId();
   const titleRef = useRef(null);
   const sheetRef = useRef(null);
@@ -425,7 +438,7 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
   const anyPicked = Boolean(f.rating || f.tag || f.role || f.has);
   // Who they vote for and volunteer roles are the long lists: one tap away,
   // open if one is picked. Tags in use sit on the first level.
-  const whoPicked = WHO_CODES.includes(f.rating);
+  const whoPicked = who.some((c) => c.code === f.rating);
   const [moreOpen, setMoreOpen] = useState(Boolean(f.role || whoPicked));
   const morePicked = [whoPicked, f.role].filter(Boolean).length;
   const moreId = useId();
@@ -454,7 +467,7 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
           <fieldset className="pp-group">
             <legend className="eyebrow">Rating</legend>
             <div className="pp-group__opts">
-              {RATING_BANDS.map((b) => chip('rating', b.value, b.label, b.band))}
+              {ratingBands(scale).map((b) => chip('rating', b.value, b.label, b.band))}
             </div>
           </fieldset>
           <fieldset className="pp-group">
@@ -480,7 +493,7 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
             <div className="pp-sheet__more" id={moreId}>
               <fieldset className="pp-group">
                 <legend className="eyebrow">Voting for…</legend>
-                <div className="pp-group__opts">{WHO_CODES.map((c) => chip('rating', c, ratingWho(c), 'opposed'))}</div>
+                <div className="pp-group__opts">{who.map((c) => chip('rating', c.code, `${c.name}${offTail(c)}`, 'opposed'))}</div>
               </fieldset>
               <fieldset className="pp-group">
                 <legend className="eyebrow">Volunteer role</legend>
@@ -841,6 +854,7 @@ function CallsScreen() {
   const location = useLocation();
   const desk = canDesk(me);
   const queryClient = useQueryClient();
+  const scale = useScale();
   const { params, f, update } = useFilters();
   // contact.log's channel is an enum — never pass a hand-edited value through.
   const asked = params.get('channel');
@@ -991,7 +1005,7 @@ function CallsScreen() {
     if (rating) setPicked((m) => ({ ...m, [p.id]: rating }));
     setHeld(null);
     setCurrentId(next?.id ?? null);
-    const what = rating ? `Rated ${ratingText(rating)}${answersTail(answers, res.result)}`
+    const what = rating ? `Rated ${ratingText(scale, rating)}${answersTail(answers, res.result)}`
       : answers.length ? answersSaid(answers, res.result) : outcomeWord(outcome, channel);
     // Not reached yet: the same words as the door card ("Saved on this phone — sends soon").
     showToast(`${firstName(p.name)} · ${what}${res.queued ? ` · ${queuedText(res)}` : ''}`, p);
@@ -1096,7 +1110,7 @@ function CallsScreen() {
                 {streetLine(current) && <span className="cl-addr">{streetLine(current)}</span>}
                 {current.rating && !mine && (
                   <span className="cl-last">
-                    Last time: {ratingLine(current.rating)}{current.rated_at ? ` · ${fmtShort(current.rated_at)}` : ''}
+                    Last time: {ratingLine(scale, current.rating)}{current.rated_at ? ` · ${fmtShort(current.rated_at)}` : ''}
                   </span>
                 )}
                 {theirNote && (

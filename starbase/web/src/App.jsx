@@ -34,6 +34,7 @@ const LaddersFollowups = lazy(() => import('./pages/LaddersFollowups.jsx'));
 const Surveys = lazy(() => import('./pages/Surveys.jsx'));
 const SurveysEdit = lazy(() => import('./pages/SurveysEdit.jsx'));
 const SurveysResults = lazy(() => import('./pages/SurveysResults.jsx'));
+const RatingScale = lazy(() => import('./pages/RatingScale.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -93,6 +94,7 @@ export default function App() {
           <Route path="/surveys" element={<Surveys />} />
           <Route path="/surveys/:id" element={<SurveysEdit />} />
           <Route path="/surveys/:id/results" element={<SurveysResults />} />
+          <Route path="/rating-scale" element={<RatingScale />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

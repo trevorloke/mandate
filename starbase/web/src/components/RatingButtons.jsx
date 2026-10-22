@@ -1,83 +1,55 @@
 // RatingButtons — the doorstep scale as big tappable buttons.
 // One row: 1 · 2 · 3 · 4, each with its meaning printed small under the
-// number ("Strong yes", "Lean yes", "Undecided", "Opposed"), so the buttons
-// are their own legend on every surface (door card, walk list, calls,
-// profile). Tapping 4 asks one more thing — "Voting for?" — with the
-// opponents' surnames (McCallum · Locke · Annis · van Vliet · Randhawa) and
-// "Not sure" (= plain 4). Nothing is logged until that second tap, so an
-// opposed rating is still one contact. Codes ("4B") never show: the picked
-// 4 reads "4 / Locke", like its chip "4 · Locke" and the toast
-// "Rated 4 · Locke" (ratingText).
+// number (the campaign's words: by default "Strong yes", "Lean yes",
+// "Undecided", "Opposed"), so the buttons are their own legend on every
+// surface (door card, walk list, calls, profile). Tapping 4 asks one more
+// thing — "Voting for?" — with the campaign's list (by default McCallum ·
+// Locke · Annis · van Vliet · Randhawa) and "Not sure" (= plain 4). Nothing
+// is logged until that second tap, so an opposed rating is still one
+// contact. Codes ("4B") never show: the picked 4 reads "4 / Locke", like its
+// chip "4 · Locke" and the toast "Rated 4 · Locke" (ratingText).
+// The words and the list are the campaign's scale (components/scale.js,
+// shared/scale.js); a candidate taken off the list is no longer offered, and
+// an old rating of theirs reads "4 · Locke (off the list)".
 // Band-tinted (support = green, undecided = ochre, opposed = red); the
 // current rating gets a dark ring and a check mark, never a solid fill, so
 // nothing here looks like the screen's one yellow button.
 // Reusable: <RatingButtons value={person.rating} onPick={(code) => …} compact />
+// (scale= shows another scale — the Rating scale screen's preview.)
 // Every button is at least 48px tall (field rule). Class names are rb-* so
 // they never collide with other pages' rating styles; styles ship with the
 // field map stylesheet so the component works anywhere.
 import { useEffect, useId, useRef, useState } from 'react';
-import { ratingByCode } from '@starbase/shared/canvass';
+import { offeredCandidates, offTail, ratingByCode, ratingWho } from '@starbase/shared/scale';
+import { useScale } from './scale.js';
 import '../pages/map.css';
+import './rating-words.css';
 
-const ROW_ONE = ['1', '2', '3'];
-const WHO = ['4D', '4B', '4F', '4N', '4C', '4'];
-// What each number means, printed under it.
-const MEANING = { 1: 'Strong yes', 2: 'Lean yes', 3: 'Undecided', 4: 'Opposed' };
-
-// "Opposed — Surrey Connect / Brenda Locke" → "Locke";
-// "Opposed — Doug McCallum supporter" → "McCallum"; plain 4 → "Not sure".
-export function ratingWho(code) {
-  const r = ratingByCode(code);
-  if (!r) return '';
-  if (r.code === '4') return 'Not sure';
-  const tail = r.label.split('— ')[1] || '';
-  const person = (tail.split(' / ')[1] || tail.replace(/ supporter$/, '')).trim();
-  return person.split(' ').slice(1).join(' ') || person || r.short;
-}
+// The words every screen uses, all taking the campaign's scale first:
+// ratingWho(scale, '4B') → "Locke" ('4' → "Not sure"); ratingSay → the
+// button's words ("Strong yes", "Locke"); ratingText → "1 · Strong yes",
+// "4 · Locke", "4 · Opposed" — toasts: `Rated ${ratingText(scale, code)}`.
+export { ratingWho, ratingSay, ratingText } from '@starbase/shared/scale';
+export { useScale };
 
 // Small filled chip for a person's current rating — same band colors as the buttons.
 // who: an opposed variant reads "4 · Locke" (the words on the button that
-// was tapped), not the code "4B".
+// was tapped), not the code "4B"; one off the list says so.
 export function RatingChip({ code, className = '', who = false }) {
-  const r = ratingByCode(code);
+  const scale = useScale();
+  const r = ratingByCode(scale, code);
   const named = who && r?.band === 'opposed' && r.code !== '4';
+  const label = r ? `${r.label}${offTail(r)}` : '';
   return (
     <span
       className={`rb-chip${named ? ' rb-chip--who' : ''} ${className}`.trim()}
       data-band={r ? r.band : 'none'}
-      title={r ? r.label : 'Not yet rated'}
-      aria-label={r ? `Rating ${r.short}: ${r.label}` : 'Not yet rated'}
+      title={r ? label : 'Not yet rated'}
+      aria-label={r ? `Rating ${r.short}: ${label}` : 'Not yet rated'}
     >
-      {r ? (named ? `4 · ${ratingWho(r.code)}` : r.short) : 'unrated'}
+      {r ? (named ? `4 · ${r.name}${offTail(r)}` : r.short) : 'unrated'}
     </span>
   );
-}
-
-// A short word for a rating, for toasts: "Lean support", "Undecided",
-// "Surrey Connect", "Doug McCallum".
-export function ratingWord(code) {
-  const r = ratingByCode(code);
-  if (!r) return '';
-  if (r.code === '4') return 'Opposed';
-  const tail = r.label.split('— ')[1];
-  return tail ? tail.split(' / ')[0].replace(/ supporter$/, '') : r.label;
-}
-
-// The words on the buttons: "Strong yes", "Undecided", "Locke", "Opposed".
-export function ratingSay(code) {
-  const r = ratingByCode(code);
-  if (!r) return '';
-  return r.band === 'opposed' && r.code !== '4' ? ratingWho(code) : MEANING[r.code] || r.label;
-}
-
-// One spelling of a rating for toasts and history lines, the same as the
-// chip and the button that was tapped: "1 · Strong yes", "4 · Locke",
-// "4 · Opposed". Never the code ("4B") — volunteers never see codes.
-// Toasts: `Rated ${ratingText(code)}`.
-export function ratingText(code) {
-  const r = ratingByCode(code);
-  if (!r) return '';
-  return `${r.band === 'opposed' ? '4' : r.short} · ${ratingSay(code)}`;
 }
 
 // The no-conversation outcomes, as one row of smaller quiet buttons.
@@ -152,46 +124,50 @@ export function focusRating(root) {
   el.focus({ preventScroll: true });
 }
 
-export default function RatingButtons({ value = null, onPick, compact = false, disabled = false }) {
-  const [askWho, setAskWho] = useState(false);
+export default function RatingButtons({ value = null, onPick, compact = false, disabled = false, scale: shown = null, askFirst = false }) {
+  const live = useScale();
+  const scale = shown || live;
+  const [askWho, setAskWho] = useState(askFirst);
   const whoId = useId();
-  const cur = ratingByCode(value);
+  const cur = ratingByCode(scale, value);
   const opposed = cur?.band === 'opposed';
+  const four = scale.steps[3];
+  // "Voting for?": the candidates on the list, then Not sure (plain 4).
+  const who = [...offeredCandidates(scale).map((c) => c.code), '4'];
   const pick = (code) => { setAskWho(false); onPick?.(code); };
   // "Voting for?" opens under the row: bring it into view, so on the last
   // door of a list it never opens hidden under a docked bar or the tab bar.
   const whoRef = useRef(null);
-  useEffect(() => { if (askWho) reveal(whoRef.current); }, [askWho]);
+  useEffect(() => { if (askWho && !askFirst) reveal(whoRef.current); }, [askWho, askFirst]);
 
   return (
     <div className={`rb${compact ? ' rb--compact' : ''}`} role="group" aria-label="Rating">
       <div className="rb-row">
-        {ROW_ONE.map((code) => {
-          const r = ratingByCode(code);
-          const active = value === code;
+        {scale.steps.slice(0, 3).map((step) => {
+          const active = value === step.code;
           return (
             <button
-              key={code}
+              key={step.code}
               type="button"
-              className={`rb-btn rb-btn--${r.band}${active ? ' is-active' : ''}`}
-              title={r.label}
-              aria-label={`${r.short}: ${r.label}`}
+              className={`rb-btn rb-btn--${step.band}${active ? ' is-active' : ''}`}
+              title={step.label}
+              aria-label={`${step.code}: ${step.label}`}
               aria-pressed={active}
               disabled={disabled}
-              onClick={() => pick(code)}
+              onClick={() => pick(step.code)}
             >
-              <span className="rb-btn__code">{r.short}</span>
-              <span className="rb-btn__sub">{MEANING[code]}</span>
+              <span className="rb-btn__code">{step.code}</span>
+              <span className="rb-btn__sub">{step.word}</span>
             </button>
           );
         })}
         <button
           type="button"
           className={`rb-btn rb-btn--opposed${opposed ? ' is-active' : ''}${askWho ? ' is-asking' : ''}`}
-          title="Opposed — tap, then pick who they vote for"
+          title={`${four.word} — tap, then pick who they vote for`}
           aria-label={opposed
-            ? `4: Opposed, ${cur.code === '4' ? 'not sure who' : `voting ${ratingWho(cur.code)}`} — change who they vote for`
-            : '4: Opposed — pick who they vote for'}
+            ? `4: ${four.word}, ${cur.code === '4' ? 'not sure who' : `voting ${cur.name}`} — change who they vote for`
+            : `4: ${four.word} — pick who they vote for`}
           aria-expanded={askWho}
           aria-controls={whoId}
           disabled={disabled}
@@ -199,7 +175,7 @@ export default function RatingButtons({ value = null, onPick, compact = false, d
         >
           {/* Picked: "4" over the name — the same words as the chip ("4 · Locke"). */}
           <span className="rb-btn__code">4</span>
-          <span className="rb-btn__sub">{opposed && cur.code !== '4' ? ratingWho(cur.code) : MEANING[4]}</span>
+          <span className="rb-btn__sub">{opposed && cur.code !== '4' ? cur.name : four.word}</span>
         </button>
       </div>
 
@@ -207,8 +183,8 @@ export default function RatingButtons({ value = null, onPick, compact = false, d
         <div className="rb-who" id={whoId} ref={whoRef} role="group" aria-label="Voting for?">
           <span className="rb-who__q">Voting for?</span>
           <div className="rb-who__grid">
-            {WHO.map((code) => {
-              const r = ratingByCode(code);
+            {who.map((code) => {
+              const r = ratingByCode(scale, code);
               const active = value === code;
               return (
                 <button
@@ -221,7 +197,7 @@ export default function RatingButtons({ value = null, onPick, compact = false, d
                   disabled={disabled}
                   onClick={() => pick(code)}
                 >
-                  <span className="rb-who__name">{ratingWho(code)}</span>
+                  <span className="rb-who__name">{ratingWho(scale, code)}</span>
                 </button>
               );
             })}

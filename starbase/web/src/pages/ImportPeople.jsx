@@ -9,10 +9,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { RATING_CODES } from '@starbase/shared/canvass';
+import { matchRating, offeredCodes } from '@starbase/shared/scale';
 import { apiPost } from '../api.js';
 import GeocodeButton from '../components/GeocodeButton.jsx';
-import { RatingChip } from '../components/RatingButtons.jsx';
+import { RatingChip, useScale } from '../components/RatingButtons.jsx';
 import { invalidatePersonData, tagWord } from './People.jsx';
 import './import.css';
 
@@ -224,12 +224,13 @@ const NAME_RE = /^\p{L}[\p{L}'’.-]*(?:\s+\p{L}[\p{L}'’.-]*){1,3}$/u;
 const POSTAL_RE = /^[a-z]\d[a-z][ -]?\d[a-z]\d$/i;
 const PHONE_RE = /^\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(\s*(x|ext\.?)\s*\d+)?$/i;
 
-// "4d " → "4D", "4 D" → "4D", "1.0" → "1" (spreadsheets love a trailing .0).
-const normalizeRating = (v) => String(v ?? '').replace(/\s+/g, '').toUpperCase().replace(/\.0+$/, '');
-const isRating = (v) => RATING_CODES.includes(normalizeRating(v));
+// The campaign's scale (its codes and words, any case): "4d " → 4D, "4 D" →
+// 4D, "1.0" → 1 (spreadsheets love a trailing .0), "Strong yes" → 1,
+// "locke" → 4B. A new rating must be on the list (off it: comes in unrated).
+const isRating = (scale, v) => { const m = matchRating(scale, v); return Boolean(m && !m.off); };
 // share: a "Support" column may hold the odd typo; a bare "ID" column must be all ratings.
-const looksLikeRatings = (values, share = 1) =>
-  values.length > 0 && values.filter(isRating).length / values.length >= share;
+const looksLikeRatings = (scale, values, share = 1) =>
+  values.length > 0 && values.filter((v) => matchRating(scale, v)).length / values.length >= share;
 const mostly = (values, re, share = 0.8) => values.length > 0 && values.filter((v) => re.test(v)).length / values.length >= share;
 // Loose header guesses must also look right ("Email opt-in" holding yes/no is not an email column).
 const VALUE_CHECK = { email: EMAIL_RE, phone: PHONE_RE, postal: POSTAL_RE };
@@ -244,14 +245,14 @@ const columnValues = (records, i, limit = 200) => {
   return out;
 };
 
-function guessMapping(headers, records, noHeader = false) {
+function guessMapping(scale, headers, records, noHeader = false) {
   const out = headers.map(() => SKIP);
   const taken = new Set();
   const values = headers.map((_, i) => columnValues(records, i));
   const claim = (i, key, loose = false) => {
     if (out[i] !== SKIP) return;
     if (!MULTI.has(key) && taken.has(key)) return;
-    if (key === 'rating' && !looksLikeRatings(values[i], /^(id|idlevel)$/.test(normHeader(headers[i])) ? 1 : 0.9)) return; // "ID" only if it holds 1/2/3/4/4D…
+    if (key === 'rating' && !looksLikeRatings(scale, values[i], /^(id|idlevel)$/.test(normHeader(headers[i])) ? 1 : 0.9)) return; // "ID" only if it holds 1/2/3/4/4D…
     if (loose && VALUE_CHECK[key] && values[i].length && !mostly(values[i], VALUE_CHECK[key], 0.6)) return;
     if (key === 'name' && mostly(values[i], EMAIL_RE)) return; // a "Contact" column of emails isn't a name
     out[i] = key;
@@ -285,14 +286,14 @@ function guessMapping(headers, records, noHeader = false) {
 // One CSV record → the server's row shape (only filled fields are sent).
 // A rating that isn't on the scale is left off: the server rejects the whole
 // row for it, and losing the person is worse than losing a bad rating.
-function toRow(cells, mapping) {
+function toRow(scale, cells, mapping) {
   const row = {};
   mapping.forEach((key, i) => {
     if (!key) return;
     const v = String(cells[i] ?? '').trim();
     if (!v) return;
     if (key === 'tags') row.tags = row.tags ? `${row.tags};${v}` : v;
-    else if (key === 'rating') { const r = normalizeRating(v); if (RATING_CODES.includes(r)) row.rating = r; }
+    else if (key === 'rating') { const m = matchRating(scale, v); if (m && !m.off) row.rating = m.code; }
     else row[key] = v;
   });
   return row;
@@ -323,15 +324,19 @@ const slugTag = (fileName) => {
 // Server messages → spreadsheet row numbers and plain words
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SCALE = RATING_CODES.join(', ');
+// "1, 2, 3, 4, 4D, 4B, 4F, 4N, 4C" — what a rating column may hold (or the words).
+const scaleCodes = (scale) => offeredCodes(scale).join(', ');
 
-function friendly(text) {
+function friendly(text, scale) {
+  const SCALE = scaleCodes(scale);
   const t = String(text || '').trim();
   if (t === 'no name') return 'No name. Fill in a full name, or a first and last name.';
   let m = /^invalid email “(.*)”$/.exec(t);
   if (m) return `“${m[1]}” doesn’t look like an email address.`;
   m = /^rating “(.*)” is not on the scale$/.exec(t);
   if (m) return `Rating “${m[1]}” isn’t on the scale (${SCALE}).`;
+  m = /^rating “(.*)” is off the list$/.exec(t);
+  if (m) return `Rating “${m[1]}” is off the list.`;
   m = /^([a-z]+)(?:\.\d+)?\s+(.*)$/.exec(t);
   if (m && FIELDS.some((f) => f.key === m[1])) {
     if (m[1] === 'rating') return `Rating isn’t on the scale (${SCALE}).`;
@@ -343,10 +348,10 @@ function friendly(text) {
 }
 
 // "row 3: no name" (3 = position in the chunk sent) → { row: 1042, text }.
-function remapInvalid(msg, part) {
+function remapInvalid(msg, part, scale) {
   const m = /^row (\d+):\s*(.*)$/s.exec(String(msg));
-  if (!m) return { row: null, text: friendly(msg) };
-  return { row: part[Number(m[1]) - 1]?.row ?? null, text: friendly(m[2]) };
+  if (!m) return { row: null, text: friendly(msg, scale) };
+  return { row: part[Number(m[1]) - 1]?.row ?? null, text: friendly(m[2], scale) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,6 +445,7 @@ const ZERO = { created: 0, merged: 0, unchanged: 0 };
 
 function ImportFlow() {
   const queryClient = useQueryClient();
+  const scale = useScale();
 
   // Step 1 — the source
   const [source, setSource] = useState(null); // { name, headers, records, delimiter }
@@ -477,7 +483,7 @@ function ImportFlow() {
     if (shaped.error) { setLoadError(shaped.error); return; }
     setLoadError(null);
     setSource({ name, ...t, ...shaped });
-    setMapping(guessMapping(shaped.headers, shaped.records, !t.header));
+    setMapping(guessMapping(scale, shaped.headers, shaped.records, !t.header));
     setTag('');
     resetAfterSource();
   };
@@ -487,7 +493,7 @@ function ImportFlow() {
     const shaped = shapeTable(source.all, on);
     if (shaped.error) return;
     setSource({ ...source, header: on, ...shaped });
-    setMapping(guessMapping(shaped.headers, shaped.records, !on));
+    setMapping(guessMapping(scale, shaped.headers, shaped.records, !on));
     resetAfterSource();
   };
 
@@ -553,8 +559,8 @@ function ImportFlow() {
 
   // ── Derived ──
   const rows = useMemo(
-    () => (source ? source.records.map((r) => ({ data: toRow(r.cells, mapping), row: r.row, cells: r.cells })) : []),
-    [source, mapping],
+    () => (source ? source.records.map((r) => ({ data: toRow(scale, r.cells, mapping), row: r.row, cells: r.cells })) : []),
+    [source, mapping, scale],
   );
   const ratingCol = mapping.indexOf('rating');
   const hasName = mapping.some((k) => k === 'name' || k === 'first' || k === 'last');
@@ -567,15 +573,23 @@ function ImportFlow() {
     () => (source ? source.headers.map((_, i) => columnValues(source.records, i, 3)) : []),
     [source],
   );
-  // A column mapped to Rating whose values aren't on the scale: those people come in unrated.
-  const badRatings = useMemo(() => {
+  // A column mapped to Rating whose values aren't on the scale (or are off
+  // the list): those people come in unrated. Which values, said once each.
+  const { badRatings, badValues } = useMemo(() => {
     const col = ratingCol;
-    if (!source || col === -1) return 0;
-    return source.records.filter((r) => {
-      const v = String(r.cells[col] ?? '').trim();
-      return v && !isRating(v);
-    }).length;
-  }, [source, mapping]);
+    const seen = new Map();
+    let n = 0;
+    if (source && col !== -1) {
+      for (const r of source.records) {
+        const v = String(r.cells[col] ?? '').trim();
+        if (!v || isRating(scale, v)) continue;
+        n += 1;
+        if (!seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), `“${v}”${matchRating(scale, v)?.off ? ' (off the list)' : ''}`);
+      }
+    }
+    const vals = [...seen.values()];
+    return { badRatings: n, badValues: vals.length > 3 ? `${vals.slice(0, 3).join(', ')}…` : vals.join(', ') };
+  }, [source, ratingCol, scale]);
 
   const previewCols = [
     hasName && ['name', 'Name'],
@@ -599,7 +613,7 @@ function ImportFlow() {
         acc.created += r.created || 0;
         acc.merged += r.merged || 0;
         acc.unchanged += r.unchanged || 0;
-        for (const msg of r.invalid || []) acc.invalid.push(remapInvalid(msg, part));
+        for (const msg of r.invalid || []) acc.invalid.push(remapInvalid(msg, part, scale));
         for (const d of r.decisions || []) {
           if (d.action === 'merged' && acc.matches.length < 50) {
             acc.matches.push({ ...d, row: part[d.row - 1]?.row ?? d.row });
@@ -628,7 +642,7 @@ function ImportFlow() {
         acc.created += r.created || 0;
         acc.merged += r.merged || 0;
         acc.unchanged += r.unchanged || 0;
-        for (const msg of r.invalid || []) acc.invalid.push(remapInvalid(msg, part));
+        for (const msg of r.invalid || []) acc.invalid.push(remapInvalid(msg, part, scale));
         setImp({ phase: 'running', sent: start + part.length, total, ...acc });
       }
       setImp({ phase: 'done', sent: total, total, ...acc });
@@ -780,7 +794,7 @@ function ImportFlow() {
                     )}
                     {mapping[i] === 'rating' && badRatings > 0 && (
                       <p className="imp-map__note is-warn">
-                        {plural(badRatings, 'rating isn’t', 'ratings aren’t')} on the scale ({SCALE}) — {badRatings === 1 ? 'comes' : 'they come'} in unrated.
+                        {plural(badRatings, 'rating isn’t', 'ratings aren’t')} on the scale ({badValues}) — {badRatings === 1 ? 'comes' : 'they come'} in unrated.
                       </p>
                     )}
                   </li>
