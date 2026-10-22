@@ -62,7 +62,8 @@ On screen the buttons read *1 Strong yes · 2 Lean yes · 3 Undecided ·
 Public pages, no login, linkable from the site (workspace slug from signup):
 
 - `/p/:slug/:petition` — petition signature page
-- `/n/:slug` — newsletter signup · `/u/:subscriptionId` — one-click unsubscribe
+- `/n/:slug` — newsletter signup · `/u/:subscriptionId` — unsubscribe (the link
+  asks; one tap on *Unsubscribe* does it, so mail scanners never unsubscribe anyone)
 - `/v/:slug` — volunteer signup with the 15 roles (a hi-rise captain is asked
   which building; translators, which language)
 
@@ -82,8 +83,12 @@ tagged by source, and is appended to the event log under a system actor.
 
 Set `STARBASE_PUBLIC_URL` (e.g. `https://starbase.imaginesurrey.ca`) so links
 in outbound mail — newsletter unsubscribe footers, invite links — point at the
-public host. Every newsletter ends with "Sent by <campaign>" and the reader's
-own one-click unsubscribe link. Shift messages render in campaign time
+public host. Every newsletter and ladder email ends with "Sent by <campaign>"
+and the reader's own unsubscribe link, and carries `List-Unsubscribe` /
+`List-Unsubscribe-Post` headers so mail apps show their own Unsubscribe
+button. Someone who unsubscribed can only rejoin from the signup page — the
+desk can't add them back. Ladder emails go only to addresses on the list as
+subscribed. Shift messages render in campaign time
 (`America/Vancouver` unless `settings.tz` says otherwise).
 
 Provider-pluggable, no SDKs: `RESEND_API_KEY` (+ `MAIL_FROM`) for email,

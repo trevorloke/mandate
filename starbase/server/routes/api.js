@@ -515,13 +515,14 @@ app.get('/petitions/:id/signatures', async (c) => {
 app.get('/subscriptions', async (c) => {
   const ctx = c.get('ctx');
   const { rows } = await c.get('db').query(
-    `select id, email, name, status, source, created_at from subscriptions
+    `select id, email, name, status, source, created_at, unsubscribed_at from subscriptions
      where workspace_id = $1 order by created_at desc limit 5000`,
     [ctx.workspaceId],
   );
   return c.json({
     subscriptions: rows,
     subscribed: rows.filter((r) => r.status === 'subscribed').length,
+    unsubscribed: rows.filter((r) => r.status === 'unsubscribed').length,
     slug: ctx.workspace.slug,
   });
 });

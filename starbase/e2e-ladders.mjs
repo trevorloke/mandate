@@ -8,9 +8,13 @@
 // profile shows the engagement chip and the Ladders section; off holds the
 // run in place and on resumes it. A volunteer on a 390×844 phone rates a
 // door 1 (which puts that person on a ladder) and can reach none of it —
-// screens, API, or the JSON their browser receives. The unsubscribe link
-// works, and the books still verify. New screens are measured (visible
-// words, yellow buttons, sideways scroll, 48px field targets).
+// screens, API, or the JSON their browser receives; Dora never said yes to
+// email, so the ladder's email skips her ("didn't ask for email"). The
+// unsubscribe link asks before it acts; once Ana is off the list the desk
+// can't add her back; Dora (never on it) is flagged do-not-email with no list
+// row. The builder's email card says who it reaches, "+ First name" fills in
+// and a {first_name} is flagged. The books still verify. New screens are
+// measured (visible words, yellow buttons, sideways scroll, 48px targets).
 //
 //   STARBASE_DATA=memory PORT=4103 STARBASE_JOBS_EVERY_MS=1000 node server/index.js &
 //   BASE=http://127.0.0.1:4103 SHOTS=/tmp/ladders node e2e-ladders.mjs
@@ -133,6 +137,7 @@ await page.waitForURL(`${BASE}/ladders`, { timeout: 8000 }).catch(() => {});
 await sleep(600);
 let t = await D.text();
 check('Ladders opens empty: one line + one button', /No ladders yet\./.test(t) && (await page.locator('.btn-primary:visible').count()) === 1, t.slice(0, 160));
+check('Ladders says what it is under the title', /^Ladders Automatic emails & follow-ups/.test(t), t.slice(0, 60));
 await D.shot('1-ladders-empty');
 
 // ── 3. New ladder: name + Starts when (the petition) ──
@@ -160,10 +165,25 @@ const addStep = async (label, fill) => {
   await sleep(700);
 };
 await addStep('Tag', () => page.getByLabel('Add tag').fill('thanked'));
-await addStep('Email', async () => {
-  await page.getByLabel('Subject').fill('Thanks, {{first_name}}');
-  await page.getByLabel('Message').fill('Thank you for signing for 72 Ave. — {{campaign}}');
-});
+// Email: a {first_name} is flagged before saving; + First name / + Campaign fill in.
+await page.getByRole('button', { name: '+ Email' }).click();
+await page.getByLabel('Subject').fill('Thanks, {first_name}');
+await page.getByLabel('Message').fill('Thank you for signing for 72 Ave. — ');
+await page.getByRole('button', { name: 'Add step' }).click();
+await sleep(400);
+t = await D.text();
+check('a {first_name} is flagged, not saved', /\{first_name\} won’t fill in — use \+ First name/.test(t)
+  && !(await D.api(`/ladders/${ladderId}`)).json.ladder.steps.some((x) => x.kind === 'email'), t.slice(t.indexOf('Subject'), t.indexOf('Subject') + 200));
+await page.getByLabel('Subject').fill('Thanks, ');
+await page.getByRole('button', { name: '+ First name' }).click();
+await page.getByLabel('Message').click();
+await page.getByLabel('Message').press('End');
+await page.getByRole('button', { name: '+ Campaign' }).click();
+const filled = [await page.getByLabel('Subject').inputValue(), await page.getByLabel('Message').inputValue()];
+check('+ First name / + Campaign fill in at the cursor', filled[0] === 'Thanks, {{first_name}}' && filled[1] === 'Thank you for signing for 72 Ave. — {{campaign}}', JSON.stringify(filled));
+check('no code in the help line', !/\{\{/.test(await page.locator('.lad-new-step .lad-hint').innerText()));
+await page.getByRole('button', { name: 'Add step' }).click();
+await sleep(700);
 await addStep('Follow-up', () => page.getByLabel('Follow-up for staff').fill('Call {{first_name}} to say thanks'));
 // Open the follow-up card and move it above the email.
 await page.locator('.lad-step .ops-row', { hasText: 'Follow-up · Call' }).click();
@@ -178,6 +198,10 @@ const kinds = L.ladder.steps.map((s) => s.kind).join(',');
 check('steps saved in order (follow-up moved up)', kinds === 'tag,followup,email,wait', kinds);
 const cards = (await page.locator('.lad-step .lad-step__line').allInnerTexts()).join(' | ');
 check('cards read as the server has them', cards === 'Tag · thanked | Follow-up · Call {{first_name}} to say thanks | Email · Thanks, {{first_name}} | Wait 1 day', cards);
+const who = (await page.locator('.lad-step .lad-step__who').allInnerTexts()).map((x) => x.trim());
+check('the email card says who it reaches (= server)', who.length === 1 && who[0] === `Goes only to people who said yes to email · ${L.emailYes}`, `${who.join(' | ')} vs ${L.emailYes}`);
+check('the steps row says "Other steps", the page has one More',
+  await page.getByRole('button', { name: 'Other steps' }).isVisible() && (await page.getByRole('button', { name: 'More', exact: true }).count()) === 1);
 // Field targets inside an open email editor.
 await page.getByRole('button', { name: '+ Email' }).click();
 await sleep(300);
@@ -193,6 +217,7 @@ L = (await D.api(`/ladders/${ladderId}`)).json;
 t = await D.text();
 const statusChip = (await page.locator('.lad-status .chip').innerText().catch(() => '')).trim();
 check('Turn on → On (server and screen)', L.ladder.active === true && /^on$/i.test(statusChip) && !(await page.getByRole('button', { name: 'Turn on' }).count()), `${statusChip} · ${t.slice(0, 120)}`);
+check('On is said once (the chip), no extra line', (await page.locator('.ops-done').count()) === 0);
 
 // ── 5. A visitor signs the petition ──
 const visitor = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -201,6 +226,7 @@ vp.on('pageerror', (e) => errors.push(`[visitor] ${e.message}`));
 await vp.goto(`${BASE}/p/${slug}/fix-72-ave`, { waitUntil: 'domcontentloaded' });
 await vp.fill('#name', 'Ana Souza');
 await vp.fill('#email', `ana.${tag}@example.org`);
+await vp.check('input[name="subscribe"]'); // she says yes to email
 await vp.click('button[type="submit"]');
 await vp.waitForSelector('text=/Thank you, Ana/', { timeout: 8000 }).catch(() => {});
 check('visitor signed', /Thank you, Ana/.test(await vp.innerText('body')));
@@ -265,7 +291,7 @@ t = await D.text();
 const rowText = (await page.locator('.ops-rows .ops-item', { hasText: 'Thank petition signers' }).innerText()).replace(/\s+/g, ' ').trim();
 check('list row: trigger, counts, On', /^Thank petition signers Signed a petition · Fix 72 Ave 1 in progress · 0 finished On$/i.test(rowText), rowText);
 check('list: follow-ups row and email note', /1 follow-up to do/.test(t) && /Email isn’t connected — email steps wait\./.test(t));
-await page.getByRole('button', { name: 'Engagement' }).click();
+await page.getByRole('button', { name: 'How involved people are' }).click();
 await sleep(300);
 const LS = (await D.api('/ladders')).json;
 const bars = (await page.locator('.lad-levels__row').allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim());
@@ -303,7 +329,8 @@ await page.setViewportSize({ width: 1360, height: 900 });
 
 // ── 11. Volunteer on a phone: rates a door 1, sees nothing of ladders ──
 const yes = (await D.api('/actions/ladder.create', {
-  name: 'Rated yes', trigger: { kind: 'rating' }, steps: [{ kind: 'tag', tag: 'said-yes' }],
+  name: 'Rated yes', trigger: { kind: 'rating' },
+  steps: [{ kind: 'tag', tag: 'said-yes' }, { kind: 'email', subject: 'Glad you are with us', body: 'Hi {{first_name}}' }],
 })).json.ladder;
 await D.api('/actions/ladder.setActive', { id: yes.id, active: true });
 const inv = (await D.api('/actions/member.invite', { email: `jas.${tag}@example.org`, role: 'volunteer' })).json;
@@ -326,6 +353,16 @@ const vt = ((await vol.innerText('body')) || '').replace(/\s+/g, ' ');
 check('volunteer rated the door; the toast says only that', /Rated 1/.test(vt) && !/ladder|follow-up/i.test(vt), vt.slice(0, 160));
 const doraRun = await until(async () => (await D.api(`/ladders/${yes.id}`)).json.people.find((p) => p.person.id === dora.id && p.status === 'done'));
 check('…which put Dora on "Rated yes" (desk sees it)', !!doraRun);
+check('a 1 at the door is not a yes to email: her email is skipped', doraRun && JSON.stringify(doraRun.skipped) === JSON.stringify([{ step: 1, kind: 'email', reason: 'no_consent' }]), JSON.stringify(doraRun?.skipped));
+await D.go(`/ladders/${yes.id}`);
+await page.getByRole('button', { name: /^Finished · / }).click().catch(() => {});
+await sleep(300);
+t = await D.text();
+check('desk: "Finished · email skipped (didn’t ask for email)"', /Dora Door Finished · email skipped \(didn’t ask for email\)/.test(t), t.slice(t.indexOf('People'), t.indexOf('People') + 140));
+await page.locator('.lad-sec .ops-row', { hasText: 'Dora Door' }).click();
+await sleep(300);
+const dlog = (await page.locator('.lad-log li').allInnerTexts()).map((x) => x.replace(/\s+/g, ' '));
+check('her log: "Email skipped — didn’t ask for email"', dlog.some((x) => /^Email skipped — didn’t ask for email/.test(x)), dlog.join(' | '));
 for (const path of ['/ladders', `/ladders/${ladderId}`, '/follow-ups']) {
   await V.go(path);
   check(`volunteer typing ${path} lands on Today`, new URL(vol.url()).pathname === '/', vol.url());
@@ -353,12 +390,52 @@ await vctx.close();
 
 // ── 12. The unsubscribe link in her email works, and is honoured ──
 await vp.goto(`${BASE}/lu/${run.id}`, { waitUntil: 'domcontentloaded' });
-const ut = await vp.innerText('body');
-check('unsubscribe page: Unsubscribed, names the campaign', /Unsubscribed\./.test(ut) && /Imagine Surrey Ladders/.test(ut), ut.slice(0, 120));
+let ut = await vp.innerText('body');
+const stillOn = (await D.api('/subscriptions')).json.subscriptions.find((s) => s.email === `ana.${tag}@example.org`);
+check('opening the link only asks: one Unsubscribe button, still subscribed', /Unsubscribe from Imagine Surrey Ladders\?/.test(ut)
+  && (await vp.locator('button', { hasText: /^Unsubscribe$/i }).count()) === 1 && stillOn?.status === 'subscribed', ut.slice(0, 120));
+await vp.screenshot({ path: `${SHOTS}/12a-unsubscribe-ask.png` });
+await vp.locator('button', { hasText: /^Unsubscribe$/i }).click();
+await vp.waitForSelector('text=/Unsubscribed\./', { timeout: 8000 }).catch(() => {});
+ut = await vp.innerText('body');
+check('one tap: Unsubscribed, names the campaign', /Unsubscribed\./.test(ut) && /Imagine Surrey Ladders/.test(ut), ut.slice(0, 120));
 await vp.screenshot({ path: `${SHOTS}/12-unsubscribed.png` });
 const subs = (await D.api('/subscriptions')).json.subscriptions.filter((s) => s.email === `ana.${tag}@example.org`);
 check('on the newsletter list as unsubscribed', subs.length === 1 && subs[0].status === 'unsubscribed', JSON.stringify(subs));
+// Dora was never on the list: no list row, flagged do-not-email.
+const doraRunId = (await D.api(`/ladders/${yes.id}`)).json.people.find((p) => p.person.id === dora.id).id;
+const pre = (await D.api('/subscriptions')).json;
+await vp.goto(`${BASE}/lu/${doraRunId}`, { waitUntil: 'domcontentloaded' });
+await vp.locator('button', { hasText: /^Unsubscribe$/i }).click();
+await vp.waitForSelector('text=/Unsubscribed\./', { timeout: 8000 }).catch(() => {});
+const post = (await D.api('/subscriptions')).json;
+const doraNow = (await D.api(`/persons/${dora.id}`)).json.person;
+check('never on the list: no list row, flagged do-not-email', post.subscriptions.length === pre.subscriptions.length
+  && !post.subscriptions.some((s) => s.email === `dora.${tag}@example.org`) && doraNow.tags.includes('do-not-email'), doraNow.tags.join(','));
 await visitor.close();
+
+// The desk sees the list as it is and can't put Ana back.
+await D.go('/outreach/newsletter');
+await page.click('button.ot-more:has-text("More")');
+await sleep(300);
+const SL = (await D.api('/subscriptions')).json;
+const subsHead = (await page.locator('section[aria-label="Subscribers"] h2').innerText()).replace(/\s+/g, ' ').trim();
+check('More: "Subscribers N · 1 unsubscribed" (= server)', subsHead.toLowerCase() === `subscribers ${SL.subscribed} · ${SL.unsubscribed} unsubscribed` && SL.unsubscribed === 1, subsHead);
+check('no Re-subscribe anywhere', (await page.getByRole('button', { name: 'Re-subscribe' }).count()) === 0);
+await page.fill('#sub-email', `ana.${tag}@example.org`);
+await page.locator('form.ot-inline-add').getByRole('button', { name: 'Add' }).click();
+await sleep(700);
+t = await D.text();
+const anaAfter = (await D.api('/subscriptions')).json.subscriptions.find((s) => s.email === `ana.${tag}@example.org`);
+check('Add: "Unsubscribed on <date> — only they can rejoin (signup page)", still off', /Unsubscribed on [A-Z][a-z]{2} \d{1,2} — only they can rejoin \(signup page\)/.test(t) && anaAfter.status === 'unsubscribed', anaAfter.status);
+await D.shot('12b-subscribers');
+
+// ── 12c. A donor's profile: the level chip never repeats the donor tier ──
+const gil = (await D.api('/actions/person.create', { name: 'Gil Giver', email: `gil.${tag}@example.org` })).json.person;
+await D.api('/actions/gift.log', { person_id: gil.id, amount_cents: 5000, date: new Date().toISOString().slice(0, 10) });
+await D.go(`/people/${gil.id}`);
+const metaChips = (await page.locator('.pf-meta .chip').allInnerTexts()).map((x) => x.trim().toLowerCase());
+check('donor profile: one Donor chip, not two', metaChips.filter((x) => x === 'donor').length === 1 && !(await page.locator('.pf-meta .lad-level').count()), metaChips.join(' | '));
 
 // ── 13. The books still verify ──
 const v = (await D.api('/audit/verify')).json;

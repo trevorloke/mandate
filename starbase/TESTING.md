@@ -88,6 +88,12 @@ one tap away under **More**.
   else by itself, and *Last sent* shows *Opened · Clicked*. A tie sends A and
   says *Tie — sent A*. Opens run high (Apple Mail opens by itself); clicks
   from mail scanners aren't counted.
+- **Outreach → Ladders** (automatic emails & follow-ups) — email steps go
+  only to people who said yes to email (the newsletter, or *Email me updates*
+  on a petition); everyone else shows *Email skipped — didn't ask for email*.
+  *+ First name* / *+ Campaign* fill in. The email's unsubscribe link asks
+  first; once someone unsubscribes, **Newsletter → More → Subscribers** can't
+  add them back — only they can, from the signup page.
 - **Outreach → Website** — set the Imagine Surrey website address; copy the
   public volunteer page (`/v/imagine-surrey`), newsletter page
   (`/n/imagine-surrey`), petition, event, and donate (`/d/imagine-surrey`)

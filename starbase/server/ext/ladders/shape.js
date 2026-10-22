@@ -57,6 +57,10 @@ export const tagsOf = (p) => {
 export const sameTag = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 export const DNC_TAG = 'do-not-contact';
 export const isDnc = (p) => tagsOf(p).some((t) => sameTag(t, DNC_TAG));
+// A ladder email's unsubscribe from someone who was never on the newsletter
+// list: no list row is made for them, the person is flagged instead.
+export const NO_EMAIL_TAG = 'do-not-email';
+export const noEmail = (p) => tagsOf(p).some((t) => sameTag(t, NO_EMAIL_TAG));
 
 export const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'there';
 

@@ -239,10 +239,18 @@ test('the unsubscribe link is never tracked and still works', async () => {
   const href = (m.html.match(/href="([^"]*\/u\/[0-9a-f-]{36})"/) || [])[1];
   assert.ok(href, 'unsubscribe link in the HTML');
   assert.ok(!href.includes('/c/'), 'not rewritten');
+  // The mail app's own Unsubscribe button points at the same link (one-click POST).
+  assert.equal(m.headers?.['List-Unsubscribe'], `<${href}>`);
+  assert.equal(m.headers?.['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
   const before = (await rows(id)).find((x) => x.email === m.to[0]);
-  const res = await pub(pathOf(href));
+  // Opening the link (a mail scanner does) only asks.
+  const ask = await pub(pathOf(href));
+  assert.equal(ask.status, 200);
+  assert.match(await ask.text(), /<button type="submit">Unsubscribe<\/button>/);
+  assert.equal((await c.get('/api/subscriptions')).json.subscriptions.find((s) => s.id === sub.id).status, 'subscribed', 'opening it unsubscribes no one');
+  const res = await app.request(pathOf(href), { method: 'POST', body: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /Unsubscribed/);
+  assert.match(await res.text(), /Unsubscribed\./);
   const after = (await rows(id)).find((x) => x.email === m.to[0]);
   assert.equal(after.clicks, before.clicks, 'no click recorded');
   assert.equal(after.opens, before.opens);

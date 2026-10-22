@@ -139,8 +139,9 @@ const runOut = (r, steps) => {
     next_at: r.next_at || null,
     last: log.length ? log[log.length - 1] : null,
     skipped: log.filter((e) => e.result === 'skipped').map((e) => ({ step: e.step, kind: e.kind, reason: e.reason })),
-    // What each step did (kind, result, reason, when) — no addresses, no message text.
-    log: log.slice(-20).map((e) => ({ step: e.step, kind: e.kind, result: e.result, reason: e.reason || null, tag: e.tag || null, until: e.until || null, at: e.at })),
+    // What each step did (kind, result, reason, when) — no addresses, no
+    // message text. 'Sending' shows only while it's the latest word.
+    log: log.filter((e, i) => e.result !== 'sending' || i === log.length - 1).slice(-20).map((e) => ({ step: e.step, kind: e.kind, result: e.result, reason: e.reason || null, tag: e.tag || null, until: e.until || null, at: e.at })),
     started_at: r.started_at,
     finished_at: r.finished_at || null,
   };
@@ -164,6 +165,10 @@ api.get('/ladders/:id', async (c) => {
     [ctx.workspaceId, l.id],
   )).rows;
   const counts = (await runCounts(db, ctx.workspaceId, l.id))[l.id];
+  // Email steps go only to these: addresses on the list as subscribed.
+  const emailYes = (await db.query(
+    "select count(*)::int as n from subscriptions where workspace_id = $1 and status = 'subscribed'", [ctx.workspaceId],
+  )).rows[0].n;
   return c.json({
     ladder: {
       ...ladder,
@@ -173,6 +178,7 @@ api.get('/ladders/:id', async (c) => {
     },
     people: runs.map((r) => ({ ...runOut(r, ladder.steps), person: { id: r.person_id, name: r.person_name } })),
     emailConfigured: emailConfigured(),
+    emailYes,
     options: opts,
   });
 });

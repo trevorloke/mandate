@@ -651,6 +651,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const [removing, setRemoving] = useState(null);
   const act = useAction(() => {
     queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
     queryClient.invalidateQueries({ queryKey: ['brief'] });
@@ -658,6 +659,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
 
   const list = subs.data?.subscriptions ?? [];
   const subscribed = subs.data?.subscribed ?? null;
+  const unsubscribed = subs.data?.unsubscribed ?? 0;
   const signupUrl = `${origin()}/n/${slug}`;
   const composing = canWrite && creating;
   const visible = showAll ? list : list.slice(0, 50);
@@ -670,13 +672,12 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
     toast(`Added ${email.trim()}`);
     setEmail(''); setName('');
   };
+  // Off the list is for good from here: only they can rejoin (signup page),
+  // so Remove asks first and there is no Re-subscribe.
   const remove = async (s) => {
     const res = await act.run('subscription.remove', { id: s.id });
+    setRemoving(null);
     if (res) toast(`Unsubscribed ${s.email}`);
-  };
-  const resubscribe = async (s) => {
-    const res = await act.run('subscription.add', { email: s.email, name: s.name || undefined });
-    if (res) toast(`Re-subscribed ${s.email}`);
   };
 
   return (
@@ -723,7 +724,7 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
         </section>
 
         <section className="ot-sec" aria-label="Subscribers">
-          <h2 className="ot-sec-h">Subscribers <span className="ot-count">{subs.isPending ? '…' : list.length}</span></h2>
+          <h2 className="ot-sec-h">Subscribers <span className="ot-count">{subs.isPending ? '…' : subscribed}{unsubscribed > 0 && ` · ${unsubscribed} unsubscribed`}</span></h2>
           {subs.isError && <p className="error">{subs.error.message}</p>}
           {list.length === 0 && !subs.isPending && <p className="ot-empty">No subscribers yet.</p>}
           {list.length > 0 && (
@@ -736,16 +737,21 @@ function NewsletterTab({ me, canWrite, creating, onClose, toast }) {
                       <span className="ot-row__sub">
                         {s.name && <span>{s.name}</span>}
                         {sourceLabel(s.source) && <span>{sourceLabel(s.source)}</span>}
-                        <span>{fmtDay(s.created_at)}</span>
+                        <span>{s.status === 'subscribed' || !s.unsubscribed_at ? fmtDay(s.created_at) : `Left ${fmtDay(s.unsubscribed_at)}`}</span>
                       </span>
                     </span>
                     {s.status !== 'subscribed' && <StatusChip status={s.status} />}
-                    {canWrite && (s.status === 'subscribed' ? (
-                      <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => remove(s)}>Remove</button>
-                    ) : (
-                      <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => resubscribe(s)}>Re-subscribe</button>
-                    ))}
+                    {canWrite && s.status === 'subscribed' && removing !== s.id && (
+                      <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => setRemoving(s.id)}>Remove</button>
+                    )}
                   </div>
+                  {removing === s.id && (
+                    <div className="ot-confirm" role="group" aria-label="Confirm unsubscribe">
+                      <span>Unsubscribe? Only they can rejoin.</span>
+                      <button type="button" className="btn btn-quiet ot-btn-tap" disabled={act.busy} onClick={() => remove(s)}>Yes</button>
+                      <button type="button" className="btn btn-quiet ot-btn-tap" onClick={() => setRemoving(null)}>No</button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

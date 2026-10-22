@@ -363,6 +363,9 @@ alter table pledges add column if not exists last_received_on date;
 -- the pledge and a restore can close it again.
 alter table gifts add column if not exists pledge_id uuid;
 create index if not exists gifts_pledge_idx on gifts (workspace_id, pledge_id) where pledge_id is not null;
+-- When an address left the newsletter list (its own link, or the desk's
+-- Remove). Once off, only the person can rejoin — the desk's Add says so.
+alter table subscriptions add column if not exists unsubscribed_at timestamptz;
 -- Background jobs (lib/jobs.js): ladder steps, A/B winners, retries.
 create table if not exists jobs (
   id uuid primary key,

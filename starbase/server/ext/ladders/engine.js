@@ -15,17 +15,28 @@
 // status no longer match (the ladder was turned off, the person was taken
 // off, a duplicate) does nothing.
 //
-// Email steps skip people with no email, who unsubscribed, or are tagged
-// do-not-contact — the reason goes in the run's log. With email not
-// connected the run waits ("Waiting — email isn't connected") and a fresh job
-// looks again every hour; nothing pretends to send, and no retry attempts
-// are spent. A provider refusal is tried again hourly, three times in all,
-// then logged as failed and the run moves on.
+// Email steps go only to people who said yes to email: an address on the
+// newsletter list as subscribed (every email opt-in — the newsletter page,
+// "Email me updates" on a petition, the website's form — puts it there).
+// Everyone else is skipped, and the reason goes in the run's log: no email,
+// unsubscribed, do-not-email, do-not-contact, or "didn't ask for email" (a
+// signer who left the box unticked, a voter rated 1 at the door). With
+// email not connected the run waits ("Waiting — email isn't connected") and
+// a fresh job looks again every hour; nothing pretends to send, and no retry
+// attempts are spent. A provider refusal is tried again hourly, three times
+// in all, then logged as failed and the run moves on.
+//
+// Sending is two writes around the provider call: (1) the step records
+// 'sending' and commits; (2) the email goes, outside any transaction, keyed
+// by the run's token and step so the provider sends it once; (3) a second
+// write records what the provider said and moves the run on. A job retried
+// after (1) finds 'sending' and never sends again by itself: the log says
+// "not sure it went" and the run moves on.
 import { newId, runAction } from '../../lib/events.js';
 import { enqueueJob, cancelJobs } from '../../lib/jobs.js';
-import { emailConfigured, sendEmail } from '../../lib/notify.js';
+import { emailConfigured, sendEmail, unsubscribeHeaders } from '../../lib/notify.js';
 import {
-  parseJson, tagsOf, sameTag, isDnc, fillIn, waitMs,
+  parseJson, tagsOf, sameTag, isDnc, noEmail, fillIn, waitMs,
 } from './shape.js';
 
 export const JOB = 'ladder.step';
@@ -315,6 +326,26 @@ const next = async (c) => {
   return { next: n };
 };
 
+// Why an email step won't email this person, or null: it goes only to an
+// address on the list as subscribed.
+const skipReason = async (tx, ws, person) => {
+  if (!person.email) return 'no_email';
+  const sub = (await tx.query(
+    'select status from subscriptions where workspace_id = $1 and email = $2', [ws, lower(person.email)],
+  )).rows[0];
+  if (sub?.status === 'unsubscribed') return 'unsubscribed';
+  if (noEmail(person)) return 'do_not_email';
+  if (isDnc(person)) return 'do_not_contact';
+  if (sub?.status !== 'subscribed') return 'no_consent';
+  return null;
+};
+
+// The same step again in `ms` (email not connected, a provider refusal).
+const again = (c, ms, extra = {}) => enqueueJob(c.tx, {
+  workspaceId: c.run.workspace_id, kind: JOB, runAt: iso(Date.now() + ms),
+  payload: { run_id: c.run.id, ladder_id: c.run.ladder_id, step: c.step, token: c.run.token, ...extra },
+});
+
 const STEPS = {
   wait: async (c, s) => {
     const until = Date.now() + waitMs(s);
@@ -325,52 +356,46 @@ const STEPS = {
 
   email: async (c, s, attempt) => {
     const { tx, run, person } = c;
-    const sub = person.email ? (await tx.query(
-      'select id, status from subscriptions where workspace_id = $1 and email = $2',
-      [run.workspace_id, lower(person.email)],
-    )).rows[0] : null;
-    const skip = !person.email ? 'no_email'
-      : sub?.status === 'unsubscribed' ? 'unsubscribed'
-      : isDnc(person) ? 'do_not_contact' : null;
+    // Handed to the provider by an earlier try that never recorded the
+    // answer: it may have gone. Never again by itself.
+    if (run.wait === 'sending') {
+      await tx.query('update ladder_runs set wait = null where id = $1', [run.id]);
+      await record(c, { kind: 'email', result: 'unsure' });
+      return next(c);
+    }
+    const skip = await skipReason(tx, run.workspace_id, person);
     if (skip) {
       await record(c, { kind: 'email', result: 'skipped', reason: skip });
       return next(c);
     }
-    const again = (ms, extra = {}) => enqueueJob(tx, {
-      workspaceId: run.workspace_id, kind: JOB, runAt: iso(Date.now() + ms),
-      payload: { run_id: run.id, ladder_id: run.ladder_id, step: c.step, token: run.token, ...extra },
-    });
     if (!emailConfigured()) {
       // Logged once, when the run starts waiting; the hourly looks write nothing.
       if (run.wait !== 'email') {
         await tx.query("update ladder_runs set wait = 'email', next_at = null where id = $1", [run.id]);
         await record(c, { kind: 'email', result: 'waiting', reason: 'email_not_connected' });
       }
-      await again(HOUR);
+      await again(c, HOUR);
       return { waiting: 'email' };
     }
     const base = (process.env.STARBASE_PUBLIC_URL || c.ladder.public_url || '').replace(/\/$/, '');
     const fill = { person, campaign: c.ladder.campaign };
-    // Every ladder email says who sent it and carries the reader's own
-    // one-click unsubscribe (it takes them off the newsletter too).
-    const text = `${fillIn(s.body, fill)}\n\n—\nSent by ${c.ladder.campaign}.\nUnsubscribe: ${base}/lu/${run.id}`;
-    const res = await sendEmail({ to: person.email, subject: fillIn(s.subject, fill), text });
-    if (res.status === 'sent') {
-      await tx.query('update ladder_runs set wait = null where id = $1', [run.id]);
-      await record(c, { kind: 'email', result: 'sent' });
-      return next(c);
-    }
-    const tries = attempt + 1;
-    const detail = String(res.detail || res.status).slice(0, 200);
-    if (tries < EMAIL_TRIES) {
-      await tx.query("update ladder_runs set wait = 'retry' where id = $1", [run.id]);
-      await record(c, { kind: 'email', result: 'failed', reason: 'will_retry', detail, tries });
-      await again(HOUR, { attempt: tries });
-      return { failed: tries };
-    }
-    await tx.query('update ladder_runs set wait = null where id = $1', [run.id]);
-    await record(c, { kind: 'email', result: 'failed', reason: 'gave_up', detail, tries });
-    return next(c);
+    const unsubscribe = `${base}/lu/${run.id}`;
+    // 1. Claim the send: 'sending', committed before the provider is called.
+    await tx.query("update ladder_runs set wait = 'sending', updated_at = now() where id = $1", [run.id]);
+    run.wait = 'sending';
+    await record(c, { kind: 'email', result: 'sending' });
+    return {
+      send: {
+        run_id: run.id, step: c.step, token: String(run.token), attempt,
+        to: person.email,
+        subject: fillIn(s.subject, fill),
+        // Every ladder email says who sent it and carries the reader's own
+        // unsubscribe (it takes them off the newsletter too), in the text and
+        // as the mail app's own Unsubscribe button.
+        text: `${fillIn(s.body, fill)}\n\n—\nSent by ${c.ladder.campaign}.\nUnsubscribe: ${unsubscribe}`,
+        headers: unsubscribeHeaders(unsubscribe),
+      },
+    };
   },
 
   tag: async (c, s) => {
@@ -419,8 +444,57 @@ const STEPS = {
   stop: async (c) => finish(c, 'stopped'),
 };
 
+const act = (db, ws, fn) => runAction(db, { workspaceId: ws, actorId: null, action: STEP_ACTION }, fn);
+
+// 2 + 3. The email claimed above goes now, outside any transaction; then the
+// second write says what the provider answered and moves the run on.
+const deliver = async (db, ws, send) => {
+  const res = await sendEmail({
+    to: send.to, subject: send.subject, text: send.text, headers: send.headers,
+    idempotencyKey: `ladder-${send.token}-${send.step}`,
+  });
+  await act(db, ws, async (tx, emit) => {
+    const run = (await tx.query(
+      'select * from ladder_runs where id = $1 and workspace_id = $2 for update', [send.run_id, ws],
+    )).rows[0];
+    if (!run) return { gone: true };
+    const ladder = (await tx.query('select steps from ladders where id = $1 and workspace_id = $2', [run.ladder_id, ws])).rows[0];
+    const c = { tx, emit, run, steps: parseJson(ladder?.steps, []), step: send.step };
+    const sent = res.status === 'sent';
+    const unsure = !sent && res.status === 'failed' && res.unknown;
+    const detail = sent ? undefined : String(res.detail || res.status).slice(0, 200);
+    const tries = send.attempt + 1;
+    const retry = !sent && !unsure && tries < EMAIL_TRIES;
+    const entry = { kind: 'email', ...(sent ? { result: 'sent' }
+      : unsure ? { result: 'unsure', detail }
+      : { result: 'failed', reason: retry ? 'will_retry' : 'gave_up', detail, tries }) };
+    // The run moved on meanwhile (taken off, deleted, or a retry already
+    // said "not sure it went"): say what happened, change nothing else.
+    if (run.wait !== 'sending' || Number(run.step) !== send.step) {
+      await record(c, entry);
+      return { late: true };
+    }
+    await tx.query('update ladder_runs set wait = $2, updated_at = now() where id = $1', [run.id, retry ? 'retry' : null]);
+    await record(c, entry);
+    if (run.status === 'paused') {
+      // Turned off mid-send: it holds its place after this step (a retry
+      // waits as 'retry' and runs again when the ladder is back on).
+      if (!retry) await tx.query('update ladder_runs set step = $2 where id = $1', [run.id, send.step + 1]);
+      return { paused: true };
+    }
+    if (run.status !== 'active') return { done: true };
+    if (retry) {
+      await again(c, HOUR, { attempt: tries });
+      return { failed: tries };
+    }
+    // On to the next step; its new token retires any other job for this one.
+    return next(c);
+  });
+};
+
 export const runStepJob = async (db, job) => {
-  await runAction(db, { workspaceId: job.workspace_id, actorId: null, action: STEP_ACTION }, async (tx, emit) => {
+  const ws = job.workspace_id;
+  const { result } = await act(db, ws, async (tx, emit) => {
     const loaded = await loadStepContext(tx, job);
     if (!loaded) return { stale: true };
     const c = { tx, emit, ...loaded };
@@ -431,4 +505,5 @@ export const runStepJob = async (db, job) => {
     if (!fn) return finish(c, 'unknown_step');
     return fn(c, s, Number(job.payload?.attempt) || 0);
   });
+  if (result?.send) await deliver(db, ws, result.send);
 };

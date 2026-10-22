@@ -19,8 +19,10 @@ export const textConfigured = () =>
 // up on: 'failed' with unknown: true — it may or may not have sent it — so a
 // hung connection never holds a send (or anything waiting on it) for long.
 // unknown is set only when the provider never answered.
+// `headers` is optional: extra mail headers (List-Unsubscribe and
+// List-Unsubscribe-Post on newsletters and ladder emails).
 const emailTimeoutMs = () => Number(process.env.STARBASE_EMAIL_TIMEOUT_MS) || 15_000;
-export const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
+export const sendEmail = async ({ to, subject, text, html, idempotencyKey, headers }) => {
   if (!emailConfigured()) {
     return { sent: false, status: 'queued', detail: 'no email provider configured (set RESEND_API_KEY)' };
   }
@@ -38,6 +40,7 @@ export const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => 
         subject,
         text,
         ...(html ? { html } : {}),
+        ...(headers && Object.keys(headers).length ? { headers } : {}),
       }),
       signal: AbortSignal.timeout(emailTimeoutMs()),
     });
@@ -97,3 +100,10 @@ export const shiftMessage = (shift, workspaceName, timeZone = 'America/Vancouver
   ].filter(Boolean);
   return lines.join('\n');
 };
+
+// The mail headers that give a mail app its own Unsubscribe button: one tap
+// sends a POST to `url` (RFC 8058). Only for a full https/http address — a
+// link without the campaign's address would go nowhere.
+export const unsubscribeHeaders = (url) => (/^https?:\/\/[^/]/i.test(String(url || ''))
+  ? { 'List-Unsubscribe': `<${url}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+  : undefined);

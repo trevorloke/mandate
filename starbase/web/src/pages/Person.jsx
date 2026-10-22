@@ -141,6 +141,12 @@ function Header({ person, donor, me, desk, onLog, contacted, level }) {
   const email = desk && person.email; // volunteers phone and knock; email is desk work
   const tiles = Boolean(person.phone || email);
   const located = person.lat != null && person.lng != null;
+  // The donor tier chip already says Donor: the level chip never repeats it
+  // ("Donor · Volunteer" → "Volunteer"; just "Donor" → no level chip).
+  const tierShown = Boolean(donor?.tier && TIER_LABEL[donor.tier]);
+  const shownLevel = level && tierShown && level.code === 'doer'
+    ? { ...level, label: level.label.split(' · ').filter((w) => w !== 'Donor').join(' · ') }
+    : level;
   return (
     <header className="pf-head">
       <BackLink desk={desk} />
@@ -156,9 +162,9 @@ function Header({ person, donor, me, desk, onLog, contacted, level }) {
           </span>
         )}
         {isDnc(person) && <span className="chip chip-danger">Do not contact</span>}
-        {desk && <EngagementChip level={level} />}
+        {desk && shownLevel?.label && <EngagementChip level={shownLevel} />}
         {/* donor is null for volunteers (the server hides money from them) */}
-        {donor?.tier && TIER_LABEL[donor.tier] && (
+        {tierShown && (
           <span className={TIER_CLASS[donor.tier]} title={`${fmtMoney(donor.yearCents)} this year${Number(donor.monthlyCents) ? ` · ${fmtMoney(donor.monthlyCents)}/mo` : ''}`}>
             {TIER_LABEL[donor.tier]}
           </span>

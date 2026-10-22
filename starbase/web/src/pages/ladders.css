@@ -22,6 +22,8 @@
 .lad-note a { color: inherit; font-weight: 600; }
 .lad-chev { margin-left: auto; font-size: 22px; line-height: 1; color: var(--text-3); }
 .lad-sec { margin-top: var(--s-2); }
+.lad-title { min-width: 0; }
+.lad-sub { margin: 2px 0 0; font-size: 15px; color: var(--text-3); }
 
 /* List: the follow-ups row on top, quiet links at the foot */
 .lad-fu-link,
@@ -106,6 +108,8 @@
 .lad-add { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
 .btn.lad-add__btn { flex: 1 1 7.5em; }
 .card.lad-new-step { margin-top: var(--s-3); }
+.lad-tokens { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0 0 var(--s-2); }
+.lad-step__who { overflow-wrap: anywhere; }
 .card.lad-new-step > .eyebrow { display: block; margin-bottom: var(--s-3); }
 .lad-log { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
 .lad-log__when { font-size: 12px; color: var(--text-3); white-space: nowrap; }

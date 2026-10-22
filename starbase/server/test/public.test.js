@@ -106,7 +106,14 @@ test('newsletter signup (page + bridge) is logged as public.subscribe; the thank
 
 test('unsubscribe link is logged as public.unsubscribe; a broken link gets a styled page, never a 500', async () => {
   const s = (await mgr.get('/api/subscriptions')).json.subscriptions.find((x) => x.email === mail('reader'));
-  const un = await pub('GET', `/u/${s.id}`);
+  // Opening the link only asks: mail scanners open links by themselves.
+  const ask = await pub('GET', `/u/${s.id}`);
+  assert.equal(ask.status, 200);
+  assert.match(ask.text, new RegExp(`Unsubscribe from ${wsName}\\?`));
+  assert.match(ask.text, new RegExp(`<form method="post" action="/u/${s.id}"><button type="submit">Unsubscribe</button></form>`));
+  assert.equal((await fresh()).length, 0, 'opening the link writes nothing');
+  assert.equal((await mgr.get('/api/subscriptions')).json.subscriptions.find((x) => x.id === s.id).status, 'subscribed');
+  const un = await pub('POST', `/u/${s.id}`, new URLSearchParams({ 'List-Unsubscribe': 'One-Click' }));
   assert.equal(un.status, 200);
   assert.match(un.text, /Unsubscribed\./);
   assert.ok(un.text.includes(wsName));
@@ -115,13 +122,26 @@ test('unsubscribe link is logged as public.unsubscribe; a broken link gets a sty
     [['subscription', s.id, 'update', 'unsubscribed', null]]);
   assert.equal((await mgr.get('/api/subscriptions')).json.subscriptions.find((x) => x.id === s.id).status, 'unsubscribed');
 
-  // A second click: still true ("Unsubscribed."), nothing new written.
-  const twice = await pub('GET', `/u/${s.id}`);
+  // A second click: still true ("Unsubscribed."), nothing new written; the
+  // link now says so without asking.
+  const twice = await pub('POST', `/u/${s.id}`, new URLSearchParams());
   assert.equal(twice.status, 200);
   assert.match(twice.text, /Unsubscribed\./);
+  assert.match((await pub('GET', `/u/${s.id}`)).text, /Unsubscribed\./);
   assert.equal((await fresh()).length, 0);
+  // Off the list: the desk can't put them back — only they can.
+  const add = await mgr.action('subscription.add', { email: mail('reader') });
+  assert.equal(add.status, 409);
+  assert.match(add.json.error, /^Unsubscribed on [A-Z][a-z]{2} \d{1,2} — only they can rejoin \(signup page\)$/);
+  assert.equal((await mgr.get('/api/subscriptions')).json.subscriptions.find((x) => x.id === s.id).status, 'unsubscribed');
+  assert.equal((await fresh()).length, 0, 'a refused add writes nothing');
 
   for (const bad of ['not-a-uuid', randomUUID(), "1' or '1'='1"]) {
+    for (const method of ['GET', 'POST']) {
+      const r = await pub(method, `/u/${encodeURIComponent(bad)}`, method === 'POST' ? new URLSearchParams() : undefined);
+      assert.equal(r.status, 404, `${method} ${bad}`);
+      assert.match(r.text, /This unsubscribe link isn't valid — reply to the email to be removed\./, bad);
+    }
     const r = await pub('GET', `/u/${encodeURIComponent(bad)}`);
     assert.equal(r.status, 404, bad);
     assert.match(r.text, /This unsubscribe link isn't valid — reply to the email to be removed\./, bad);

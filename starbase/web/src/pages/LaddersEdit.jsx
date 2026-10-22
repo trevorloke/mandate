@@ -3,17 +3,20 @@
 //     quiet "Turn off" — everyone holds their place until it's back on.
 //   Starts when: one line; Change opens the picker in place.
 //   Steps: numbered cards (Wait · Email · Tag · Follow-up; Remove a tag and
-//     Stop under More). A card opens in place to edit, move or remove it.
+//     Stop under "Other steps"). A card opens in place to edit, move or
+//     remove it. An email card says who it goes to: only people who said yes
+//     to email. "+ First name" / "+ Campaign" fill in; a {…} that wouldn't
+//     fill in is flagged before saving.
 //   People: each person and where they are ("Waiting until Fri, Oct 24",
 //     "Waiting — email isn't connected"); a row opens on what each step did,
 //     with Take off. Finished people fold away.
 //   More: rename, "Let people go through again", Delete.
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action, apiGet } from '../api.js';
 import {
-  CONNECT_TO, STEP_KINDS, TriggerPicker, countsLine, fmtWhen, logLine, stepLine, triggerLine, whereLine,
+  CONNECT_TO, OTHER_STEPS, STEP_KINDS, TriggerPicker, countsLine, fmtWhen, logLine, stepLine, triggerLine, whereLine,
 } from '../components/LaddersBits.jsx';
 import './shifts.css';
 import './ladders.css';
@@ -28,11 +31,28 @@ const BLANK = {
 };
 const doesSomething = (steps) => steps.some((s) => s.kind !== 'wait' && s.kind !== 'stop');
 
+// What fills in, and the buttons that put it in.
+const TOKENS = [
+  { label: '+ First name', token: '{{first_name}}' },
+  { label: '+ Campaign', token: '{{campaign}}' },
+];
+const FILLS = /\{\{\s*(first_name|campaign)\s*\}\}/gi;
+// "{first_name} won't fill in — use + First name": anything in braces that
+// isn't one of the two would go out as typed.
+const unfilled = (text) => {
+  const rest = String(text || '').replace(FILLS, '');
+  const m = rest.match(/\{+[^{}\n]{0,40}\}*/) || rest.match(/[^\s{}]{0,40}\}+/);
+  if (!m) return null;
+  const use = /camp/i.test(m[0]) ? '+ Campaign' : /name/i.test(m[0]) ? '+ First name' : '+ First name or + Campaign';
+  return `${m[0].trim()} won’t fill in — use ${use}`;
+};
+
 // What a step needs before it can be saved.
 const missing = (s) => {
   if (s.kind === 'wait' && !(Number(s.n) >= 1)) return 'How long?';
   if (s.kind === 'email' && !s.subject.trim()) return 'Add a subject';
   if (s.kind === 'email' && !s.body.trim()) return 'Add a message';
+  if (s.kind === 'email') { const u = unfilled(s.subject) || unfilled(s.body); if (u) return u; }
   if ((s.kind === 'tag' || s.kind === 'untag') && !s.tag.trim()) return 'Add a tag';
   if (s.kind === 'followup' && !s.text.trim()) return 'Say what to do';
   return null;
@@ -44,6 +64,47 @@ const clean = (s) => {
   if (s.kind === 'followup') return { kind: 'followup', text: s.text.trim() };
   return { kind: 'stop' };
 };
+
+// Subject and message, and the two fill-in buttons: a tap puts the fill-in
+// where the cursor was (in whichever of the two was last touched).
+function EmailFields({ s, set, idp }) {
+  const subject = useRef(null);
+  const body = useRef(null);
+  const last = useRef('body');
+  const insert = (token) => {
+    const key = last.current;
+    const el = (key === 'subject' ? subject : body).current;
+    const val = s[key] || '';
+    const at = typeof el?.selectionStart === 'number' ? el.selectionStart : val.length;
+    const end = typeof el?.selectionEnd === 'number' ? el.selectionEnd : at;
+    set({ ...s, [key]: val.slice(0, at) + token + val.slice(end) });
+    const caret = at + token.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange?.(caret, caret); });
+  };
+  return (
+    <>
+      <div className="field">
+        <label htmlFor={`${idp}-subj`}>Subject</label>
+        <input id={`${idp}-subj`} ref={subject} className="input lad-input" maxLength={200} autoComplete="off"
+          placeholder="Thanks for signing" value={s.subject}
+          onFocus={() => { last.current = 'subject'; }} onChange={(e) => set({ ...s, subject: e.target.value })} />
+      </div>
+      <div className="field">
+        <label htmlFor={`${idp}-body`}>Message</label>
+        <textarea id={`${idp}-body`} ref={body} className="input lad-input lad-body" rows={6} maxLength={20000}
+          placeholder="Thank you for signing." value={s.body}
+          onFocus={() => { last.current = 'body'; }} onChange={(e) => set({ ...s, body: e.target.value })} />
+      </div>
+      <div className="lad-tokens" role="group" aria-label="Fill in">
+        {TOKENS.map((t) => (
+          <button key={t.token} type="button" className="btn btn-quiet ops-tap lad-token"
+            onMouseDown={(e) => e.preventDefault()} onClick={() => insert(t.token)}>{t.label}</button>
+        ))}
+      </div>
+      <p className="lad-hint">An unsubscribe link is added.</p>
+    </>
+  );
+}
 
 function StepFields({ s, set, idp, tags }) {
   if (s.kind === 'wait') {
@@ -62,24 +123,7 @@ function StepFields({ s, set, idp, tags }) {
       </div>
     );
   }
-  if (s.kind === 'email') {
-    return (
-      <>
-        <div className="field">
-          <label htmlFor={`${idp}-subj`}>Subject</label>
-          <input id={`${idp}-subj`} className="input lad-input" maxLength={200} autoComplete="off"
-            placeholder="Thanks, {{first_name}}" value={s.subject} onChange={(e) => set({ ...s, subject: e.target.value })} />
-        </div>
-        <div className="field">
-          <label htmlFor={`${idp}-body`}>Message</label>
-          <textarea id={`${idp}-body`} className="input lad-input lad-body" rows={6} maxLength={20000}
-            placeholder="Hi {{first_name}}, thank you for signing. — {{campaign}}" value={s.body}
-            onChange={(e) => set({ ...s, body: e.target.value })} />
-        </div>
-        <p className="lad-hint">{'{{first_name}}'} and {'{{campaign}}'} fill in. An unsubscribe link is added.</p>
-      </>
-    );
-  }
+  if (s.kind === 'email') return <EmailFields s={s} set={set} idp={idp} />;
   if (s.kind === 'tag' || s.kind === 'untag') {
     return (
       <div className="field">
@@ -126,13 +170,18 @@ function StepEditor({ initial, saveLabel, onSave, onCancel, busy, tags, extra })
   );
 }
 
-function StepCard({ step, index, count, open, onToggle, onSave, onRemove, onMove, busy, tags }) {
+function StepCard({ step, index, count, open, onToggle, onSave, onRemove, onMove, busy, tags, emailYes }) {
   const [confirm, setConfirm] = useState(false);
   return (
     <li className="ops-item lad-step" data-open={open || undefined}>
       <button type="button" className="ops-row" aria-expanded={open} onClick={onToggle}>
         <span className="lad-step__n" aria-hidden="true">{index + 1}</span>
-        <span className="ops-row__main"><span className="ops-row__name lad-step__line">{stepLine(step)}</span></span>
+        <span className="ops-row__main">
+          <span className="ops-row__name lad-step__line">{stepLine(step)}</span>
+          {step.kind === 'email' && (
+            <span className="ops-row__sub lad-step__who">Goes only to people who said yes to email · {emailYes ?? '…'}</span>
+          )}
+        </span>
       </button>
       {open && (
         <div className="ops-body">
@@ -176,7 +225,7 @@ function AddStep({ onAdd, busy, tags }) {
           + {k.label}
         </button>
       ))}
-      {!more && <button type="button" className="btn btn-quiet ops-tap" onClick={() => setMore(true)}>More</button>}
+      {!more && <button type="button" className="btn btn-quiet ops-tap" onClick={() => setMore(true)}>{OTHER_STEPS}</button>}
     </div>
   );
 }
@@ -364,16 +413,17 @@ export default function LaddersEdit() {
       </div>
     );
   }
-  const { ladder: l, people, emailConfigured, options } = q.data;
+  const { ladder: l, people, emailConfigured, emailYes, options } = q.data;
   const steps = l.steps;
   const saveSteps = (next) => run('ladder.update', { id: l.id, steps: next });
   const hasEmail = steps.some((s) => s.kind === 'email');
   const ready = doesSomething(steps);
 
+  // The chip says On / Off; a line only when people were picked up or paused.
   const turnOn = () => run('ladder.setActive', { id: l.id, active: true },
-    (r) => (r.resumed ? `On · ${r.resumed} picked up where they were` : 'On'));
+    (r) => (r.resumed ? `On · ${r.resumed} picked up where they were` : null));
   const turnOff = () => run('ladder.setActive', { id: l.id, active: false },
-    (r) => (r.paused ? `Off · ${r.paused} paused in place` : 'Off'));
+    (r) => (r.paused ? `Off · ${r.paused} paused in place` : null));
 
   return (
     <div className="ops-page lad-page">
@@ -407,6 +457,7 @@ export default function LaddersEdit() {
           <ol className="ops-rows lad-steps">
             {steps.map((s, i) => (
               <StepCard key={`${i}-${s.kind}-${stepLine(s)}`} step={s} index={i} count={steps.length} busy={busy} tags={options.tags}
+                emailYes={emailYes}
                 open={openStep === i} onToggle={() => setOpenStep(openStep === i ? null : i)}
                 onSave={async (next) => { if (await saveSteps(steps.map((x, j) => (j === i ? next : x)))) setOpenStep(null); }}
                 onRemove={async () => { if (await saveSteps(steps.filter((_, j) => j !== i))) setOpenStep(null); }}

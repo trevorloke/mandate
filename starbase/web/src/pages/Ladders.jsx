@@ -2,7 +2,8 @@
 // name, what starts it, "N in progress · N finished", On / Off. One yellow
 // "New ladder" (a name and what starts it, then straight to its steps).
 // Open follow-ups sit on top as one row; how far people have come
-// (Contact → … → Leader) folds away under "Engagement".
+// (Contact → … → Leader) folds away under "How involved people are". Under
+// the title, the plain words for what a ladder is (as Outreach's link says).
 //   /ladders/:id   the builder (LaddersEdit.jsx)
 //   /follow-ups    the follow-up list (LaddersFollowups.jsx)
 // Desk only (App.jsx guards it; the server refuses volunteers these reads).
@@ -101,7 +102,10 @@ export default function Ladders() {
   return (
     <div className="ops-page lad-page">
       <div className="ops-head">
-        <h1>Ladders</h1>
+        <div className="lad-title">
+          <h1>Ladders</h1>
+          <p className="lad-sub">Automatic emails &amp; follow-ups</p>
+        </div>
         {!showNew && (
           <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>New ladder</button>
         )}
@@ -127,7 +131,7 @@ export default function Ladders() {
         <div className="ops-foot">
           <button type="button" className="ops-more disclose" aria-expanded={showLevels} aria-controls="lad-levels"
             onClick={() => setShowLevels((v) => !v)}>
-            Engagement
+            How involved people are
           </button>
           {showLevels && (
             <div id="lad-levels" className="ops-more-body">

@@ -519,19 +519,38 @@ export const FIELD_ACTIONS = {
       name: z.string().max(300).nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
+      const email = input.email.toLowerCase();
+      // Someone who left the list — by their own unsubscribe link, a ladder
+      // email's, or the desk's Remove — is off-limits to the desk: only they
+      // can rejoin, from the signup page.
+      const prev = (await tx.query(
+        'select status, unsubscribed_at from subscriptions where workspace_id = $1 and email = $2', [ctx.workspaceId, email],
+      )).rows[0];
+      const optedOut = prev?.status === 'unsubscribed' || (await tx.query(
+        `select 1 from persons where workspace_id = $1 and lower(email) = $2 and deleted_at is null
+           and tags @> '"do-not-email"'::jsonb limit 1`,
+        [ctx.workspaceId, email],
+      )).rows.length > 0;
+      if (optedOut) {
+        const tz = ctx.workspace?.settings?.tz || 'America/Vancouver';
+        const on = prev?.unsubscribed_at
+          ? ` on ${new Date(prev.unsubscribed_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', timeZone: tz })}`
+          : '';
+        throw httpError(409, `Unsubscribed${on} — only they can rejoin (signup page)`);
+      }
       const id = newId();
       await tx.query(
         `insert into subscriptions (id, workspace_id, email, name, status, source)
          values ($1, $2, $3, $4, 'subscribed', 'manual')
          on conflict (workspace_id, email)
-         do update set status = 'subscribed', name = coalesce(excluded.name, subscriptions.name)`,
-        [id, ctx.workspaceId, input.email.toLowerCase(), input.name || null],
+         do update set name = coalesce(excluded.name, subscriptions.name)`,
+        [id, ctx.workspaceId, email, input.name || null],
       );
       const row = (await tx.query(
         'select id from subscriptions where workspace_id = $1 and email = $2',
-        [ctx.workspaceId, input.email.toLowerCase()],
+        [ctx.workspaceId, email],
       )).rows[0];
-      emit('subscription', row.id, 'create', { email: input.email.toLowerCase(), name: input.name });
+      emit('subscription', row.id, 'create', { email, name: input.name });
       return { id: row.id };
     },
   },
@@ -541,7 +560,8 @@ export const FIELD_ACTIONS = {
     input: z.object({ id: uuid() }),
     handler: async (tx, ctx, input, emit) => {
       const n = await tx.query(
-        `update subscriptions set status = 'unsubscribed' where id = $1 and workspace_id = $2`,
+        `update subscriptions set status = 'unsubscribed', unsubscribed_at = coalesce(unsubscribed_at, now())
+         where id = $1 and workspace_id = $2`,
         [input.id, ctx.workspaceId],
       );
       if (n.affectedRows === 0) throw httpError(404, 'subscription not found');

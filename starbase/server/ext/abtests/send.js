@@ -19,7 +19,7 @@
 // reaches it once it is 10 minutes old, with the same key.
 import { z } from 'zod';
 import { randomBytes, randomInt } from 'node:crypto';
-import { sendEmail } from '../../lib/notify.js';
+import { sendEmail, unsubscribeHeaders } from '../../lib/notify.js';
 import { enqueueJob } from '../../lib/jobs.js';
 
 export const AB_MIN = 50;
@@ -184,6 +184,8 @@ export const blastHtml = (ctx, kind, body, subscriptionId, token, links) => {
 export const composeBlast = (ctx, { kind, body, subscriptionId, token, links }) => ({
   text: blastText(ctx, kind, body, subscriptionId),
   html: blastHtml(ctx, kind, body, subscriptionId, token, links),
+  // A newsletter's mail-app Unsubscribe button: the same /u link, by POST.
+  headers: kind === 'newsletter' && subscriptionId ? unsubscribeHeaders(`${ctx.publicUrl || ''}/u/${subscriptionId}`) : undefined,
 });
 
 // Group A gets subject A, group B subject B, the rest the winner's.

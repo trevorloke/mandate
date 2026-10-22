@@ -1,7 +1,9 @@
 // Ladders of engagement: a trigger puts someone on a ladder once, each step
 // runs as a job on the hash chain (wait → email → tag → follow-up), email
-// steps skip who unsubscribed / has no email / is do-not-contact, wait while
-// email isn't connected (without spending retries) and send once it is;
+// steps go only to people who said yes to email (skipping who unsubscribed,
+// never asked, has no email, is do-not-contact), wait while email isn't
+// connected (without spending retries) and send once it is — once, even when
+// the write after the send fails; the unsubscribe link asks before it acts;
 // turning a ladder off holds everyone's place and on resumes it. Volunteers
 // can read none of it. Engagement levels follow what people did.
 import { test, before, after } from 'node:test';
@@ -9,6 +11,7 @@ import assert from 'node:assert/strict';
 import { freshDb, Client } from './helpers.js';
 import { app } from '../index.js';
 import { runDueJobs } from '../lib/jobs.js';
+import { onHook } from '../lib/hooks.js';
 
 const tag = Math.random().toString(36).slice(2, 8);
 const mail = (who) => `${who}.lad.${tag}@example.org`;
@@ -56,7 +59,7 @@ const withEmail = async (fn, { fail = () => false } = {}) => {
     if (String(url).startsWith('https://api.resend.com')) {
       const m = JSON.parse(init.body);
       if (fail(m.to[0])) return new Response('provider says no', { status: 500 });
-      sent.push(m);
+      sent.push({ ...m, key: init.headers?.['Idempotency-Key'] || null });
       return new Response(JSON.stringify({ id: 'msg' }), { status: 200 });
     }
     return realFetch(url, init);
@@ -123,7 +126,7 @@ test('petition signed → on the ladder once → wait → email → tag → foll
   assert.equal((await ladder(thanks.id)).people.length, 0, 'nobody is put on a ladder that is off');
 
   await turnOn(thanks.id);
-  const sign = await pub('POST', `/p/${slug}/fix-72-${tag}`, new URLSearchParams({ name: 'Ana Souza', email: mail('ana') }));
+  const sign = await pub('POST', `/p/${slug}/fix-72-${tag}`, new URLSearchParams({ name: 'Ana Souza', email: mail('ana'), subscribe: '1' }));
   assert.equal(sign.status, 200);
   const ana = await personByEmail(mail('ana'));
   let run = await runOf(thanks.id, ana.id);
@@ -158,6 +161,15 @@ test('petition signed → on the ladder once → wait → email → tag → foll
     assert.match(m.text, new RegExp(`^Thank you for signing\\. — ${wsName}`));
     assert.ok(m.text.includes(`Sent by ${wsName}.`), 'says who sent it');
     assert.ok(m.text.trimEnd().endsWith(`/lu/${anaRun}`), 'ends with the reader’s own unsubscribe link');
+    // The mail app's own Unsubscribe button: the same link, one-click POST.
+    assert.match(m.headers['List-Unsubscribe'], new RegExp(`^<https?://[^>]+/lu/${anaRun}>$`));
+    assert.equal(m.headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+    const stepJob = (await db.query(
+      `select payload->>'token' as token from jobs where workspace_id = $1 and kind = 'ladder.step'
+         and payload->>'run_id' = $2 and payload->>'step' = '1'`, [ws, anaRun],
+    )).rows;
+    assert.equal(stepJob.length, 1);
+    assert.equal(m.key, `ladder-${stepJob[0].token}-1`, 'keyed by the run token and step');
   });
 
   run = await runOf(thanks.id, ana.id);
@@ -206,15 +218,26 @@ test('once per ladder — again only when the ladder allows it', async () => {
   await mgr.action('ladder.update', { id: thanks.id, reentry: false });
 });
 
-test('the unsubscribe link takes them off everywhere; email steps skip unsubscribed, no email, do-not-contact', async () => {
-  const page = await pub('GET', `/lu/${anaRun}`);
+test('the unsubscribe link asks, then takes them off everywhere; email steps go only to who said yes to email', async () => {
+  // Opening the link (a mail scanner does) only asks.
+  const ask = await pub('GET', `/lu/${anaRun}`);
+  assert.equal(ask.status, 200);
+  assert.match(ask.text, new RegExp(`Unsubscribe from ${wsName}\\?`));
+  assert.ok(ask.text.includes(`<form method="post" action="/lu/${anaRun}"><button type="submit">Unsubscribe</button></form>`));
+  assert.equal((await mgr.get('/api/subscriptions')).json.subscriptions.find((s) => s.email === mail('ana')).status, 'subscribed',
+    'opening the link unsubscribes no one');
+  // The button (or a mail app's one-click unsubscribe) does it.
+  const page = await pub('POST', `/lu/${anaRun}`, new URLSearchParams({ 'List-Unsubscribe': 'One-Click' }));
   assert.equal(page.status, 200);
   assert.match(page.text, /Unsubscribed\./);
   assert.match(page.text, new RegExp(`newsletters or automatic emails from ${wsName}`));
-  const again = await pub('GET', `/lu/${anaRun}`);
+  const again = await pub('POST', `/lu/${anaRun}`, new URLSearchParams());
   assert.equal(again.status, 200, 'a second click is fine');
-  assert.equal((await pub('GET', '/lu/not-a-link')).status, 404);
-  assert.equal((await pub('GET', '/lu/99999999-9999-4999-8999-999999999999')).status, 404);
+  assert.match((await pub('GET', `/lu/${anaRun}`)).text, /Unsubscribed\./, 'the link now says so without asking');
+  for (const method of ['GET', 'POST']) {
+    assert.equal((await pub(method, '/lu/not-a-link', method === 'POST' ? new URLSearchParams() : undefined)).status, 404);
+    assert.equal((await pub(method, '/lu/99999999-9999-4999-8999-999999999999', method === 'POST' ? new URLSearchParams() : undefined)).status, 404);
+  }
   const subs = (await mgr.get('/api/subscriptions')).json.subscriptions.filter((s) => s.email === mail('ana'));
   assert.deepEqual(subs.map((s) => s.status), ['unsubscribed'], 'on the newsletter list as unsubscribed');
   const unsubEvents = (await mgr.get('/api/events?since=0&limit=1000')).json.events
@@ -239,15 +262,19 @@ test('the unsubscribe link takes them off everywhere; email steps skip unsubscri
   const ana = await personByEmail(mail('ana'));
   const ben = await mgr.createPerson('Ben Noemail', { phone: '604-555-0142' });
   const cal = await mgr.createPerson('Cal Private', { email: mail('cal'), tags: ['do-not-contact'] });
-  for (const p of [ana, ben, cal]) {
+  // Dana has an email but never said yes to email; Eli joined the newsletter.
+  const dana = await mgr.createPerson('Dana Never', { email: mail('dana') });
+  const eli = await mgr.createPerson('Eli Yes', { email: mail('eli') });
+  assert.equal((await mgr.action('subscription.add', { email: mail('eli') })).status, 200);
+  for (const p of [ana, ben, cal, dana, eli]) {
     assert.equal((await mgr.action('contact.log', { person_id: p.id, channel: 'door', outcome: 'contacted', rating: '1' })).status, 200);
   }
   await withEmail(async (sent) => {
     await runJobs();
-    assert.equal(sent.length, 0, 'none of the three is emailed');
+    assert.deepEqual(sent.map((m) => m.to[0]), [mail('eli')], 'only the one who said yes to email');
   });
   const reasons = {};
-  for (const p of [ana, ben, cal]) {
+  for (const p of [ana, ben, cal, dana, eli]) {
     const run = await runOf(yes.id, p.id);
     assert.equal(run.status, 'done');
     reasons[p.name] = run.skipped.map((s) => `${s.kind}:${s.reason}`);
@@ -255,12 +282,98 @@ test('the unsubscribe link takes them off everywhere; email steps skip unsubscri
   assert.deepEqual(reasons['Ana Souza'], ['email:unsubscribed']);
   assert.deepEqual(reasons['Ben Noemail'], ['email:no_email']);
   assert.deepEqual(reasons['Cal Private'], ['email:do_not_contact', 'followup:do_not_contact']);
+  assert.deepEqual(reasons['Dana Never'], ['email:no_consent'], 'a 1 at the door is not a yes to email');
+  assert.deepEqual(reasons['Eli Yes'], []);
+  const eliLog = (await runOf(yes.id, eli.id)).log.map((e) => `${e.kind}:${e.result}`);
+  assert.deepEqual(eliLog.filter((e) => e.startsWith('email:')), ['email:sent'], 'one "Email sent"; "sending" is only shown while it is the latest');
+  // The builder counts who an email step can reach.
+  assert.equal((await ladder(yes.id)).emailYes,
+    (await db.query("select count(*)::int as n from subscriptions where workspace_id = $1 and status = 'subscribed'", [ws])).rows[0].n);
   // The other steps still ran.
   assert.ok((await personByEmail(mail('cal'))).tags.includes('yes-ladder'));
   const open = (await mgr.get('/api/ladders/followups')).json.open.map((f) => f.text);
   assert.ok(open.includes('Thank Ana') && open.includes('Thank Ben'));
   assert.ok(!open.includes('Thank Cal'), 'no follow-up for do-not-contact');
   await mgr.action('ladder.setActive', { id: yes.id, active: false });
+  await verified();
+});
+
+test('a ladder unsubscribe from someone never on the list: flagged do-not-email, no list row; only their own signup undoes it', async () => {
+  const dana = await personByEmail(mail('dana'));
+  const runId = (await db.query('select id from ladder_runs where workspace_id = $1 and person_id = $2 limit 1', [ws, dana.id])).rows[0].id;
+  const before = (await mgr.get('/api/subscriptions')).json;
+  const r = await pub('POST', `/lu/${runId}`, new URLSearchParams());
+  assert.equal(r.status, 200);
+  assert.match(r.text, /Unsubscribed\./);
+  const after = (await mgr.get('/api/subscriptions')).json;
+  assert.ok(!after.subscriptions.some((x) => x.email === mail('dana')), 'no newsletter row for her');
+  assert.deepEqual([after.subscribed, after.unsubscribed], [before.subscribed, before.unsubscribed], 'the list counts are unchanged');
+  assert.ok((await personByEmail(mail('dana'))).tags.includes('do-not-email'));
+  assert.match((await pub('GET', `/lu/${runId}`)).text, /Unsubscribed\./, 'the link says so without asking');
+  const flagged = (await mgr.get('/api/events?since=0&limit=1000')).json.events
+    .filter((e) => e.action === 'public.unsubscribe' && e.entity_type === 'person' && e.entity_id === dana.id);
+  assert.equal(flagged.length, 1, 'on the chain as the system');
+  assert.equal(flagged[0].actor_id, null);
+
+  // The desk can't put either of them on the list.
+  const addDana = await mgr.action('subscription.add', { email: mail('dana') });
+  assert.equal(addDana.status, 409);
+  assert.equal(addDana.json.error, 'Unsubscribed — only they can rejoin (signup page)');
+  const addAna = await mgr.action('subscription.add', { email: mail('ana') });
+  assert.equal(addAna.status, 409);
+  assert.match(addAna.json.error, /^Unsubscribed on [A-Z][a-z]{2} \d{1,2} — only they can rejoin \(signup page\)$/);
+  assert.equal((await mgr.get('/api/subscriptions')).json.subscriptions.find((x) => x.email === mail('ana')).status, 'unsubscribed');
+
+  // An email step skips her as do-not-email.
+  const nudge = await create({ name: 'Nudge', trigger: { kind: 'tag', ref: 'nudge' }, steps: [{ kind: 'email', subject: 'S', body: 'B' }] });
+  await turnOn(nudge.id);
+  await mgr.action('person.update', { id: dana.id, tags: [...(await personByEmail(mail('dana'))).tags, 'nudge'] });
+  await withEmail(async (sent) => {
+    await runJobs();
+    assert.equal(sent.length, 0);
+  });
+  assert.deepEqual((await runOf(nudge.id, dana.id)).skipped.map((x) => x.reason), ['do_not_email']);
+  await mgr.action('ladder.setActive', { id: nudge.id, active: false });
+
+  // Her own signup is the way back on: on the list, and the flag lifted.
+  assert.equal((await pub('POST', `/n/${slug}`, new URLSearchParams({ email: mail('dana'), name: 'Dana Never' }))).status, 200);
+  assert.ok(!(await personByEmail(mail('dana'))).tags.includes('do-not-email'));
+  assert.equal((await mgr.get('/api/subscriptions')).json.subscriptions.find((x) => x.email === mail('dana')).status, 'subscribed');
+  await verified();
+});
+
+test('a failure after the send never sends it twice: the retry finds "sending", says "not sure it went", moves on', async () => {
+  const lad = await create({
+    name: 'Hello once',
+    trigger: { kind: 'tag', ref: 'hello-once' },
+    steps: [{ kind: 'email', subject: 'Ladder hello', body: 'Hi {{first_name}}' }, { kind: 'tag', tag: 'after-hello' }],
+  });
+  await turnOn(lad.id);
+  assert.equal((await mgr.action('subscription.add', { email: mail('dbl') })).status, 200);
+  const boom = { on: true };
+  let target = null;
+  onHook('events', async (_tx, meta, events) => {
+    if (boom.on && meta.action === 'ladder.step'
+      && events.some((e) => e.entityType === 'ladder_run' && e.payload?.result === 'sent' && e.payload?.person_id === target)) {
+      throw new Error('the database went away after the send');
+    }
+  });
+  await withEmail(async (sent) => {
+    const p = await mgr.createPerson('Dot Double', { email: mail('dbl'), tags: ['hello-once'] });
+    target = p.id;
+    await runJobs();
+    assert.equal(sent.length, 1, 'the provider got it');
+    let run = await runOf(lad.id, p.id);
+    assert.deepEqual([run.status, run.step, run.wait], ['active', 0, 'sending'], 'committed before the provider call, so the retry knows');
+    for (let i = 0; i < 3; i += 1) { await fastForward(); await runJobs(); }
+    assert.equal(sent.length, 1, 'never a second copy');
+    run = await runOf(lad.id, p.id);
+    assert.equal(run.status, 'done', 'the run moved on');
+    assert.deepEqual(run.log.filter((e) => e.kind === 'email').map((e) => e.result), ['unsure']);
+    assert.ok((await personByEmail(mail('dbl'))).tags.includes('after-hello'));
+  });
+  boom.on = false;
+  await mgr.action('ladder.setActive', { id: lad.id, active: false });
   await verified();
 });
 
@@ -325,6 +438,7 @@ test('a provider refusal is tried again hourly, three times, then logged as fail
     steps: [{ kind: 'email', subject: 'S', body: 'B' }, { kind: 'tag', tag: 'after-retry' }],
   });
   await turnOn(lad.id);
+  assert.equal((await mgr.action('subscription.add', { email: mail('rae') })).status, 200);
   const p = await mgr.createPerson('Rae Retry', { email: mail('rae'), tags: ['retry-me'] });
   await withEmail(async (sent) => {
     await runJobs();
@@ -339,7 +453,8 @@ test('a provider refusal is tried again hourly, three times, then logged as fail
   }, { fail: () => true });
   const evs = (await mgr.get('/api/events?since=0&limit=1000')).json.events
     .filter((e) => e.entity_type === 'ladder_run' && e.payload.kind === 'email' && e.payload.person_id === p.id);
-  assert.deepEqual(evs.map((e) => e.payload.reason), ['will_retry', 'will_retry', 'gave_up']);
+  assert.deepEqual(evs.filter((e) => e.payload.result === 'failed').map((e) => e.payload.reason), ['will_retry', 'will_retry', 'gave_up']);
+  assert.equal(evs.filter((e) => e.payload.result === 'sending').length, 3, 'each try is claimed before the provider call');
   assert.ok((await personByEmail(mail('rae'))).tags.includes('after-retry'));
   await mgr.action('ladder.setActive', { id: lad.id, active: false });
 });

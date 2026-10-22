@@ -2,8 +2,10 @@
 //
 //   ladders           a trigger (what starts it) + an ordered list of steps
 //   ladder_runs       one person on one ladder: the step they're on, whether
-//                     they're waiting (a Wait step, or email not connected),
-//                     and a short log of what each step did
+//                     they're waiting (a Wait step, email not connected, a
+//                     retry, or 'sending': an email handed to the provider —
+//                     committed before the call, so a retry never sends it
+//                     twice), and a short log of what each step did
 //   ladder_followups  "Call Ana to say thanks" — staff tasks a step created
 //   ladder_tag_changes  tags a person just got, noted by a trigger on persons
 //                     so the events hook can tell "got a tag" from "already
@@ -34,7 +36,7 @@ create table if not exists ladder_runs (
   person_id uuid not null references persons(id) on delete cascade,
   step int not null default 0,
   status text not null default 'active' check (status in ('active', 'paused', 'done')),
-  wait text check (wait in ('time', 'email', 'retry')),
+  wait text check (wait in ('time', 'email', 'retry', 'sending')),
   next_at timestamptz,
   token uuid,
   trigger_note text,
@@ -43,6 +45,13 @@ create table if not exists ladder_runs (
   updated_at timestamptz not null default now(),
   finished_at timestamptz
 );
+-- Runs from before 'sending' existed carry the first check.
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'lruns_wait_ok') then
+    alter table ladder_runs drop constraint if exists ladder_runs_wait_check;
+    alter table ladder_runs add constraint lruns_wait_ok check (wait in ('time', 'email', 'retry', 'sending'));
+  end if;
+end $$;
 create index if not exists lruns_ladder_idx on ladder_runs (workspace_id, ladder_id, status);
 create index if not exists lruns_person_idx on ladder_runs (workspace_id, person_id);
 

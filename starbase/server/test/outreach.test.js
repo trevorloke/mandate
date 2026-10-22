@@ -64,7 +64,7 @@ test('newsletter: public signup, dedupe on email, one-click unsubscribe, manual 
   let subs = await c.get('/api/subscriptions');
   assert.equal(subs.json.subscriptions.filter((s) => s.email === 'maya@example.org').length, 1, 'case-insensitive dedupe');
   const maya = subs.json.subscriptions.find((s) => s.email === 'maya@example.org');
-  const un = await pub('GET', `/u/${maya.id}`);
+  const un = await pub('POST', `/u/${maya.id}`);
   assert.equal(un.status, 200);
   assert.match(un.text, /Unsubscribed/);
   subs = await c.get('/api/subscriptions');

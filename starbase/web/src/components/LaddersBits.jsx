@@ -36,6 +36,8 @@ export const STEP_KINDS = [
   { kind: 'untag', label: 'Remove a tag', more: true },
   { kind: 'stop', label: 'Stop', more: true },
 ];
+// The step button that shows the rest (not "More": the page has its own).
+export const OTHER_STEPS = 'Other steps';
 export const STEP_WORD = { wait: 'Wait', email: 'Email', tag: 'Tag', untag: 'Remove tag', followup: 'Follow-up', stop: 'Stop' };
 
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -56,7 +58,10 @@ export const fmtWhen = (ts) => new Date(ts).toLocaleString('en-CA', {
   weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 });
 
-const REASON = { no_email: 'no email', unsubscribed: 'unsubscribed', do_not_contact: 'do not contact' };
+const REASON = {
+  no_email: 'no email', unsubscribed: 'unsubscribed', do_not_contact: 'do not contact',
+  do_not_email: 'do not email', no_consent: 'didn’t ask for email',
+};
 const END = { finished: 'Finished', stopped: 'Stopped', taken_off: 'Taken off', person_removed: 'Finished' };
 
 // Where a person is on a ladder, in a few words. Literally what the server
@@ -71,6 +76,7 @@ export const whereLine = (run, emailConfigured) => {
   if (run.status === 'paused') return `Paused · step ${run.step + 1} of ${run.steps}`;
   if (run.wait === 'email') return emailConfigured ? 'Email connected — sends within the hour' : 'Waiting — email isn’t connected';
   if (run.wait === 'retry') return 'Email didn’t go — trying again';
+  if (run.wait === 'sending') return 'Sending email';
   if (run.wait === 'time' && run.next_at) return `Waiting until ${fmtWhen(run.next_at)}`;
   return `Step ${Math.min(run.step + 1, run.steps)} of ${run.steps}${run.stepKind ? ` · ${STEP_WORD[run.stepKind]}` : ''}`;
 };
@@ -86,6 +92,8 @@ export const logLine = (e) => {
   if (e.result === 'skipped') return `${what} skipped — ${REASON[e.reason] || e.reason}`;
   if (e.kind === 'email') {
     if (e.result === 'sent') return 'Email sent';
+    if (e.result === 'sending') return 'Sending email';
+    if (e.result === 'unsure') return 'Email — not sure it went';
     if (e.result === 'waiting') return 'Email waiting — not connected';
     if (e.result === 'failed') return e.reason === 'gave_up' ? 'Email failed' : 'Email didn’t go — trying again';
   }

@@ -2,7 +2,7 @@
 //   GET/POST /p/:ws/:petition   petition signature page
 //   GET/POST /n/:ws             newsletter signup page
 //   GET/POST /v/:ws             volunteer signup page
-//   GET      /u/:subscriptionId one-click unsubscribe
+//   GET/POST /u/:subscriptionId unsubscribe (GET asks, POST does it)
 //   GET/POST /e/:ws/:event      event page + RSVP
 //   GET/POST /d/:ws             donate (BC eligibility attestations; Stripe
 //                               Checkout when configured, else a pledge)
@@ -157,8 +157,24 @@ const upsertPersonFromPublic = async (db, ws, { name, email, phone, address }, t
 // given name, if any). Signing up again with nothing new writes nothing, so
 // nothing is logged. The workspace row lock runAction holds serializes this
 // read-then-write against every other action.
+// They asked for email themselves, so a ladder email's unsubscribe
+// (do-not-email, for an address that was never on the list) is lifted.
+const liftNoEmail = async (tx, emit, ws, em) => {
+  const rows = (await tx.query(
+    `select id, tags from persons where workspace_id = $1 and lower(email) = $2 and deleted_at is null
+       and tags @> '"do-not-email"'::jsonb`,
+    [ws.id, em],
+  )).rows;
+  for (const p of rows) {
+    const tags = (typeof p.tags === 'string' ? JSON.parse(p.tags) : p.tags).filter((t) => t !== 'do-not-email');
+    await tx.query('update persons set tags = $3, updated_at = now() where id = $1 and workspace_id = $2', [p.id, ws.id, JSON.stringify(tags)]);
+    emit('person', p.id, 'update', { tags, source: 'public' });
+  }
+};
+
 const subscribeTx = async (tx, emit, ws, email, name, source) => {
   const em = email.toLowerCase();
+  await liftNoEmail(tx, emit, ws, em);
   const prev = (await tx.query(
     'select id, name, status from subscriptions where workspace_id = $1 and email = $2', [ws.id, em],
   )).rows[0];
@@ -166,7 +182,7 @@ const subscribeTx = async (tx, emit, ws, email, name, source) => {
     const nextName = name || prev.name || null;
     if (prev.status === 'subscribed' && nextName === (prev.name || null)) return { id: prev.id, changed: false };
     await tx.query(
-      `update subscriptions set status = 'subscribed', name = $3 where id = $1 and workspace_id = $2`,
+      `update subscriptions set status = 'subscribed', name = $3, unsubscribed_at = null where id = $1 and workspace_id = $2`,
       [prev.id, ws.id, nextName],
     );
     emit('subscription', prev.id, 'update', { email: em, name: nextName, status: 'subscribed', source });
@@ -296,25 +312,42 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const badUnsubscribe = (c) => c.html(page(null, 'Unsubscribe',
   `<h1>This unsubscribe link isn't valid — reply to the email to be removed.</h1>`), 404);
 
-app.get('/u/:id', async (c) => {
-  const sid = c.req.param('id');
-  if (!UUID.test(sid)) return badUnsubscribe(c);
-  const db = await getDb();
+// The link in every newsletter. Opening it only asks (mail scanners open
+// links by themselves); the one button — or a mail app's one-click
+// unsubscribe (List-Unsubscribe-Post) — sends the POST that does it.
+const loadSub = async (db, sid) => {
+  if (!UUID.test(sid)) return null;
   const row = (await db.query(
-    'select s.id, s.workspace_id, w.name, w.slug, w.settings from subscriptions s join workspaces w on w.id = s.workspace_id where s.id = $1',
+    'select s.id, s.status, s.workspace_id, w.name, w.slug, w.settings from subscriptions s join workspaces w on w.id = s.workspace_id where s.id = $1',
     [sid],
   )).rows[0];
-  if (!row) return badUnsubscribe(c);
-  const ws = { id: row.workspace_id, name: row.name, slug: row.slug, settings: row.settings };
+  return row ? { row, ws: { id: row.workspace_id, name: row.name, slug: row.slug, settings: row.settings } } : null;
+};
+const unsubscribedPage = (c, ws) => c.html(page(ws, 'Unsubscribed', `<h1>Unsubscribed.</h1><div class="done">You won't receive further newsletters from ${esc(ws.name)}.</div>`));
+
+app.get('/u/:id', async (c) => {
+  const found = await loadSub(await getDb(), c.req.param('id'));
+  if (!found) return badUnsubscribe(c);
+  if (found.row.status === 'unsubscribed') return unsubscribedPage(c, found.ws);
+  return c.html(page(found.ws, 'Unsubscribe', `<h1>Unsubscribe from ${esc(found.ws.name)}?</h1>
+<form method="post" action="/u/${esc(found.row.id)}"><button type="submit">Unsubscribe</button></form>`));
+});
+
+app.post('/u/:id', async (c) => {
+  const db = await getDb();
+  const found = await loadSub(db, c.req.param('id'));
+  if (!found) return badUnsubscribe(c);
+  const { row, ws } = found;
   // A second click finds them already off the list: nothing to write or log.
   await publicAction(db, ws, 'public.unsubscribe', async (tx, emit) => {
     const n = await tx.query(
-      `update subscriptions set status = 'unsubscribed' where id = $1 and workspace_id = $2 and status <> 'unsubscribed'`,
+      `update subscriptions set status = 'unsubscribed', unsubscribed_at = now()
+       where id = $1 and workspace_id = $2 and status <> 'unsubscribed'`,
       [row.id, ws.id],
     );
     if (n.affectedRows > 0) emit('subscription', row.id, 'update', { status: 'unsubscribed', source: 'unsubscribe-link' });
   });
-  return c.html(page(ws, 'Unsubscribed', `<h1>Unsubscribed.</h1><div class="done">You won't receive further newsletters from ${esc(ws.name)}.</div>`));
+  return unsubscribedPage(c, ws);
 });
 
 // ── Volunteer signup ──
