@@ -21,6 +21,7 @@ import SurveyQuestions, { PersonAnswers, answersTail, usePersonAnswers, useSurve
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import { EngagementChip, PersonLadders, usePersonLadders } from '../components/LaddersBits.jsx';
 import { queuedText } from '../components/queued.js';
+import { PersonFields, filledCount, usePersonFields } from '../components/FieldsBits.jsx';
 import { useOutbox } from '../offline.js';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
@@ -785,6 +786,7 @@ export default function Person() {
   });
   const ladders = usePersonLadders(id, desk); // engagement level + ladders (desk only)
   const answers = usePersonAnswers(id, desk); // survey answers (desk only)
+  const fields = usePersonFields(id); // profile fields (a volunteer gets only theirs)
 
   // Awaited by useAction so controls stay disabled until the profile refetches.
   // Covers the map (['doors']: pins, ratings, unlocated count after an address
@@ -846,6 +848,12 @@ export default function Person() {
         <Section title="Details" open={!!open.details} onToggle={toggle('details')}>
           <Details person={person} household={household} refresh={refresh} desk={desk} me={me} />
         </Section>
+        {/* The campaign's own fields (People → More → Profile fields). */}
+        {fields.data?.fields?.length > 0 && (
+          <Section title="More details" count={filledCount(fields) || ''} open={!!open.more} onToggle={toggle('more')}>
+            <PersonFields query={fields} personId={person.id} />
+          </Section>
+        )}
         {/* Tags and roles are desk work: volunteers can't change them (person.update / volunteer.* are desk-only). */}
         {desk && (
           <Section title="Tags" count={tags.length || ''} open={!!open.tags} onToggle={toggle('tags')}>

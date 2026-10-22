@@ -14,6 +14,7 @@ import { apiPost } from '../api.js';
 import GeocodeButton from '../components/GeocodeButton.jsx';
 import { RatingChip } from '../components/RatingButtons.jsx';
 import { invalidatePersonData, tagWord } from './People.jsx';
+import { FIELD_KEY, fieldCell, useImportFields } from '../components/FieldsBits.jsx';
 import './import.css';
 
 const DESK = ['manager', 'treasurer', 'staff'];
@@ -244,7 +245,8 @@ const columnValues = (records, i, limit = 200) => {
   return out;
 };
 
-function guessMapping(headers, records, noHeader = false) {
+// custom: the campaign's profile fields ({ key, label }), matched by name.
+function guessMapping(headers, records, noHeader = false, custom = []) {
   const out = headers.map(() => SKIP);
   const taken = new Set();
   const values = headers.map((_, i) => columnValues(records, i));
@@ -264,6 +266,10 @@ function guessMapping(headers, records, noHeader = false) {
     if (hit) claim(i, hit[0], loose);
   });
   pass(EXACT, false);
+  headers.forEach((h, i) => {
+    const hit = custom.find((x) => normHeader(x.label) === normHeader(h));
+    if (hit) claim(i, hit.key);
+  });
   pass(CONTAINS, true);
   headers.forEach((_, i) => {
     if (out[i] !== SKIP || !values[i].length) return;
@@ -291,6 +297,7 @@ function toRow(cells, mapping) {
     if (!key) return;
     const v = String(cells[i] ?? '').trim();
     if (!v) return;
+    if (key.startsWith(FIELD_KEY)) { fieldCell(row, key, v); return; }
     if (key === 'tags') row.tags = row.tags ? `${row.tags};${v}` : v;
     else if (key === 'rating') { const r = normalizeRating(v); if (RATING_CODES.includes(r)) row.rating = r; }
     else row[key] = v;
@@ -440,6 +447,8 @@ const ZERO = { created: 0, merged: 0, unchanged: 0 };
 
 function ImportFlow() {
   const queryClient = useQueryClient();
+  const custom = useImportFields(); // the campaign's profile fields, as columns
+  const allFields = [...FIELDS, ...custom];
 
   // Step 1 — the source
   const [source, setSource] = useState(null); // { name, headers, records, delimiter }
@@ -477,7 +486,7 @@ function ImportFlow() {
     if (shaped.error) { setLoadError(shaped.error); return; }
     setLoadError(null);
     setSource({ name, ...t, ...shaped });
-    setMapping(guessMapping(shaped.headers, shaped.records, !t.header));
+    setMapping(guessMapping(shaped.headers, shaped.records, !t.header, custom));
     setTag('');
     resetAfterSource();
   };
@@ -487,7 +496,7 @@ function ImportFlow() {
     const shaped = shapeTable(source.all, on);
     if (shaped.error) return;
     setSource({ ...source, header: on, ...shaped });
-    setMapping(guessMapping(shaped.headers, shaped.records, !on));
+    setMapping(guessMapping(shaped.headers, shaped.records, !on, custom));
     resetAfterSource();
   };
 
@@ -559,7 +568,7 @@ function ImportFlow() {
   const ratingCol = mapping.indexOf('rating');
   const hasName = mapping.some((k) => k === 'name' || k === 'first' || k === 'last');
   const usedCount = mapping.filter(Boolean).length;
-  const usedFields = FIELDS.filter((f) => mapping.includes(f.key)).map((f) => f.label);
+  const usedFields = allFields.filter((f) => mapping.includes(f.key)).map((f) => f.label);
   const tagClean = tag.trim();
   const fileTag = source && source.name !== 'Pasted text' ? slugTag(source.name) : '';
 
@@ -772,10 +781,15 @@ function ImportFlow() {
                     >
                       <option value={SKIP}>Don’t import</option>
                       {FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                      {custom.length > 0 && (
+                        <optgroup label="Profile fields">
+                          {custom.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                        </optgroup>
+                      )}
                     </select>
                     {bumped?.col === i && (
                       <p className="imp-map__note" role="status">
-                        Now “Don’t import” — {fieldLabel(bumped.key)} comes from one column.
+                        Now “Don’t import” — {allFields.find((f) => f.key === bumped.key)?.label} comes from one column.
                       </p>
                     )}
                     {mapping[i] === 'rating' && badRatings > 0 && (

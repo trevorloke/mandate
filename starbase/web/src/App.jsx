@@ -34,6 +34,7 @@ const LaddersFollowups = lazy(() => import('./pages/LaddersFollowups.jsx'));
 const Surveys = lazy(() => import('./pages/Surveys.jsx'));
 const SurveysEdit = lazy(() => import('./pages/SurveysEdit.jsx'));
 const SurveysResults = lazy(() => import('./pages/SurveysResults.jsx'));
+const Fields = lazy(() => import('./pages/Fields.jsx'));
 import Join from './pages/Join.jsx';
 
 function RequireAuth() {
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/inbox/:id" element={<TextingThread />} />
         <Route element={<DeskOnly />}>
           <Route path="/people/import" element={<ImportPeople />} />
+          <Route path="/people/fields" element={<Fields />} />
           <Route path="/inbox/settings" element={<TextingSettings />} />
           <Route path="/money" element={<Money />} />
           <Route path="/money/receipts" element={<Receipts />} />

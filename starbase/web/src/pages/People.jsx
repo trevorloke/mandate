@@ -19,6 +19,7 @@ import { queuedText } from '../components/queued.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import { apiGet, action } from '../api.js';
 import { noSignal } from '../components/NoSignal.jsx';
+import { FieldFilterChip, FieldFilterGroups } from '../components/FieldsBits.jsx';
 import './people.css';
 import {
   TextingCallButton, TextingRepliesLink, noTexts, textingOn, useTextingStatus, useTextQueue, useTextingPerson,
@@ -322,7 +323,7 @@ export function MoreMenu({ items, label = 'More' }) {
 // Filters: read from / write to the URL
 // ─────────────────────────────────────────────────────────────────────────────
 const HAS_LABEL = { phone: 'Has phone', email: 'Has email', location: 'On map' };
-const FILTER_KEYS = ['q', 'tag', 'rating', 'role'];
+const FILTER_KEYS = ['q', 'tag', 'rating', 'role', 'field']; // field: <field id>:<value> (profile fields)
 
 // Rating filter: three bands + Unrated on the first look; who an opposed
 // voter backs ("Voting for…") under More. The value goes to the server as is.
@@ -351,6 +352,7 @@ function useFilters() {
     rating: params.get('rating') || '',
     role: params.get('role') || '',
     has: params.get('has') || '',
+    field: params.get('field') || '',
   };
   // Patch the URL in place; empty values drop the key.
   const update = (patch, { replace = true } = {}) => {
@@ -422,12 +424,12 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose, phone]);
   const pick = (key, value) => update({ [key]: f[key] === value ? null : value });
-  const anyPicked = Boolean(f.rating || f.tag || f.role || f.has);
+  const anyPicked = Boolean(f.rating || f.tag || f.role || f.has || f.field);
   // Who they vote for and volunteer roles are the long lists: one tap away,
   // open if one is picked. Tags in use sit on the first level.
   const whoPicked = WHO_CODES.includes(f.rating);
-  const [moreOpen, setMoreOpen] = useState(Boolean(f.role || whoPicked));
-  const morePicked = [whoPicked, f.role].filter(Boolean).length;
+  const [moreOpen, setMoreOpen] = useState(Boolean(f.role || whoPicked || f.field));
+  const morePicked = [whoPicked, f.role, f.field].filter(Boolean).length;
   const moreId = useId();
   const chip = (key, value, label, band) => (
     <button key={value} type="button" className={`chip-btn pp-pick${f[key] === value ? ' on' : ''}`}
@@ -444,7 +446,7 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
           <h2 id={titleId} ref={titleRef} tabIndex={-1}>Filter</h2>
           {anyPicked && (
             <button type="button" className="btn btn-quiet pp-btn"
-              onClick={() => update({ rating: null, tag: null, role: null, has: null })}>
+              onClick={() => update({ rating: null, tag: null, role: null, has: null, field: null })}>
               Clear
             </button>
           )}
@@ -486,6 +488,7 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
                 <legend className="eyebrow">Volunteer role</legend>
                 <div className="pp-group__opts">{VOLUNTEER_ROLES.map((r) => chip('role', r.code, r.label))}</div>
               </fieldset>
+              <FieldFilterGroups chip={chip} />
             </div>
           )}
         </div>
@@ -633,6 +636,7 @@ function PeopleList() {
   if (f.rating) qs.set('rating', f.rating);
   if (f.role) qs.set('role', f.role);
   if (f.has) qs.set('has', f.has);
+  if (f.field) qs.set('field', f.field);
   const qsKey = qs.toString();
 
   const persons = useQuery({
@@ -655,7 +659,7 @@ function PeopleList() {
     ...[...seen].filter((t) => !SUGGESTED_TAGS.includes(t)).sort((a, b) => tagWord(a).localeCompare(tagWord(b))),
   ];
 
-  const picked = [f.rating, f.tag, f.role, f.has].filter(Boolean).length;
+  const picked = [f.rating, f.tag, f.role, f.has, f.field].filter(Boolean).length;
   const anyFilter = Boolean(picked || f.q);
   const closeFilter = useCallback(() => { setFilterOpen(false); filterBtn.current?.focus(); }, []);
 
@@ -685,6 +689,7 @@ function PeopleList() {
               { to: '/inbox', label: 'Inbox', icon: 'text', state: { from: { to: '/people', label: 'People' } } },
               desk && { to: '/people/import', label: 'Import', icon: 'upload' },
               desk && { to: '/surveys', label: 'Surveys' },
+              me?.role === 'manager' && { to: '/people/fields', label: 'Profile fields' },
             ]}
           />
           {desk && !showNew && (
@@ -714,7 +719,8 @@ function PeopleList() {
 
       {filterOpen && <FilterSheet f={f} update={update} tagOptions={tagOptions} onClose={closeFilter} phone={phone} />}
 
-      <FilterChips f={f} update={update} />
+      <FilterChips f={f} update={update}
+        extra={f.field ? <FieldFilterChip value={f.field} onRemove={() => update({ field: null })} /> : null} />
 
       {!offline && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}</p>}
 
@@ -726,7 +732,7 @@ function PeopleList() {
         <div className="pp-empty">
           <p>{anyFilter ? 'No one matches.' : 'No people yet.'}</p>
           {anyFilter ? (
-            <button type="button" className="btn pp-btn" onClick={() => update({ q: null, tag: null, rating: null, role: null, has: null })}>
+            <button type="button" className="btn pp-btn" onClick={() => update({ q: null, tag: null, rating: null, role: null, has: null, field: null })}>
               Clear filters
             </button>
           ) : desk && !showNew ? (
@@ -862,6 +868,7 @@ function CallsScreen() {
   if (f.tag) qs.set('tag', f.tag);
   if (f.rating) qs.set('rating', f.rating);
   if (f.role) qs.set('role', f.role);
+  if (f.field) qs.set('field', f.field);
   // The list is kept on this phone, so losing signal mid-list loses nothing.
   const copyName = `calls:${qs}`;
   const persons = useQuery({
@@ -1037,7 +1044,8 @@ function CallsScreen() {
     update({ channel: c === 'text' ? 'text' : null, person: null });
   };
 
-  const filterChips = <FilterChips f={f} update={update} keys={['rating', 'tag', 'role', 'q']} />;
+  const filterChips = <FilterChips f={f} update={update} keys={['rating', 'tag', 'role', 'q']}
+    extra={f.field ? <FieldFilterChip value={f.field} desk={desk} onRemove={() => update({ field: null })} /> : null} />;
 
   return (
     <div className="cl-page">
