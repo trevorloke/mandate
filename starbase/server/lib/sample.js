@@ -105,6 +105,27 @@ export const buildSample = () => {
     { name: 'Rita Sandhu — radio (sample)', email: 'rita@radio.example', tags: ['media'], socials: { x: '@ritasandhu_sample' } },
     { name: 'Daniel Ruiz — TV (sample)', email: 'druiz@tv.example', tags: ['media'] },
   ];
+  // Who knows whom (ext/relationships): Priya Nair, a sample volunteer, and
+  // her people; Gurpreet's and Sam's; a few more. [a, b, kind, note, b was
+  // brought in by a].
+  const relationships = [
+    ['Priya Nair', 'Jasmine Wong', 'neighbour', 'Same block'],
+    ['Priya Nair', 'Liam O’Connor', 'neighbour'],
+    ['Priya Nair', 'Daniel Kim', 'friend'],
+    ['Priya Nair', 'Fatima Rahimi', 'community'],
+    ['Priya Nair', 'Maya Chen', 'work'],
+    ['Priya Nair', 'Sofia Petrova', 'friend', null, true],
+    ['Gurpreet Sandhu', 'Navdeep Sandhu', 'family'],
+    ['Gurpreet Sandhu', 'Harjit Gill', 'community'],
+    ['Gurpreet Sandhu', 'Manpreet Dhaliwal', 'family'],
+    ['Gurpreet Sandhu', 'Ravi Shankar', 'community'],
+    ['Sam Ortiz', 'Jack Morrison', 'friend'],
+    ['Sam Ortiz', 'Emma Fraser', 'neighbour'],
+    ['Sam Ortiz', 'Owen Price', 'community'],
+    ['Maya Chen', 'Hannah Lee', 'friend'],
+    ['Maya Chen', 'Kwame Mensah', 'work'],
+    ['Emma Fraser', 'Charlotte Hughes', 'community'],
+  ];
   const subscribers = ['maya.chen@example.org', 'hannah.lee@example.org', 'charlotte.hughes@example.org', 'supporter.one@example.org', 'supporter.two@example.org'];
 
   // Newton turf: the 72 Ave block, padded.
@@ -120,5 +141,5 @@ export const buildSample = () => {
     ],
   };
 
-  return { people, tags, roles, gifts, signs, media, subscribers, turf };
+  return { people, tags, roles, gifts, signs, media, subscribers, turf, relationships };
 };

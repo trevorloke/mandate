@@ -16,6 +16,7 @@ import { pointInPolygon, groupDoors, walkOrder } from '../lib/geo.js';
 import { checkCap } from '../lib/cap.js';
 import { EXTENSIONS } from '../ext.js';
 import { runHooks } from '../lib/hooks.js';
+import { forViewer, isMoneyTag, loginEmail } from '../lib/viewer.js';
 // Which saved newsletter / press rows Try again would reach (ext/abtests).
 import { goingRow, retryable, sendJobOn } from '../ext/abtests/send.js';
 
@@ -52,25 +53,10 @@ const DESK_ONLY_READS = [
   ...EXTENSIONS.flatMap((e) => (e.deskOnlyReads || []).map(pathPattern)),
 ];
 
-// What a volunteer's browser may receive about a person: phone and address
-// (they call and knock), never anyone else's email, and never a tag that
-// gives money away ('donor-prospect', 'lapsed', …). Their own record keeps
-// its email — it is theirs. Applied to every person row a volunteer reads:
-// /persons, /persons/:id, /map/doors and /turfs/:id/walk.
-const isMoneyTag = (t) => {
-  const s = String(t ?? '').trim().toLowerCase();
-  return s.includes('donor') || s === 'lapsed';
-};
-const loginEmail = (ctx) => String(ctx.user.email || '').trim().toLowerCase();
-const forViewer = (ctx) => {
-  if (ctx.role !== 'volunteer') return (p) => p;
-  const mine = loginEmail(ctx);
-  return (p) => ({
-    ...p,
-    email: mine && String(p.email || '').trim().toLowerCase() === mine ? p.email : null,
-    tags: (Array.isArray(p.tags) ? p.tags : []).filter((t) => !isMoneyTag(t)),
-  });
-};
+// What a volunteer's browser may receive about a person (lib/viewer.js):
+// phone and address, never anyone else's email, never a money tag. Applied
+// to every person row a volunteer reads: /persons, /persons/:id, /map/doors
+// and /turfs/:id/walk (and the features' own person rows, "My people").
 app.use('*', async (c, next) => {
   if (c.get('ctx').role === 'volunteer' && c.req.method === 'GET'
       && DESK_ONLY_READS.some((re) => re.test(c.req.path))) {

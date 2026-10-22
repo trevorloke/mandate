@@ -15,7 +15,8 @@ export const RATINGS = [
 export const RATING_CODES = RATINGS.map((r) => r.code);
 export const ratingByCode = (c) => RATINGS.find((r) => r.code === c) || null;
 
-export const CHANNELS = ['door', 'phone', 'text'];
+// in_person: a talk with someone you know, away from their door ("My people").
+export const CHANNELS = ['door', 'phone', 'text', 'in_person'];
 export const OUTCOMES = ['contacted', 'no_answer', 'refused', 'moved', 'inaccessible'];
 
 export const SIGN_KINDS = [
