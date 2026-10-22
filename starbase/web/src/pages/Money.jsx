@@ -5,11 +5,16 @@
 //   month's gift and stays open; once in for the month it waits under More
 //   until next month) — and gifts over the contribution limit ("Over limit":
 //   "$150 over the $1,250 limit", the legal wording under "Why?", Donor ·
-//   Void right there).
+//   Void right there) — and receipts with no home address ("Needs address":
+//   Street address · Save address right there; the receipt's email waits).
 //   One yellow "Log a gift" (?new=1; ?person=<id> preselects the donor):
-//   donor, amount, date — paid by, cadence and note under "More details".
+//   donor, amount, date — paid by, cadence and note under "More details"
+//   (and the donor's street address when none is on file).
 //   Type-ahead donor picker (never type IDs). Saving says "✓ $150 from Owen
-//   Patel" (Undo voids it); a cap crossing also raises an "Over limit" banner.
+//   Patel · receipt emails in a minute" (Undo voids it, and the email never
+//   goes); a cap crossing also raises an "Over limit" banner. Voiding a gift
+//   whose receipt was already emailed asks "Receipt already emailed — send a
+//   void notice? Yes · No".
 //   The ledger: rows of donor, amount, date (+ monthly / over limit chips). Tap
 //   a row for how it was paid, note, the donor's profile and Void ("Void this
 //   gift? Yes · No", then a 7s Undo).
@@ -25,6 +30,7 @@ import {
 } from '@tanstack/react-query';
 import { apiGet, action, fmtMoney, fmtDate, todayISO, dollarsToCents } from '../api.js';
 import ReceiptsGiftLine from '../components/ReceiptsGiftLine.jsx';
+import { AddressRow, VoidNoticeAsk, receiptOf, receiptNote } from '../components/ReceiptsNeeds.jsx';
 import './shifts.css';
 
 // gift.log / gift.void / gift.restore and GET /records/* are desk-only
@@ -201,9 +207,12 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
   const [method, setMethod] = useState('');
   const [cadence, setCadence] = useState('one-time');
   const [note, setNote] = useState('');
+  const [address, setAddress] = useState('');
   const [more, setMore] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // A receipt prints the donor's home address: ask for it when none is on file.
+  const noAddress = !!donor && !String(donor.address || '').trim();
 
   const preset = useQuery({
     queryKey: ['person', presetPersonId],
@@ -224,6 +233,11 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
     if (cents === 0) { setError('The amount must be more than $0'); return; }
     setBusy(true);
     try {
+      // The address first, so the gift's receipt is issued with it.
+      if (noAddress && address.trim()) {
+        const up = await action('person.update', { id: donor.id, address: address.trim().slice(0, 1000) });
+        setDonor((d) => (d && d.id === donor.id ? { ...d, ...(up.person || {}), address: address.trim() } : d));
+      }
       const res = await action('gift.log', {
         person_id: donor.id,
         amount_cents: cents,
@@ -283,6 +297,13 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
             <label htmlFor="gift-note">Note</label>
             <input id="gift-note" className="input" maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
+          {noAddress && (
+            <div className="field">
+              <label htmlFor="gift-address">Street address</label>
+              <input id="gift-address" className="input" maxLength={1000} autoComplete="off" placeholder="For the receipt"
+                value={address} onChange={(e) => setAddress(e.target.value)} />
+            </div>
+          )}
         </div>
       )}
 
@@ -573,6 +594,7 @@ export default function Money() {
   const presetPersonId = params.get('person');
 
   const [banner, setBanner] = useState(null);
+  const [voidAsk, setVoidAsk] = useState(null); // { id, number, name, giftId } — a void receipt the donor already got
   const [voided, setVoided] = useState(() => new Set());
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
@@ -591,6 +613,7 @@ export default function Money() {
   });
   const pledges = useQuery({ queryKey: ['pledges'], queryFn: () => apiGet('/pledges'), enabled: canMoney });
   const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), enabled: canMoney });
+  const receiptNeeds = useQuery({ queryKey: ['receipts', 'needs'], queryFn: () => apiGet('/receipts/needs'), enabled: canMoney });
 
   // Newest gift date first (the ledger itself pages in entry order).
   const rows = (gifts.data?.pages ?? []).flatMap((p) => p?.records ?? []).filter((g) => !voided.has(g.id))
@@ -602,6 +625,7 @@ export default function Money() {
   const monthlyIn = allPledges.filter(paidThisMonth);
   const closedPledges = allPledges.filter((p) => !OPEN_PLEDGE.has(p.status));
   const flagged = (brief.data?.flagged ?? []).filter((f) => !voided.has(f.id));
+  const noAddress = (receiptNeeds.data?.receipts ?? []).filter((r) => !voided.has(r.gift_id));
   // The latest few skip gifts already listed under "Needs you"; "All gifts" shows every one.
   const flaggedIds = new Set(flagged.map((f) => f.id));
   const latest = rows.filter((g) => !flaggedIds.has(g.id)).slice(0, LATEST);
@@ -645,26 +669,31 @@ export default function Money() {
     ? { name, line: overLine(res.compliance), reason: res.gift?.flag_reason, giftId: res.gift?.id }
     : null);
 
-  const onSaved = (res, donor) => {
+  const onSaved = async (res, donor) => {
     const g = res.gift || {};
     setBanner(overBanner(res, donor?.name));
     setParams({});
     invalidate();
+    // What the receipt is doing, as the server has it: "receipt emails in a
+    // minute" (Undo before then and it never goes) or "receipt needs address".
+    const note = g.id ? receiptNote(await receiptOf(g.id)) : '';
     showToast({
-      text: `✓ ${fmtBig(g.amount_cents)} from ${donor?.name ?? 'donor'}`,
+      text: `✓ ${fmtBig(g.amount_cents)} from ${donor?.name ?? 'donor'}${note}`,
       undo: g.id ? () => voidGift(g.id) : null,
     });
   };
 
-  const onReceived = (res, p) => {
+  const onReceived = async (res, p) => {
     const g = res.gift || {};
     setBanner(overBanner(res, p.name));
     refreshPledges();
     // A monthly pledge stays open: say which month came in. Undo voids the
-    // gift, which opens the pledge (or that month) again.
+    // gift, which opens the pledge (or that month) again — and, within the
+    // minute, its receipt email never goes.
     const month = isMonthly(p) && g.date ? ` for ${monthWord(ym(g.date))}` : '';
+    const note = g.id ? receiptNote(await receiptOf(g.id)) : '';
     showToast({
-      text: `✓ ${fmtBig(g.amount_cents ?? p.amount_cents)} from ${p.name}${month}`,
+      text: `✓ ${fmtBig(g.amount_cents ?? p.amount_cents)} from ${p.name}${month}${note}`,
       undo: g.id ? () => voidGift(g.id) : null,
     });
   };
@@ -686,6 +715,9 @@ export default function Money() {
       // never closed).
       const reopened = !!res?.pledge?.reopened;
       showToast({ text: reopened ? 'Gift voided · pledge open again' : 'Gift voided', undo: () => undoVoid(id) });
+      // Its receipt already went to the donor: offer to tell them it's void.
+      const r = await receiptOf(id);
+      setVoidAsk(r?.void && r.can_send_void ? { id: r.id, number: r.number, name: r.donor_name, giftId: id } : null);
     } catch (e) {
       setVoided((s) => { const n = new Set(s); n.delete(id); return n; });
       setError(e.message);
@@ -700,6 +732,7 @@ export default function Money() {
     try {
       const res = await action('gift.restore', { id });
       setVoided((s) => { const n = new Set(s); n.delete(id); return n; });
+      setVoidAsk((a) => (a?.giftId === id ? null : a));
       const closedAgain = ['received', 'paid'].includes(res?.pledge?.status);
       showToast({ text: closedAgain ? '✓ Gift restored · pledge paid' : '✓ Gift restored' });
     } catch (e) {
@@ -720,7 +753,7 @@ export default function Money() {
     );
   }
 
-  const needs = openPledges.length + flagged.length;
+  const needs = openPledges.length + flagged.length + noAddress.length;
 
   return (
     <div className="ops-page">
@@ -745,6 +778,11 @@ export default function Money() {
         </div>
       )}
 
+      {voidAsk && (
+        <VoidNoticeAsk ask={voidAsk} onClose={() => setVoidAsk(null)}
+          onDone={(text) => { setVoidAsk(null); invalidate(); showToast({ text }); }} />
+      )}
+
       {showNew && (
         <GiftForm presetPersonId={presetPersonId} onSaved={onSaved} onClose={() => setParams({})} />
       )}
@@ -765,6 +803,9 @@ export default function Money() {
             ))}
             {flagged.map((f) => (
               <FlaggedRow key={f.id} f={f} personId={f.person_id ?? personOf[f.id]} onVoid={() => voidGift(f.id)} />
+            ))}
+            {noAddress.map((r) => (
+              <AddressRow key={r.id} r={r} onSaved={(text) => { invalidate(); showToast({ text }); }} />
             ))}
           </ul>
         </section>

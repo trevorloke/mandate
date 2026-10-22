@@ -13,7 +13,9 @@ export const textConfigured = () =>
   !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
 
 // `html` is optional: sent alongside the plain-text part when given.
-export const sendEmail = async ({ to, subject, text, html }) => {
+// `idempotencyKey` is optional: the provider sends a key it has seen in the
+// last day only once, so a retry after an unknown outcome never doubles up.
+export const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
   if (!emailConfigured()) {
     return { sent: false, status: 'queued', detail: 'no email provider configured (set RESEND_API_KEY)' };
   }
@@ -23,6 +25,7 @@ export const sendEmail = async ({ to, subject, text, html }) => {
       headers: {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
+        ...(idempotencyKey ? { 'Idempotency-Key': String(idempotencyKey).slice(0, 256) } : {}),
       },
       body: JSON.stringify({
         from: process.env.MAIL_FROM || 'onboarding@resend.dev',

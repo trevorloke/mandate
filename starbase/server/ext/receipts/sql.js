@@ -10,6 +10,14 @@
 //                     and address are copied in when it is issued (and again
 //                     whenever it is sent), so a sent receipt stays what the
 //                     donor got. token: the donor's own link (/r/<token>).
+//                     email_status: null (not sent) · held (waits for the
+//                     home address) · queued (the automatic email is due) ·
+//                     sending (committed before the provider is called, so a
+//                     retry never sends twice) · sent · failed.
+//                     void_sent_*: the "this receipt is void" email.
+//
+// receipt_settings.period_*: the campaign's election period for the
+// disclosure (unset = the current calendar year).
 export const sql = `
 create table if not exists receipt_settings (
   workspace_id uuid primary key references workspaces(id) on delete cascade,
@@ -19,8 +27,12 @@ create table if not exists receipt_settings (
   agent_contact text,
   notice text,
   footer text,
+  period_start date,
+  period_end date,
   updated_at timestamptz not null default now()
 );
+alter table receipt_settings add column if not exists period_start date;
+alter table receipt_settings add column if not exists period_end date;
 
 create table if not exists receipt_counters (
   workspace_id uuid not null references workspaces(id) on delete cascade,
@@ -45,7 +57,8 @@ create table if not exists receipts (
   method text,
   sample boolean not null default false,
   voided_at timestamptz,
-  email_status text check (email_status in ('queued', 'sent', 'failed')),
+  email_status text constraint receipts_email_status_ok
+    check (email_status in ('held', 'queued', 'sending', 'sent', 'failed')),
   email_note text,
   sent_at timestamptz,
   sent_count int not null default 0,
@@ -54,6 +67,16 @@ create table if not exists receipts (
   unique (workspace_id, gift_id),
   unique (workspace_id, series, seq)
 );
+alter table receipts add column if not exists void_sent_at timestamptz;
+alter table receipts add column if not exists void_sent_count int not null default 0;
+-- Receipts made before 'held' and 'sending' existed carry the first check.
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'receipts_email_status_ok') then
+    alter table receipts drop constraint if exists receipts_email_status_check;
+    alter table receipts add constraint receipts_email_status_ok
+      check (email_status in ('held', 'queued', 'sending', 'sent', 'failed'));
+  end if;
+end $$;
 create index if not exists receipts_ws_idx on receipts (workspace_id, series, seq);
 create index if not exists receipts_person_idx on receipts (workspace_id, person_id);
 `;

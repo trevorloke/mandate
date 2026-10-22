@@ -2,16 +2,19 @@
 // One job: the receipt, ready to print. The yellow button is Print.
 //   Under the title, what happened, in the server's words: "Sent October 22,
 //   2026" · "Not sent — email isn't connected" · "No email on file" ·
-//   "Sending by email" · "Void — the gift was voided".
-//   Send / Send again (quiet) only when it can really go: email connected,
-//   an email on file, not void, not a sample.
+//   "Waiting — needs address" · "Sending by email" · "Not sure it went —
+//   check with the donor" · "Void — the receipt was already emailed".
+//   Send / Send again (quiet) only when the server says it can really go:
+//   email connected, an email and a home address on file, not void, not a
+//   sample, not already on its way. "Send void notice" for a voided receipt
+//   the donor already got (once).
 //   More: the donor's own link (Copy link · Open) and the donor's profile.
 //   Printing shows the receipt alone (receipts.css).
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action } from '../api.js';
-import { ReceiptDoc } from '../components/ReceiptsBits.jsx';
+import { ReceiptDoc, sendWord, onItsWay } from '../components/ReceiptsBits.jsx';
 import './shifts.css';
 import './receipts.css';
 
@@ -53,7 +56,7 @@ export default function ReceiptsOne() {
     queryKey: ['receipts', 'one', id],
     queryFn: () => apiGet(`/receipts/${id}`),
     // While the email is on its way, look again until it has gone (or not).
-    refetchInterval: (query) => (query.state.data?.receipt?.status?.code === 'sending' ? 3000 : false),
+    refetchInterval: (query) => (onItsWay(query.state.data?.receipt?.status) ? 3000 : false),
   });
   const data = q.data;
   const r = data?.receipt;
@@ -65,12 +68,13 @@ export default function ReceiptsOne() {
   };
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const send = async () => {
+  const send = async (kind = 'receipt') => {
     setError(null);
     setBusy(true);
     try {
-      const res = await action('receipt.send', { id: r.id });
-      say(res.email === 'sent' ? `✓ Sent to ${r.donor_name}` : 'Not sent — the email failed');
+      const res = await action(kind === 'void' ? 'receipt.sendVoid' : 'receipt.send', { id: r.id });
+      const what = kind === 'void' ? 'Void notice sent' : 'Sent';
+      say(res.email === 'sent' ? `✓ ${what} to ${r.donor_name}` : 'Not sent — the email failed');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -101,8 +105,15 @@ export default function ReceiptsOne() {
         <p className="rc-one-status" data-code={r.status.code}>{r.status.line}</p>
         {data.canSend && (
           <div className="ops-actions rc-send">
-            <button type="button" className="btn ops-tap" disabled={busy} onClick={send}>
-              {busy ? 'Sending…' : r.sent_count > 0 ? 'Send again' : 'Send'}
+            <button type="button" className="btn ops-tap" disabled={busy} onClick={() => send()}>
+              {busy ? 'Sending…' : sendWord(r)}
+            </button>
+          </div>
+        )}
+        {r.can_send_void && (
+          <div className="ops-actions rc-send">
+            <button type="button" className="btn ops-tap" disabled={busy} onClick={() => send('void')}>
+              {busy ? 'Sending…' : 'Send void notice'}
             </button>
           </div>
         )}

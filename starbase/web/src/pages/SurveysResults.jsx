@@ -38,7 +38,7 @@ function Bar({ o, from }) {
               {o.people.map((p) => (
                 <li key={p.id}><Link to={`/people/${p.id}`} state={{ from }}>{p.name}</Link></li>
               ))}
-              {o.more > 0 && <li className="muted sv-people__more">+{o.more} more in the CSV</li>}
+              {o.more > 0 && <li className="muted sv-people__more">+{o.more} more in the download</li>}
             </ul>
           )}
         </>
@@ -64,7 +64,7 @@ function QuestionResult({ q, from }) {
                 </span>
               </li>
             ))}
-            {q.more > 0 && <li className="muted">+{q.more} more in the CSV</li>}
+            {q.more > 0 && <li className="muted">+{q.more} more in the download</li>}
           </ul>
         )
       ) : (
@@ -109,7 +109,7 @@ export default function SurveysResults() {
         </button>
         {more && (
           <div id="sv-res-more" className="ops-more-body ops-actions">
-            <a className="btn ops-tap" href={`/api/surveys/${id}/results.csv`} download>Download CSV</a>
+            <a className="btn ops-tap" href={`/api/surveys/${id}/results.csv`} download>Download for a spreadsheet</a>
             <span className="ops-meta">{plural(survey.people, 'row')}</span>
           </div>
         )}

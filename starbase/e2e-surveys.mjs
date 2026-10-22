@@ -354,7 +354,7 @@ const lines = csv.raw.trim().split(/\r\n/);
 check('CSV: a header + one row per person who answered', csv.status === 200 && lines.length === 1 + res.survey.people && /^Name,Phone,Email,Address,Last answer,What matters most to you\?/.test(lines[0]), `${lines.length} ${lines[0]}`);
 await page.click('.ops-foot .ops-more');
 const dl = await page.$('a[href$="/results.csv"]');
-check('Download CSV sits under More', !!dl);
+check('Download for a spreadsheet sits under More', !!dl);
 
 // ── 7. Profile: Answers (desk), none for the volunteer ──
 await D.go(`/people/${P.maya.id}`);

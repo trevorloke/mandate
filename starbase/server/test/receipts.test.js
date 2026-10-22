@@ -72,17 +72,27 @@ const parseCsv = (text) => text.trim().split('\r\n').map((line) => {
 
 // Stand in for the email provider: RESEND_API_KEY set and fetch answered
 // here (both restored after). `fail` picks addresses the provider refuses.
+// Like the real one, a request whose Idempotency-Key it already sent is
+// answered as before and not sent again (logged in sent.deduped).
 const withEmail = async (fn, { fail = () => false } = {}) => {
   const realFetch = globalThis.fetch;
   const had = Object.hasOwn(process.env, 'RESEND_API_KEY');
   const old = process.env.RESEND_API_KEY;
   const sent = [];
+  sent.deduped = [];
+  const seen = new Set();
   process.env.RESEND_API_KEY = 'test-key';
   globalThis.fetch = async (url, init) => {
     if (String(url).startsWith('https://api.resend.com/')) {
       const msg = JSON.parse(init.body);
+      const key = init.headers?.['Idempotency-Key'] || null;
       if (fail(msg.to[0])) return new Response('mailbox unavailable', { status: 500 });
-      sent.push(msg);
+      if (key && seen.has(key)) {
+        sent.deduped.push(key);
+        return new Response(JSON.stringify({ id: 'msg' }), { status: 200 });
+      }
+      if (key) seen.add(key);
+      sent.push({ ...msg, key });
       return new Response(JSON.stringify({ id: 'msg' }), { status: 200 });
     }
     return realFetch(url, init);
@@ -107,6 +117,9 @@ const receiptFor = async (client, giftId) => {
 };
 const one = async (client, id) => (await client.get(`/api/receipts/${id}`)).json;
 const tokenOf = async (id) => (await db.query('select token from receipts where id = $1', [id])).rows[0].token;
+// The automatic email waits out the gift's Undo (a minute): make it due now.
+const due = (ws) => db.query(`update jobs set run_at = now() where workspace_id = $1 and kind = 'receipt.email' and status = 'pending'`, [ws]);
+const statusRow = async (id) => (await db.query('select email_status, sent_count from receipts where id = $1', [id])).rows[0];
 const verified = async (client) => {
   const v = await client.get('/api/audit/verify');
   assert.equal(v.json.ok, true, JSON.stringify(v.json));
@@ -283,10 +296,21 @@ test('email connected: sent once by itself, Send again sends again; a refusal is
     const g = await gift(mgr, d, 15000);
     let r = await receiptFor(mgr, g.id);
     assert.equal(r.status.word, 'Sending', 'issued while connected: waiting for the job, not claiming sent');
+    assert.equal(r.can_send, true, 'a person may still send it now');
     assert.equal(sent.length, 0);
+    // Due a minute after the gift (after its Undo), not at once.
+    const wait = (await db.query(
+      `select extract(epoch from run_at - created_at)::int as s from jobs where workspace_id = $1 and kind = 'receipt.email' and payload->>'receipt_id' = $2`,
+      [wsId, r.id],
+    )).rows[0].s;
+    assert.ok(wait >= 55 && wait <= 65, `due in about a minute (${wait}s)`);
+    await runDueJobs(db, { workspaceId: wsId });
+    assert.equal(sent.length, 0, 'not before the minute is up');
+    await due(wsId);
     await runDueJobs(db, { workspaceId: wsId });
     assert.equal(sent.length, 1);
     assert.deepEqual(sent[0].to, [mail('erin')]);
+    assert.equal(sent[0].key, `receipt-${r.id}-1`, 'the provider gets receipt + send count as the idempotency key');
     assert.match(sent[0].subject, new RegExp(`Your receipt ${r.number} from Receipts ${tag}`));
     for (const words of ['Contributor: Erin Email', 'Home address: 5 Mail Rd, Surrey', 'Amount: $150.00', 'Date received: October 1, 2026',
       'Financial agent: Jordan Agent · agent@example.org', 'Contributions to BC municipal election campaigns are not tax-deductible.']) {
@@ -301,18 +325,20 @@ test('email connected: sent once by itself, Send again sends again; a refusal is
     assert.equal(again.status, 200);
     assert.equal(again.json.email, 'sent');
     assert.equal(sent.length, 2);
+    assert.equal(sent[1].key, `receipt-${r.id}-2`);
     assert.equal((await receiptFor(mgr, g.id)).sent_count, 2);
     const ev = (await db.query(
       `select action, op, actor_id, payload from events where workspace_id = $1 and entity_type = 'receipt' and entity_id = $2 order by seq`, [wsId, r.id],
     )).rows;
     assert.deepEqual(ev.map((e) => [e.action, e.op, e.payload.email_status ?? null]),
-      [['gift.log', 'create', null], ['receipt.autosend', 'update', 'sent'], ['receipt.send', 'update', 'sent']]);
+      [['gift.log', 'create', null], ['receipt.autosend', 'update', 'sending'], ['receipt.autosend', 'update', 'sent'], ['receipt.send', 'update', 'sent']]);
     assert.equal(ev[1].actor_id, null);
-    assert.equal(ev[2].payload.again, true);
+    assert.equal(ev[2].actor_id, null);
+    assert.equal(ev[3].payload.again, true);
   });
 
   // The provider refuses: tried three times, then "Not sent — the email failed".
-  const f = await mgr.createPerson('Fay Fails', { email: mail('fay') });
+  const f = await mgr.createPerson('Fay Fails', { email: mail('fay'), address: '6 Bounce Rd' });
   await withEmail(async (sent) => {
     const g = await gift(mgr, f, 2000);
     for (let i = 0; i < 3; i += 1) {
@@ -332,8 +358,8 @@ test('email connected: sent once by itself, Send again sends again; a refusal is
 test('email not connected: nothing pretends to send; no email on file says so; Send all sends what is waiting once connected', async () => {
   delete process.env.RESEND_API_KEY;
   const { c, ws } = await campaign(`Unsent ${tag}`);
-  const a = await c.createPerson('Una Unsent', { email: mail('una') });
-  const b = await c.createPerson('Bo NoEmail');
+  const a = await c.createPerson('Una Unsent', { email: mail('una'), address: '1 Unsent Ave' });
+  const b = await c.createPerson('Bo NoEmail', { address: '2 Unsent Ave' });
   const ga = await gift(c, a, 3000);
   const gb = await gift(c, b, 3000);
   const ra = await receiptFor(c, ga.id);
@@ -392,7 +418,7 @@ test('the donor link shows that one receipt and nothing else', async () => {
   assert.equal(logged, 0, 'the token is never in the event log');
 });
 
-test('disclosure CSV: contributors over $100 (editable), each contribution listed; the register lists every receipt', async () => {
+test('disclosure: contributors over $100 for one period (editable), each contribution listed, over-limit marked; the register lists every receipt', async () => {
   const { c, ws } = await campaign(`Disclose ${tag}`);
   const tr = await member(ws, 'treasurer', 'dtreas');
   const st = await member(ws, 'staff', 'dstaff');
@@ -403,6 +429,8 @@ test('disclosure CSV: contributors over $100 (editable), each contribution liste
   const sam1 = await c.createPerson('Sam Twin', { address: '5 Fifth St' });
   const sam2 = await c.createPerson('Sam Twin', { address: '6 Sixth St' });
   const evil = await c.createPerson('=HYPERLINK("http://x.example")', { address: '7 Seventh St' });
+  const rec = await c.createPerson('Rec Three', { address: '8 Eighth St' });
+  const olga = await c.createPerson('Olga Overlimit', { address: '9 Ninth St' });
   await gift(c, ann, 6000, '2026-03-01');
   await gift(c, ann, 5000, '2026-04-01');
   await gift(c, bob, 10000, '2026-05-01');
@@ -413,38 +441,79 @@ test('disclosure CSV: contributors over $100 (editable), each contribution liste
   await gift(c, sam1, 8000, '2026-08-01');
   await gift(c, sam2, 8000, '2026-08-02');
   await gift(c, evil, 20000, '2026-09-01');
+  // $20 last year + $90 this year: over $100 only if the years are added up.
+  await gift(c, rec, 2000, '2025-11-15');
+  await gift(c, rec, 9000, '2026-02-01');
+  // Over the contribution limit this year (Money flags it).
+  await gift(c, olga, 130000, '2026-02-02');
 
-  const res = await raw(tr, '/api/receipts/disclosure.csv');
+  const res = await raw(tr, '/api/receipts/disclosure.csv?period=2026');
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /text\/csv/);
-  assert.match(res.headers.get('content-disposition'), /attachment; filename="disclosure-over-100-/);
+  assert.match(res.headers.get('content-disposition'), /attachment; filename="disclosure-over-100-2026\.csv"/);
   const rows = parseCsv(res.text);
-  assert.deepEqual(rows[0], ['Contributor', 'Home address', 'Contributor total', 'Date received', 'Amount', 'Receipt']);
-  const body = rows.slice(1).map((r) => r.slice(0, 5));
+  assert.deepEqual(rows[0], ['Period', 'Calendar year 2026', '2026-01-01 to 2026-12-31'], 'the period is the first row');
+  assert.deepEqual(rows[1], ['Contributor', 'Home address', 'Contributor total', 'Over limit', 'Date received', 'Amount', 'Receipt']);
+  const body = rows.slice(2).map((r) => r.slice(0, 6));
   assert.deepEqual(body, [
-    ["'=HYPERLINK(\"http://x.example\")", '7 Seventh St', '200.00', '2026-09-01', '200.00'],
-    ['Ann Over', '1 First St, Surrey, V3W 1A1', '110.00', '2026-03-01', '60.00'],
-    ['Ann Over', '1 First St, Surrey, V3W 1A1', '110.00', '2026-04-01', '50.00'],
-    ['Cy Single', '3 Third St', '150.00', '2026-06-01', '150.00'],
-  ], 'over $100 only: exactly $100 is not over, a voided gift does not count, two people with one name never pool');
-  assert.ok(rows.slice(1).every((r) => /^2026-\d{4}$/.test(r[5])), 'each contribution names its receipt');
+    ["'=HYPERLINK(\"http://x.example\")", '7 Seventh St', '200.00', 'No', '2026-09-01', '200.00'],
+    ['Ann Over', '1 First St, Surrey, V3W 1A1', '110.00', 'No', '2026-03-01', '60.00'],
+    ['Ann Over', '1 First St, Surrey, V3W 1A1', '110.00', 'No', '2026-04-01', '50.00'],
+    ['Cy Single', '3 Third St', '150.00', 'No', '2026-06-01', '150.00'],
+    ['Olga Overlimit', '9 Ninth St', '1300.00', 'Yes', '2026-02-02', '1300.00'],
+  ], 'over $100 in 2026 only: exactly $100 is not over, a voided gift does not count, two people with one name never pool, last year never adds in');
+  assert.ok(rows.slice(2).every((r) => /^2026-\d{4}$/.test(r[6])), 'each contribution names its receipt');
+  const last = parseCsv((await raw(tr, '/api/receipts/disclosure.csv?period=2025')).text);
+  assert.deepEqual(last[0], ['Period', 'Calendar year 2025', '2025-01-01 to 2025-12-31']);
+  assert.equal(last.length, 2, '2025: nobody over $100 (Rec Three gave $20)');
+
+  // The campaign's own period (the default): set under Settings.
+  assert.equal((await tr.action('receipt.settings', { period_start: '2026-07-01', period_end: '2026-05-01' })).status, 400, 'ends before it starts');
+  assert.equal((await tr.action('receipt.settings', { period_start: '2026-05-01', period_end: '2026-06-30' })).status, 200);
+  const camp = await raw(tr, '/api/receipts/disclosure.csv');
+  assert.match(camp.headers.get('content-disposition'), /filename="disclosure-over-100-campaign-2026-05-01-to-2026-06-30\.csv"/);
+  const campRows = parseCsv(camp.text);
+  assert.deepEqual(campRows[0], ['Period', 'This campaign', '2026-05-01 to 2026-06-30']);
+  assert.deepEqual(campRows.slice(2).map((r) => r[0]), ['Cy Single']);
+  const listed = (await tr.get('/api/receipts')).json;
+  assert.deepEqual(listed.periods.map((p) => [p.key, p.from, p.to]),
+    [['campaign', '2026-05-01', '2026-06-30'], ['2026', '2026-01-01', '2026-12-31'], ['2025', '2025-01-01', '2025-12-31']]);
+  assert.equal((await tr.action('receipt.settings', { period_start: null, period_end: null })).status, 200);
+  const dflt = parseCsv((await raw(tr, '/api/receipts/disclosure.csv')).text)[0];
+  assert.deepEqual(dflt.slice(0, 2), ['Period', 'This campaign']);
+  assert.match(dflt[2], /^(\d{4})-01-01 to \1-12-31$/, 'unset: this calendar year');
 
   assert.equal((await tr.action('receipt.settings', { disclosure_cents: 5000 })).status, 200);
-  const lower = parseCsv((await raw(c, '/api/receipts/disclosure.csv')).text).slice(1).map((r) => r[0]);
-  assert.deepEqual([...new Set(lower)], ["'=HYPERLINK(\"http://x.example\")", 'Ann Over', 'Bob Exactly', 'Cy Single', 'Dee Voided', 'Sam Twin']);
+  const lower = parseCsv((await raw(c, '/api/receipts/disclosure.csv?period=2026')).text).slice(2).map((r) => r[0]);
+  assert.deepEqual([...new Set(lower)], ["'=HYPERLINK(\"http://x.example\")", 'Ann Over', 'Bob Exactly', 'Cy Single', 'Dee Voided', 'Olga Overlimit', 'Rec Three', 'Sam Twin']);
   assert.equal(lower.filter((n) => n === 'Sam Twin').length, 2);
 
   const reg = parseCsv((await raw(c, '/api/receipts/register.csv')).text);
   assert.deepEqual(reg[0], ['Receipt', 'Status', 'Date received', 'Contributor', 'Home address', 'Amount', 'Method', 'Sent']);
-  assert.deepEqual(reg.slice(1).map((r) => r[0]), Array.from({ length: 9 }, (_, i) => `2026-${String(i + 1).padStart(4, '0')}`));
+  assert.deepEqual(reg.slice(1).map((r) => r[0]), ['2025-0001', ...Array.from({ length: 11 }, (_, i) => `2026-${String(i + 1).padStart(4, '0')}`)]);
   assert.equal(reg.find((r) => r[5] === '50.00' && r[3] === 'Dee Voided')[1], 'Void');
-  assert.equal(reg[1][1], 'Not sent');
+  assert.equal(reg[2][1], 'Not sent');
 
   // Staff keep the books but the filing exports are the agent's.
   assert.equal((await raw(st, '/api/receipts/disclosure.csv')).status, 403);
   assert.equal((await raw(st, '/api/receipts/register.csv')).status, 403);
   assert.equal((await st.get('/api/receipts')).status, 200);
   await verified(c);
+});
+
+test('the sample campaign never reaches the filing exports', async () => {
+  const { c } = await campaign(`SampleFile ${tag}`);
+  assert.equal((await c.post('/api/data/sample')).status, 200);
+  const real = await c.createPerson('Rhoda Real', { address: '10 Real Rd' });
+  const year = new Date().getFullYear();
+  await gift(c, real, 25000, `${year}-01-15`);
+  const dis = parseCsv((await raw(c, `/api/receipts/disclosure.csv?period=${year}`)).text);
+  assert.deepEqual(dis.slice(2).map((r) => [r[0], r[2]]), [['Rhoda Real', '250.00']], 'no sample donor (Arjun Mehta, Charlotte Hughes …) is listed');
+  const reg = parseCsv((await raw(c, '/api/receipts/register.csv')).text);
+  assert.deepEqual(reg.slice(1).map((r) => r[0]), [`${year}-0001`], 'no SAMPLE receipts in the register');
+  const list = (await c.get('/api/receipts')).json;
+  assert.equal(list.sampleLoaded, true);
+  assert.ok(list.receipts.some((r) => r.sample), 'the screen still shows them, marked Sample');
 });
 
 test('volunteers get 403 on every receipts read and write, and no receipt rides on what they can read', async () => {
@@ -510,12 +579,185 @@ test('an unsent receipt follows the donor’s record; a sent one stays as it was
   await verified(mgr);
 });
 
+test('the automatic email waits out the Undo: a gift undone in that minute never reaches the donor', async () => {
+  const d = await mgr.createPerson('Una Undo', { email: mail('undo'), address: '11 Undo Ln' });
+  await withEmail(async (sent) => {
+    const g = await gift(mgr, d, 4000);
+    const r = await receiptFor(mgr, g.id);
+    assert.equal(r.status.code, 'queued', 'Money’s toast reads this: "receipt emails in a minute"');
+    assert.equal((await mgr.action('gift.void', { id: g.id })).status, 200);
+    await due(wsId);
+    await runDueJobs(db, { workspaceId: wsId });
+    assert.equal(sent.filter((m) => m.to[0] === mail('undo')).length, 0, 'nothing went');
+    const v = (await one(mgr, r.id)).receipt;
+    assert.deepEqual([v.status.line, v.emailed, v.can_send_void], ['Void — the gift was voided', false, false], 'no void notice to send');
+    const job = (await db.query(`select status from jobs where workspace_id = $1 and kind = 'receipt.email' and payload->>'receipt_id' = $2`, [wsId, r.id])).rows[0];
+    assert.equal(job.status, 'cancelled');
+    assert.equal((await mgr.action('receipt.sendVoid', { id: r.id })).status, 409, 'never emailed: nothing to call back');
+  });
+  await verified(mgr);
+});
+
+test('a failure after the send never sends twice by itself; Send again goes with the same key (one email)', async () => {
+  const d = await mgr.createPerson('Rory Retry', { email: mail('rory'), address: '12 Retry Rd' });
+  const boom = { on: false };
+  onHook('events', async (_tx, meta, events) => {
+    if (boom.on && meta.action === 'receipt.autosend' && events.some((e) => e.payload?.email_status === 'sent')) {
+      throw new Error('the database went away after the send');
+    }
+  });
+  await withEmail(async (sent) => {
+    const g = await gift(mgr, d, 6000);
+    const r = await receiptFor(mgr, g.id);
+    boom.on = true;
+    await due(wsId);
+    await runDueJobs(db, { workspaceId: wsId });
+    assert.equal(sent.length, 1, 'the provider got it');
+    assert.equal((await statusRow(r.id)).email_status, 'sending', 'committed before the provider call, so the retry knows');
+    for (let i = 0; i < 3; i += 1) {
+      await due(wsId);
+      await runDueJobs(db, { workspaceId: wsId });
+    }
+    assert.equal(sent.length, 1, 'the retry finds "sending" and stops — never a second copy');
+    let s1 = (await one(mgr, r.id)).receipt;
+    assert.equal(s1.status.word, 'Sending');
+    assert.equal(s1.can_send, false, 'no Send while it may still be on its way');
+    // Minutes later, still no answer recorded: the screen says so.
+    await db.query(`update receipts set updated_at = now() - interval '10 minutes' where id = $1`, [r.id]);
+    s1 = (await one(mgr, r.id)).receipt;
+    assert.deepEqual([s1.status.code, s1.status.line], ['unsure', 'Not sure it went — check with the donor']);
+    assert.equal(s1.can_send, true);
+    boom.on = false;
+    const again = await mgr.action('receipt.send', { id: r.id });
+    assert.equal(again.status, 200, JSON.stringify(again.json));
+    assert.deepEqual([sent.length, sent.deduped], [1, [`receipt-${r.id}-1`]], 'same key: the provider sends it once');
+    const done = (await one(mgr, r.id)).receipt;
+    assert.deepEqual([done.status.word, done.sent_count], ['Sent', 1], 'the screen says what the donor has: one');
+  });
+  boom.on = false;
+  await verified(mgr);
+});
+
+test('no home address: the receipt says "Needs address", is held, and goes by itself once the address is on file', async () => {
+  const d = await mgr.createPerson('Nia Noaddress', { email: mail('nia'), city: 'Surrey' });
+  await withEmail(async (sent) => {
+    const g = await gift(mgr, d, 15000);
+    let r = await receiptFor(mgr, g.id);
+    assert.deepEqual([r.status.code, r.status.word, r.status.line], ['needs_address', 'Needs address', 'Waiting — needs address'],
+      'a city alone is no home address');
+    assert.equal(r.needs_address, true);
+    assert.equal(r.can_send, false);
+    assert.equal((await statusRow(r.id)).email_status, 'held');
+    assert.equal((await db.query(`select count(*)::int as n from jobs where workspace_id = $1 and payload->>'receipt_id' = $2`, [wsId, r.id])).rows[0].n, 0);
+    const needs = (await treas.get('/api/receipts/needs')).json.receipts;
+    assert.ok(needs.some((x) => x.id === r.id && x.donor_name === 'Nia Noaddress'), 'Money → Needs you lists it');
+    const send = await mgr.action('receipt.send', { id: r.id });
+    assert.equal(send.status, 409);
+    assert.match(send.json.error, /home address/);
+    assert.equal((await mgr.action('receipt.sendAll', {})).status, 200);
+    assert.equal(sent.filter((m) => m.to[0] === mail('nia')).length, 0, 'Send all leaves it waiting too');
+    assert.equal((await mgr.action('person.update', { id: d.id, address: '9 Late St' })).status, 200);
+    r = await receiptFor(mgr, g.id);
+    assert.equal(r.status.word, 'Sending', 'queued the moment the address is on file');
+    assert.equal(r.needs_address, false);
+    await runDueJobs(db, { workspaceId: wsId });
+    const got = sent.filter((m) => m.to[0] === mail('nia'));
+    assert.equal(got.length, 1);
+    assert.ok(got[0].text.includes('Home address: 9 Late St, Surrey'), got[0].text);
+    assert.equal((await receiptFor(mgr, g.id)).status.word, 'Sent');
+    assert.ok(!(await treas.get('/api/receipts/needs')).json.receipts.some((x) => x.id === r.id));
+  });
+  assert.equal((await vol.get('/api/receipts/needs')).status, 403);
+  await verified(mgr);
+});
+
+test('a voided receipt the donor already got: send a void notice (once)', async () => {
+  const d = await mgr.createPerson('Vic Voidnotice', { email: mail('vicv'), address: '13 Void Way' });
+  await withEmail(async (sent) => {
+    const g = await gift(mgr, d, 4000);
+    const r = await receiptFor(mgr, g.id);
+    await due(wsId);
+    await runDueJobs(db, { workspaceId: wsId });
+    assert.equal(sent.filter((m) => m.to[0] === mail('vicv')).length, 1);
+    assert.equal((await mgr.action('gift.void', { id: g.id })).status, 200);
+    let v = (await receiptFor(mgr, g.id));
+    assert.deepEqual([v.void, v.emailed, v.can_send_void, v.status.line], [true, true, true, 'Void — the receipt was already emailed']);
+    assert.equal((await vol.action('receipt.sendVoid', { id: r.id })).status, 403);
+    const res = await staff.action('receipt.sendVoid', { id: r.id });
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.equal(res.json.email, 'sent');
+    const notice = sent.filter((m) => m.to[0] === mail('vicv'))[1];
+    assert.equal(notice.subject, `Receipt ${r.number} from Receipts ${tag} is void`);
+    assert.ok(notice.text.includes('$40.00 contribution received October 1, 2026 was voided'), notice.text);
+    assert.equal(notice.key, `receipt-void-${r.id}-1`);
+    v = await receiptFor(mgr, g.id);
+    assert.equal(v.can_send_void, false, 'once');
+    assert.match(v.status.line, /^Void — void notice sent [A-Z][a-z]+ \d{1,2}, \d{4}$/);
+    const ev = (await db.query(`select action, payload from events where workspace_id = $1 and entity_id = $2 and action = 'receipt.sendVoid'`, [wsId, r.id])).rows;
+    assert.equal(ev.length, 1);
+    assert.equal(ev[0].payload.void_notice, 'sent');
+  });
+  // Email off: refused plainly.
+  const d2 = await mgr.createPerson('Wes Offline', { email: mail('wes'), address: '14 Off St' });
+  let r2;
+  await withEmail(async () => {
+    const g2 = await gift(mgr, d2, 3000);
+    r2 = await receiptFor(mgr, g2.id);
+    await due(wsId);
+    await runDueJobs(db, { workspaceId: wsId });
+    assert.equal((await mgr.action('gift.void', { id: g2.id })).status, 200);
+  });
+  const off = await mgr.action('receipt.sendVoid', { id: r2.id });
+  assert.equal(off.status, 409);
+  assert.match(off.json.error, /Email isn’t connected/);
+  await verified(mgr);
+});
+
+test('card gifts are dated by the campaign’s day, not the UTC day', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_receipts';
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_receipts';
+  const realFetch = globalThis.fetch;
+  let n = 0;
+  globalThis.fetch = async (url, init) => (String(url) === 'https://api.stripe.com/v1/checkout/sessions'
+    ? new Response(JSON.stringify({ id: `cs_tz_${tag}_${n}`, url: 'https://checkout.stripe.test/tz' }), { status: 200 })
+    : realFetch(url, init));
+  const pay = async (who, at) => {
+    n += 1;
+    const go = await pub('POST', `/d/${slug}`, new URLSearchParams({
+      amount: '30', name: who, email: mail(who.toLowerCase().replace(/\W/g, '')), address: '15 Evening Rd, Surrey', ...eligible,
+    }));
+    assert.equal(go.status, 303);
+    const p = (await mgr.get('/api/pledges')).json.pledges.find((x) => x.email === mail(who.toLowerCase().replace(/\W/g, '')));
+    const body = JSON.stringify({ id: `evt_tz_${tag}_${n}`, type: 'checkout.session.completed', created: Math.floor(at / 1000), data: { object: {
+      id: `cs_tz_${tag}_${n}`, mode: 'payment', payment_status: 'paid', amount_total: 3000, payment_intent: `pi_tz_${n}`, created: Math.floor(at / 1000),
+      metadata: { pledge_id: p.id, workspace_id: wsId },
+    } } });
+    const hook = await pub('POST', '/api/public/stripe/webhook', body, { 'stripe-signature': stripeSign(body, 'whsec_receipts') });
+    assert.equal(hook.status, 200, JSON.stringify(hook.json));
+    return receiptFor(mgr, hook.json.gift_id);
+  };
+  try {
+    // 7:30 pm Pacific on Oct 21 is 02:30 UTC on Oct 22.
+    const evening = await pay('Eve Evening', Date.UTC(2026, 9, 22, 2, 30));
+    assert.equal(evening.received_on, '2026-10-21');
+    assert.ok((await one(mgr, evening.id)).doc.received_on === '2026-10-21');
+    // 7 pm Pacific on Dec 31 stays in 2026's series and limit.
+    const nye = await pay('Ned Newyear', Date.UTC(2027, 0, 1, 3, 0));
+    assert.equal(nye.received_on, '2026-12-31');
+    assert.match(nye.number, /^2026-\d{4}$/);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+  }
+});
+
 test('the books still verify across everything in this file', async () => {
   await verified(mgr);
   const kinds = (await db.query(
     `select distinct action from events where workspace_id = $1 and entity_type in ('receipt', 'receipt_settings') order by 1`, [wsId],
   )).rows.map((r) => r.action);
-  for (const a of ['gift.log', 'gift.void', 'gift.restore', 'pledge.receive', 'stripe.payment', 'receipt.send', 'receipt.autosend', 'receipt.settings', 'person.update']) {
+  for (const a of ['gift.log', 'gift.void', 'gift.restore', 'pledge.receive', 'stripe.payment', 'receipt.send', 'receipt.autosend', 'receipt.sendVoid', 'receipt.settings', 'person.update']) {
     assert.ok(kinds.includes(a), a);
   }
 });

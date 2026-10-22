@@ -1,17 +1,30 @@
 // receipt.* actions — the only writes this feature makes from the desk.
 //   receipt.send       email one receipt (Send / Send again)
 //   receipt.sendAll    email every receipt not sent yet that can be
-//   receipt.settings   financial agent, threshold, tax line, footer, disclosure
+//   receipt.sendVoid   email "this receipt is void" for a voided receipt the
+//                      donor was already emailed
+//   receipt.settings   financial agent, threshold, tax line, footer,
+//                      disclosure amount, the election period
 // Sends happen inside the action, so what the screen says afterwards is what
-// the email provider answered. Without email connected they refuse plainly.
+// the email provider answered; each carries an idempotency key (receipt +
+// send count), so a send repeated after an unknown outcome reaches the donor
+// once. Without email connected — or without the donor's home address —
+// they refuse plainly.
 import { z } from 'zod';
 import { emailConfigured } from '../../lib/notify.js';
 import { httpError } from '../../actions/util.js';
-import { MONEY_ROLES, AGENT_ROLES, DEFAULTS, deliver, donorEmail } from './core.js';
+import {
+  MONEY_ROLES, AGENT_ROLES, DEFAULTS, deliver, deliverVoid, donorEmail, currentAddress, canSendOf, wasEmailed,
+} from './core.js';
 
 const SEND_ALL_MAX = 100;
 const text = (max) => z.string().max(max).nullish();
 const cents = () => z.number().int().min(0).max(100_000_000).optional();
+const day = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD').nullish();
+const NO_ADDRESS = 'Add the donor’s home address first — nothing was sent';
+
+// A stored date comes back as a Date at UTC midnight.
+const dayOf = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null);
 
 const sendable = (r) => {
   if (r.voided_at) return 'This receipt is void';
@@ -32,7 +45,28 @@ export const actions = {
       const email = await donorEmail(tx, ctx.workspaceId, r.person_id);
       if (!email) throw httpError(409, 'No email on file for this donor');
       if (!emailConfigured()) throw httpError(409, 'Email isn’t connected — nothing was sent');
+      const hasAddress = !!(await currentAddress(tx, ctx.workspaceId, r));
+      if (!hasAddress) throw httpError(409, NO_ADDRESS);
+      if (!canSendOf(r, { emailOn: true, hasEmail: true, hasAddress })) throw httpError(409, 'It’s on its way — try again in a minute');
       const res = await deliver(tx, { workspaceId: ctx.workspaceId, emit }, r, { email, base: ctx.publicUrl });
+      return { id: r.id, number: r.number, email: res.status, detail: res.detail };
+    },
+  },
+
+  'receipt.sendVoid': {
+    roles: MONEY_ROLES,
+    input: z.object({ id: z.uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const r = (await tx.query('select * from receipts where id = $1 and workspace_id = $2 for update',
+        [input.id, ctx.workspaceId])).rows[0];
+      if (!r) throw httpError(404, 'receipt not found');
+      if (!r.voided_at) throw httpError(409, 'This receipt isn’t void');
+      if (r.sample) throw httpError(409, 'Sample receipts are never sent');
+      if (!wasEmailed(r)) throw httpError(409, 'This receipt was never emailed — nothing to call back');
+      const email = await donorEmail(tx, ctx.workspaceId, r.person_id);
+      if (!email) throw httpError(409, 'No email on file for this donor');
+      if (!emailConfigured()) throw httpError(409, 'Email isn’t connected — nothing was sent');
+      const res = await deliverVoid(tx, { workspaceId: ctx.workspaceId, emit }, r, { email, base: ctx.publicUrl });
       return { id: r.id, number: r.number, email: res.status, detail: res.detail };
     },
   },
@@ -45,7 +79,9 @@ export const actions = {
       const todo = (await tx.query(
         `select r.*, nullif(trim(p.email), '') as email from receipts r join persons p on p.id = r.person_id
          where r.workspace_id = $1 and r.voided_at is null and not r.sample
-           and r.email_status is distinct from 'sent' and nullif(trim(p.email), '') is not null
+           and r.email_status is distinct from 'sent' and r.email_status is distinct from 'sending'
+           and nullif(trim(p.email), '') is not null
+           and (nullif(trim(r.donor_address), '') is not null or nullif(trim(p.address), '') is not null)
          order by r.series, r.seq limit $2 for update of r`,
         [ctx.workspaceId, SEND_ALL_MAX + 1],
       )).rows;
@@ -67,6 +103,8 @@ export const actions = {
       agent_contact: text(300),
       notice: text(300),
       footer: text(500),
+      period_start: day(),
+      period_end: day(),
     }),
     handler: async (tx, ctx, input, emit) => {
       const cur = (await tx.query('select * from receipt_settings where workspace_id = $1 for update', [ctx.workspaceId])).rows[0];
@@ -79,13 +117,20 @@ export const actions = {
         agent_contact: pick('agent_contact', null),
         notice: pick('notice', null),
         footer: has('footer') ? pick('footer', null) : (cur ? cur.footer : DEFAULTS.footer),
+        period_start: dayOf(pick('period_start', null)),
+        period_end: dayOf(pick('period_end', null)),
       };
+      if (next.period_start && next.period_end && next.period_end < next.period_start) {
+        throw httpError(400, 'The campaign ends before it starts');
+      }
       await tx.query(
-        `insert into receipt_settings (workspace_id, threshold_cents, disclosure_cents, agent_name, agent_contact, notice, footer, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7, now())
+        `insert into receipt_settings (workspace_id, threshold_cents, disclosure_cents, agent_name, agent_contact, notice, footer,
+                                       period_start, period_end, updated_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
          on conflict (workspace_id) do update set threshold_cents = $2, disclosure_cents = $3, agent_name = $4,
-           agent_contact = $5, notice = $6, footer = $7, updated_at = now()`,
-        [ctx.workspaceId, next.threshold_cents, next.disclosure_cents, next.agent_name, next.agent_contact, next.notice, next.footer],
+           agent_contact = $5, notice = $6, footer = $7, period_start = $8, period_end = $9, updated_at = now()`,
+        [ctx.workspaceId, next.threshold_cents, next.disclosure_cents, next.agent_name, next.agent_contact, next.notice, next.footer,
+          next.period_start, next.period_end],
       );
       const changed = Object.fromEntries(Object.keys(next).filter(has).map((k) => [k, next[k]]));
       emit('receipt_settings', ctx.workspaceId, 'update', changed);

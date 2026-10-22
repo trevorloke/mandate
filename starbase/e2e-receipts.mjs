@@ -10,17 +10,27 @@
 // (/r/<token>, no sign-in) shows that receipt and nothing else. Voiding the
 // gift voids the receipt (number kept), Undo brings it back; a void receipt
 // says VOID on the donor's page. A pledge from the donate page, marked paid,
-// gets the next number. The disclosure CSV lists contributors over $100 and
-// the register lists every receipt. The new screens are measured on a phone.
+// gets the next number. A donor with no home address: Log a gift asks for
+// it under More details; left blank, the toast says "receipt needs address"
+// and Money's Needs you lists it ("Needs address") until the address is
+// saved right there. The disclosure (for a period, with an Over limit
+// column) lists contributors over $100 and the register lists every
+// receipt, each "Download for a spreadsheet". The new screens are measured
+// on a phone.
 // A volunteer on a 390×844 phone can reach none of it — screens, API, or the
 // JSON their browser receives — and the books verify.
 //
 // Part 2, email connected through a stand-in provider: this script starts a
 // second fresh in-memory server (MAIL_PORT) whose fetch to api.resend.com is
-// answered locally and logged, never sent. A gift to a donor with an email is
-// sent once by itself ("Sent"); Send again sends again; a receipt waiting for
-// an email shows the one yellow "Send all not sent", which asks first and
-// sends it. What the screen says matches what the stand-in provider got.
+// answered locally and logged, never sent; its automatic email waits 4 s
+// (STARBASE_RECEIPT_DELAY_S; a minute in real use). A gift to a donor with an
+// email says "receipt emails in a minute" and is sent once by itself
+// ("Sent"), with an idempotency key; Send again sends again; a receipt
+// waiting for an email shows the one yellow "Send all not sent", which asks
+// first and sends it. A gift undone right away never reaches the donor.
+// Voiding a gift whose receipt went asks "Receipt already emailed — send a
+// void notice?", and Yes sends it. What the screen says matches what the
+// stand-in provider got.
 //
 //   STARBASE_DATA=memory PORT=4106 node server/index.js &
 //   BASE=http://127.0.0.1:4106 SHOTS=/tmp/receipts node e2e-receipts.mjs
@@ -293,18 +303,77 @@ const rC = giftC ? (await D.api(`/receipts/gift/${giftC.id}`)).json.receipt : nu
 const docC = rC ? (await D.api(`/receipts/${rC.id}`)).json.doc : null;
 check('pledge marked paid → receipt 0003 with the home address from the donate page', rC?.number === `${year}-0003` && rC.amount_cents === 7500 && docC?.address === '77 Pledge Way, Surrey', `${rC?.number} ${docC?.address}`);
 
+// ── 7b. No home address: asked in the form, flagged in Needs you ──
+const dev = (await D.api('/actions/person.create', { name: 'Dev Noaddress', city: 'Surrey' })).json.person;
+const eli = (await D.api('/actions/person.create', { name: 'Eli Typed' })).json.person;
+await D.go('/money?new=1');
+await page.fill('#gift-donor', 'Dev');
+await page.locator('#donor-options li', { hasText: 'Dev Noaddress' }).first().waitFor({ timeout: 8000 });
+await page.locator('#donor-options li', { hasText: 'Dev Noaddress' }).first().dispatchEvent('mousedown');
+await page.fill('#gift-amount', '30');
+check('Log a gift: no Street address field on the first look', !(await page.locator('#gift-address').isVisible()));
+await page.getByRole('button', { name: 'More details' }).click();
+check('Log a gift: a donor with no address → "Street address" under More details', await page.locator('#gift-address').isVisible());
+await simple(page, 'Log a gift with the address field (desktop)');
+await D.shot('06b-gift-form-address');
+await page.getByRole('button', { name: 'Save gift' }).click();
+const devToast = await page.locator('.toast', { hasText: 'from Dev Noaddress' }).innerText({ timeout: 8000 }).catch(() => '');
+check('the toast says the receipt needs an address', /✓ \$30 from Dev Noaddress · receipt needs address/.test(devToast.replace(/\s+/g, ' ')), devToast);
+const giftD = await giftOf(D, dev.id);
+let rD = (await D.api(`/receipts/gift/${giftD.id}`)).json.receipt;
+check('server: "Needs address" — "Waiting — needs address" (a city alone is no address)', rD.needs_address === true && rD.status.word === 'Needs address' && rD.status.line === 'Waiting — needs address', JSON.stringify(rD.status));
+await D.go('/money');
+const devRow = page.locator('.ops-needs .ops-item', { hasText: 'Dev Noaddress' });
+await devRow.waitFor({ timeout: 8000 }).catch(() => {});
+check('Money → Needs you: Dev’s receipt with a "Needs address" chip', /Needs address/i.test(await devRow.locator('.chip').innerText().catch(() => '')));
+await devRow.locator('.ops-row').click();
+await simple(page, 'Money → Needs you, address row open (desktop)');
+await D.shot('06c-money-needs-address');
+await devRow.getByLabel('Street address').fill('42 Late St');
+await devRow.getByRole('button', { name: 'Save address' }).click();
+await page.locator('.toast', { hasText: 'Address saved' }).waitFor({ timeout: 8000 }).catch(() => {});
+await sleep(700);
+rD = (await D.api(`/receipts/gift/${giftD.id}`)).json.receipt;
+const docD = (await D.api(`/receipts/${rD.id}`)).json.doc;
+check('saved: the receipt has the address and leaves Needs you', docD.address === '42 Late St, Surrey' && rD.needs_address === false
+  && !(await page.locator('.ops-needs .ops-item', { hasText: 'Dev Noaddress' }).count()), `${docD.address} ${rD.status.line}`);
+// The address typed in the form goes on the donor's record and the receipt.
+await D.go('/money?new=1');
+await page.fill('#gift-donor', 'Eli');
+await page.locator('#donor-options li', { hasText: 'Eli Typed' }).first().waitFor({ timeout: 8000 });
+await page.locator('#donor-options li', { hasText: 'Eli Typed' }).first().dispatchEvent('mousedown');
+await page.fill('#gift-amount', '20');
+await page.getByRole('button', { name: 'More details' }).click();
+await page.fill('#gift-address', '7 Typed Ave');
+await page.getByRole('button', { name: 'Save gift' }).click();
+await page.locator('.toast', { hasText: 'from Eli Typed' }).waitFor({ timeout: 8000 }).catch(() => {});
+const giftE = await giftOf(D, eli.id);
+const rEli = giftE ? (await D.api(`/receipts/gift/${giftE.id}`)).json.receipt : null;
+const eliDoc = rEli ? (await D.api(`/receipts/${rEli.id}`)).json.doc : null;
+const eliP = (await D.api(`/persons/${eli.id}`)).json.person;
+check('typed in the form: on the donor and on the receipt', eliP.address === '7 Typed Ave' && eliDoc?.address === '7 Typed Ave' && rEli.needs_address === false, `${eliP.address} ${eliDoc?.address}`);
+
 // ── 8. Disclosure (over $100) and the register ──
 await D.go('/money/receipts');
 await page.getByRole('button', { name: 'More', exact: true }).click();
-check('More: Settings · Disclosure (over $100) · All receipts (CSV)', await page.getByRole('button', { name: 'Settings' }).isVisible()
-  && await page.locator('a[href="/api/receipts/disclosure.csv"]', { hasText: 'Disclosure (over $100)' }).isVisible()
-  && await page.locator('a[href="/api/receipts/register.csv"]').isVisible());
+const disGroup = page.getByRole('group', { name: 'Disclosure (over $100)' });
+check('More: Settings · Disclosure (over $100) · All receipts — "Download for a spreadsheet", no "CSV"', await page.getByRole('button', { name: 'Settings' }).isVisible()
+  && await disGroup.locator('a[href^="/api/receipts/disclosure.csv"]', { hasText: 'Download for a spreadsheet' }).isVisible()
+  && await page.getByRole('group', { name: 'All receipts' }).locator('a[href="/api/receipts/register.csv"]', { hasText: 'Download for a spreadsheet' }).isVisible()
+  && !/CSV/.test(await page.locator('#rc-more-body').innerText()));
+const periods = await disGroup.locator('select option').allInnerTexts();
+check('the disclosure has a period: this campaign first, then calendar years', /^This campaign · Jan 1 – Dec 31$/.test(periods[0] || '') && periods.includes(year), periods.join(' | '));
+check('the download link carries the period', (await disGroup.locator('a').getAttribute('href')) === '/api/receipts/disclosure.csv?period=campaign');
+await simple(page, 'receipts More (desktop)');
 await D.shot('07-receipts-more');
-const dis = (await D.api('/receipts/disclosure.csv')).raw.trim().split('\r\n');
-check('disclosure CSV: Ana ($150) only — Cara $75 and Ben (void) are not over $100', dis.length === 2 && dis[0].startsWith('Contributor,Home address,Contributor total')
-  && /^Ana Souza,"12345 72 Ave, Surrey, V3W 2M1",150\.00,\d{4}-\d{2}-\d{2},150\.00,\d{4}-0001$/.test(dis[1]), dis.join(' | '));
+const dis = (await D.api('/receipts/disclosure.csv?period=campaign')).raw.trim().split('\r\n');
+check('disclosure: the period first, then Ana ($150, not over the limit) only — Cara $75, Ben (void), Dev $30 are not over $100',
+  dis.length === 3 && new RegExp(`^Period,This campaign,${year}-01-01 to ${year}-12-31$`).test(dis[0])
+  && dis[1] === 'Contributor,Home address,Contributor total,Over limit,Date received,Amount,Receipt'
+  && /^Ana Souza,"12345 72 Ave, Surrey, V3W 2M1",150\.00,No,\d{4}-\d{2}-\d{2},150\.00,\d{4}-0001$/.test(dis[2]), dis.join(' | '));
 const reg = (await D.api('/receipts/register.csv')).raw.trim().split('\r\n');
-check('register CSV: every receipt in number order, Ben’s Void', reg.length === 4 && reg[1].startsWith(`${year}-0001,Not sent`) && reg[2].startsWith(`${year}-0002,Void`) && reg[3].startsWith(`${year}-0003,`), reg.join(' | '));
+check('register: every receipt in number order, Ben’s Void', reg.length === 6 && reg[1].startsWith(`${year}-0001,Not sent`) && reg[2].startsWith(`${year}-0002,Void`)
+  && reg[3].startsWith(`${year}-0003,`) && reg[4].startsWith(`${year}-0004,`) && reg[5].startsWith(`${year}-0005,`), reg.join(' | '));
 
 // ── 9. The new screens on a phone (desk) ──
 await page.setViewportSize({ width: 390, height: 844 });
@@ -318,7 +387,13 @@ for (const [path, name, shot] of [
   console.log(`      words on ${path} (phone): ${m.words}`);
   await D.full(shot);
 }
+await D.go('/money/receipts');
+await page.getByRole('button', { name: 'More', exact: true }).click();
+await simple(page, 'receipts More: period + downloads (phone)');
+await D.full('10b-receipts-more-phone');
 await D.go('/money');
+// The ledger opens on the latest three; Ana's is one tap away under "All gifts".
+if (!(await page.locator('#gift-list .ops-row', { hasText: 'Ana Souza' }).count())) await page.getByRole('button', { name: /^All gifts/ }).click();
 await page.locator('#gift-list .ops-row', { hasText: 'Ana Souza' }).click();
 await page.locator('.rc-giftline').waitFor({ timeout: 8000 }).catch(() => {});
 await simple(page, 'Money with a gift open (phone)');
@@ -345,12 +420,13 @@ for (const path of ['/money/receipts', `/money/receipts/${rA.id}`, '/money/recei
   await V.go(path);
   check(`volunteer typing ${path} lands on Today`, new URL(vol.url()).pathname === '/', vol.url());
 }
-for (const path of ['/receipts', `/receipts/${rA.id}`, `/receipts/gift/${giftA.id}`, '/receipts/disclosure.csv', '/receipts/register.csv']) {
+for (const path of ['/receipts', '/receipts/needs', `/receipts/${rA.id}`, `/receipts/gift/${giftA.id}`, '/receipts/disclosure.csv', '/receipts/register.csv']) {
   const res = await V.api(path);
   check(`volunteer API ${path} → 403, nothing in it`, res.status === 403 && !/Ana|Souza|-0001|150/.test(res.raw), `${res.status} ${res.raw.slice(0, 80)}`);
 }
 check('volunteer cannot send or change settings', (await V.api('/actions/receipt.sendAll', {})).status === 403
   && (await V.api('/actions/receipt.send', { id: rA.id })).status === 403
+  && (await V.api('/actions/receipt.sendVoid', { id: rB.id })).status === 403
   && (await V.api('/actions/receipt.settings', { threshold_cents: 100 })).status === 403);
 const vprof = await V.api(`/persons/${ana.id}`);
 check('volunteer’s profile JSON: no receipt, no money, no email', vprof.status === 200 && !vprof.raw.includes(rA.number) && !/receipt|amount_cents/i.test(vprof.raw)
@@ -377,14 +453,14 @@ const real = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   if (String(url).startsWith('https://api.resend.com/')) {
     const m = JSON.parse(init.body);
-    console.log('RESEND_STUB ' + JSON.stringify({ to: m.to, subject: m.subject, text: m.text }));
+    console.log('RESEND_STUB ' + JSON.stringify({ to: m.to, subject: m.subject, text: m.text, key: init.headers['Idempotency-Key'] || null }));
     return new Response(JSON.stringify({ id: 'stub' }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   return real(url, init);
 };`;
 const outbox = [];
 const child = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(STUB)}`, fileURLToPath(new URL('./server/index.js', import.meta.url))], {
-  env: { ...process.env, STARBASE_DATA: 'memory', PORT: String(MAIL_PORT), RESEND_API_KEY: 'e2e-stand-in', MAIL_FROM: 'receipts@example.org', STARBASE_JOBS_EVERY_MS: '1000', STARBASE_PUBLIC_URL: '' },
+  env: { ...process.env, STARBASE_DATA: 'memory', PORT: String(MAIL_PORT), RESEND_API_KEY: 'e2e-stand-in', MAIL_FROM: 'receipts@example.org', STARBASE_JOBS_EVERY_MS: '1000', STARBASE_RECEIPT_DELAY_S: '4', STARBASE_PUBLIC_URL: '' },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 let buf = '';
@@ -407,6 +483,10 @@ try {
   await M.api('/actions/receipt.settings', { agent_name: 'Jordan Agent', agent_contact: `agent.${tag}@example.org` });
   const erin = (await M.api('/actions/person.create', { name: 'Erin Email', email: `erin.${tag}@example.org`, address: '5 Mail Rd', city: 'Surrey' })).json.person;
   await logGiftOnScreen(p2, M, { donor: 'Erin Email', amount: 120 });
+  const erinToast = (await p2.locator('.toast').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  check('the toast says the receipt is going: "✓ $120 from Erin Email · receipt emails in a minute · Undo"',
+    /✓ \$120 from Erin Email · receipt emails in a minute/.test(erinToast) && /Undo/i.test(erinToast), erinToast);
+  await M.shot('12b-toast-receipt-emails');
   const gE = await giftOf(M, erin.id);
   const rE0 = (await M.api(`/receipts/gift/${gE.id}`)).json.receipt;
   check('connected: a fresh receipt says Sending (or Sent), never Sent before it is', ['Sending', 'Sent'].includes(rE0.status.word) && (rE0.status.word === 'Sent') === (outbox.length === 1), `${rE0.status.word} outbox=${outbox.length}`);
@@ -415,7 +495,8 @@ try {
     return r.status.word === 'Sent' ? r : null;
   });
   check('it was sent once by itself, to the donor, with the receipt in it', sentE && outbox.length === 1 && outbox[0].to[0] === `erin.${tag}@example.org`
-    && outbox[0].subject === `Your receipt ${sentE.number} from Imagine Surrey Mail` && outbox[0].text.includes(NOTICE) && outbox[0].text.includes('Amount: $120.00'),
+    && outbox[0].subject === `Your receipt ${sentE.number} from Imagine Surrey Mail` && outbox[0].text.includes(NOTICE) && outbox[0].text.includes('Amount: $120.00')
+    && outbox[0].key === `receipt-${sentE.id}-1`,
   JSON.stringify(outbox[0] || {}).slice(0, 200));
   await M.go('/money/receipts');
   let t2 = await M.text();
@@ -463,6 +544,36 @@ try {
   await M.go(`/money/receipts/${sentE.id}`);
   await simple(p2, 'one receipt, email connected (phone)');
   await M.full('15-receipt-sent-phone');
+  await p2.setViewportSize({ width: 1360, height: 900 });
+
+  // A gift undone at once: its receipt email never goes.
+  await M.api('/actions/person.create', { name: 'Una Undo', email: `una.${tag}@example.org`, address: '11 Undo Ln', city: 'Surrey' });
+  await logGiftOnScreen(p2, M, { donor: 'Una Undo', amount: 45 });
+  await p2.locator('.toast').getByRole('button', { name: 'Undo' }).click();
+  await p2.locator('.toast', { hasText: 'Gift voided' }).waitFor({ timeout: 8000 }).catch(() => {});
+  await sleep(7000);
+  check('Undo inside the minute → nothing reached the donor, and no void notice is asked', !outbox.some((m) => m.to[0] === `una.${tag}@example.org`)
+    && !(await p2.getByRole('group', { name: 'Send a void notice' }).count()), `outbox=${outbox.length}`);
+
+  // Erin's receipt went: voiding her gift asks to send a void notice.
+  const before = outbox.length;
+  await M.go('/money');
+  await p2.locator('#gift-list .ops-row', { hasText: 'Erin Email' }).click();
+  await p2.locator('#gift-list').getByRole('button', { name: 'Void' }).click();
+  await p2.getByRole('group', { name: 'Void this gift' }).getByRole('button', { name: 'Yes' }).click();
+  const askEl = p2.getByRole('group', { name: 'Send a void notice' });
+  await askEl.waitFor({ timeout: 8000 }).catch(() => {});
+  check('void a gift whose receipt was emailed → "Receipt already emailed — send a void notice? Yes · No"',
+    /^Receipt already emailed — send a void notice\? Yes No$/i.test((await askEl.innerText().catch(() => '')).replace(/\s+/g, ' ').trim()));
+  await simple(p2, 'Money with the void-notice ask (desktop)');
+  await M.shot('16-void-notice-ask');
+  await askEl.getByRole('button', { name: 'Yes' }).click();
+  await p2.locator('.toast', { hasText: 'Void notice sent' }).waitFor({ timeout: 8000 }).catch(() => {});
+  const vn = outbox[before];
+  const vr = (await M.api(`/receipts/${sentE.id}`)).json.receipt;
+  check('Yes → the donor got "Receipt … is void"; the receipt says so', outbox.length === before + 1 && vn?.to[0] === `erin.${tag}@example.org`
+    && vn.subject === `Receipt ${sentE.number} from Imagine Surrey Mail is void` && /was voided/.test(vn.text)
+    && /^Void — void notice sent /.test(vr.status.line) && /✓ Void notice sent to Erin Email/.test(await p2.innerText('body')), `${outbox.length} ${vr.status.line}`);
   v = (await M.api('/audit/verify')).json;
   ev = (await M.api('/events?since=0&limit=1000')).json.events;
   check('second server: chain verifies; the automatic send is on it as the system', v.ok === true && ev.some((e) => e.action === 'receipt.autosend' && e.actor_id === null && e.entity_type === 'receipt'), JSON.stringify(v));

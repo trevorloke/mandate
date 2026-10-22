@@ -1,20 +1,23 @@
 // Receipts (Money → More → Receipts). One job: see that every gift has its
 // receipt, and get them to donors.
-//   Rows: donor, receipt number + Sent / Not sent / Sending / Void / Sample,
-//   amount. Tap a row for what happened ("Not sent — email isn't
-//   connected", "No email on file"), Print and Send / Send again.
+//   Rows: donor, receipt number + Sent / Not sent / Sending / Needs address /
+//   Not sure / Void / Sample, amount. Tap a row for what happened ("Not sent —
+//   email isn't connected", "Waiting — needs address"), Print and Send /
+//   Send again (only when the server says it can really go), and "Send void
+//   notice" for a voided receipt the donor already got.
 //   One yellow "Send all not sent" — only while email is connected and some
 //   can go (asks in place: "Email 3 receipts? Yes · No").
 //   Settings (?settings=1, managers and treasurers): the financial agent and
-//   how to reach them, "Receipt gifts from ($)", the footer; the tax line
-//   and the disclosure amount under More details.
-//   More: Settings · Disclosure (over $100) · All receipts — the CSVs the
-//   financial agent files (managers and treasurers).
+//   how to reach them, "Receipt gifts from ($)", the footer; the tax line,
+//   the disclosure amount and the campaign's dates under More details.
+//   More: Settings · Disclosure (over $100) for a period · All receipts —
+//   each "Download for a spreadsheet", what the financial agent files
+//   (managers and treasurers). Sample gifts are never in them.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, fmtMoney, dollarsToCents } from '../api.js';
-import { StatusChip, fmtBig, shortDate, methodWord } from '../components/ReceiptsBits.jsx';
+import { StatusChip, fmtBig, shortDate, methodWord, sendWord, onItsWay } from '../components/ReceiptsBits.jsx';
 import './shifts.css';
 import './receipts.css';
 
@@ -22,6 +25,8 @@ const LATEST = 12;
 const AGENT_ROLES = ['manager', 'treasurer'];
 const receipts = (n) => `${n} ${n === 1 ? 'receipt' : 'receipts'}`;
 const centsToField = (c) => (c ? String(Number(c) / 100) : '');
+// "This campaign · Jan 1 – Dec 31, 2026" / "2025"
+const periodWord = (p) => (p.key === 'campaign' ? `This campaign · ${shortDate(p.from)} – ${shortDate(p.to)}` : p.key);
 
 function SettingsForm({ settings, onSaved, onClose }) {
   const [f, setF] = useState(() => ({
@@ -31,6 +36,8 @@ function SettingsForm({ settings, onSaved, onClose }) {
     footer: settings.footer || '',
     notice: settings.notice || '',
     disclosure: centsToField(settings.disclosure_cents),
+    period_start: settings.period_start || '',
+    period_end: settings.period_end || '',
   }));
   const [more, setMore] = useState(false);
   const [error, setError] = useState(null);
@@ -43,11 +50,13 @@ function SettingsForm({ settings, onSaved, onClose }) {
     const threshold = f.threshold.trim() === '' ? 0 : dollarsToCents(f.threshold);
     const disclosure = f.disclosure.trim() === '' ? 10000 : dollarsToCents(f.disclosure);
     if (threshold === null || disclosure === null) { setError('Enter dollars, like 25 or 100'); return; }
+    if (f.period_start && f.period_end && f.period_end < f.period_start) { setError('The campaign ends before it starts'); return; }
     setBusy(true);
     try {
       await action('receipt.settings', {
         agent_name: f.agent_name, agent_contact: f.agent_contact, footer: f.footer, notice: f.notice,
         threshold_cents: threshold, disclosure_cents: disclosure,
+        period_start: f.period_start || null, period_end: f.period_end || null,
       });
       onSaved();
     } catch (err) {
@@ -92,6 +101,16 @@ function SettingsForm({ settings, onSaved, onClose }) {
             <input id="rc-disclosure" className="input mono" inputMode="decimal" placeholder="100"
               value={f.disclosure} onChange={set('disclosure')} />
           </div>
+          <div className="form-row">
+            <div className="field">
+              <label htmlFor="rc-from">Campaign from</label>
+              <input id="rc-from" className="input mono" type="date" value={f.period_start} onChange={set('period_start')} />
+            </div>
+            <div className="field">
+              <label htmlFor="rc-to">Campaign to</label>
+              <input id="rc-to" className="input mono" type="date" value={f.period_end} onChange={set('period_end')} />
+            </div>
+          </div>
         </div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
@@ -103,9 +122,9 @@ function SettingsForm({ settings, onSaved, onClose }) {
   );
 }
 
-function ReceiptRow({ r, open, onToggle, emailOn, onSend, busy }) {
+function ReceiptRow({ r, open, onToggle, onSend, onSendVoid, busy }) {
   const bodyId = `rc-${r.id}`;
-  const canSend = emailOn && r.has_email && !r.void && !r.sample;
+  const canSend = !!r.can_send;
   return (
     <li className="ops-item" data-open={open ? '' : undefined} data-tone={r.void ? 'past' : undefined}>
       <button type="button" className="ops-row" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
@@ -123,7 +142,12 @@ function ReceiptRow({ r, open, onToggle, emailOn, onSend, busy }) {
             <Link className="btn ops-tap" to={`/money/receipts/${r.id}`}>Print</Link>
             {canSend && (
               <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={onSend}>
-                {busy ? 'Sending…' : r.sent_count > 0 ? 'Send again' : 'Send'}
+                {busy ? 'Sending…' : sendWord(r)}
+              </button>
+            )}
+            {r.can_send_void && (
+              <button type="button" className="btn btn-quiet ops-tap" disabled={busy} onClick={onSendVoid}>
+                {busy ? 'Sending…' : 'Send void notice'}
               </button>
             )}
             {r.person_id && <Link className="btn btn-quiet ops-tap" to={`/people/${r.person_id}`}>Donor</Link>}
@@ -153,8 +177,9 @@ export default function Receipts() {
     queryKey: ['receipts', 'list'],
     queryFn: () => apiGet('/receipts'),
     // While an email is on its way, look again until it has gone (or not).
-    refetchInterval: (query) => (query.state.data?.receipts?.some((r) => r.status?.code === 'sending') ? 3000 : false),
+    refetchInterval: (query) => (query.state.data?.receipts?.some((r) => onItsWay(r.status)) ? 3000 : false),
   });
+  const [period, setPeriod] = useState('campaign');
   const data = q.data;
   // Cleared sample data leaves its receipts void in the books (the register
   // keeps them); the list doesn't show them.
@@ -177,6 +202,20 @@ export default function Receipts() {
     try {
       const res = await action('receipt.send', { id: r.id });
       say(res.email === 'sent' ? `✓ Sent ${r.number} to ${r.donor_name}` : `Not sent — the email failed`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+      refresh();
+    }
+  };
+
+  const sendVoid = async (r) => {
+    setError(null);
+    setBusy(r.id);
+    try {
+      const res = await action('receipt.sendVoid', { id: r.id });
+      say(res.email === 'sent' ? `✓ Void notice sent to ${r.donor_name}` : 'Not sent — the email failed');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -250,8 +289,8 @@ export default function Receipts() {
       {rows.length > 0 && (
         <ul className="ops-rows" id="rc-list">
           {shown.map((r) => (
-            <ReceiptRow key={r.id} r={r} open={openId === r.id} emailOn={emailOn} busy={busy === r.id}
-              onToggle={() => setOpenId((cur) => (cur === r.id ? null : r.id))} onSend={() => sendOne(r)} />
+            <ReceiptRow key={r.id} r={r} open={openId === r.id} busy={busy === r.id}
+              onToggle={() => setOpenId((cur) => (cur === r.id ? null : r.id))} onSend={() => sendOne(r)} onSendVoid={() => sendVoid(r)} />
           ))}
         </ul>
       )}
@@ -273,10 +312,26 @@ export default function Receipts() {
               <button type="button" className="btn btn-quiet ops-tap" onClick={() => { setMore(false); setParams({ settings: '1' }); }}>
                 Settings
               </button>
-              <a className="btn btn-quiet ops-tap" href="/api/receipts/disclosure.csv" download>
-                Disclosure (over {fmtBig(settings?.disclosure_cents ?? 10000)})
-              </a>
-              <a className="btn btn-quiet ops-tap" href="/api/receipts/register.csv" download>All receipts (CSV)</a>
+              <div className="rc-dl" role="group" aria-label={`Disclosure (over ${fmtBig(settings?.disclosure_cents ?? 10000)})`}>
+                <span className="ops-donate__label">Disclosure (over {fmtBig(settings?.disclosure_cents ?? 10000)})</span>
+                <select className="input rc-period" aria-label="Period" value={period} onChange={(e) => setPeriod(e.target.value)}>
+                  {(data?.periods ?? [{ key: 'campaign', label: 'This campaign' }]).map((p) => (
+                    <option key={p.key} value={p.key}>{p.from ? periodWord(p) : p.label}</option>
+                  ))}
+                </select>
+                <a className="btn btn-quiet ops-tap" href={`/api/receipts/disclosure.csv?period=${encodeURIComponent(period)}`} download
+                  aria-label="Download the disclosure for a spreadsheet">
+                  Download for a spreadsheet
+                </a>
+              </div>
+              <div className="rc-dl" role="group" aria-label="All receipts">
+                <span className="ops-donate__label">All receipts</span>
+                <a className="btn btn-quiet ops-tap" href="/api/receipts/register.csv" download
+                  aria-label="Download all receipts for a spreadsheet">
+                  Download for a spreadsheet
+                </a>
+              </div>
+              {data?.sampleLoaded && <p className="ops-meta">Sample gifts are left out.</p>}
             </div>
           )}
         </div>

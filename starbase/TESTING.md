@@ -142,10 +142,19 @@ one tap away under **More**.
   open a gift on Money to see *Receipt 2026-0007 · Sent*. Without email
   connected each one says *Not sent — email isn't connected* (or *No email on
   file*) — tap it, then **Print**. With email connected it goes to the donor
-  once by itself; *Send again* resends; **Send all not sent** sends the rest.
-  Voiding a gift marks its receipt **VOID** (the number is kept). Set the
-  financial agent, the minimum gift and the footer under **More → Settings**;
-  **More → Disclosure** downloads contributors over $100.
+  once by itself a minute after the gift (the toast says *receipt emails in a
+  minute*; Undo before then and nothing is sent); *Send again* resends;
+  **Send all not sent** sends the rest. A donor with no street address: Log
+  a gift asks for it under *More details*; left blank, the receipt says
+  **Needs address**, shows under **Money → Needs you** (type it right there)
+  and its email waits until the address is saved. Voiding a gift marks its
+  receipt **VOID** (the number is kept); if the receipt was already emailed,
+  Money asks *Receipt already emailed — send a void notice?* Set the
+  financial agent, the minimum gift and the footer under **More →
+  Settings** (the campaign's dates under *More details*); **More →
+  Disclosure** picks a period (this campaign, or a calendar year) and
+  downloads contributors over $100 for a spreadsheet, with an *Over limit*
+  column. Sample gifts are never in it.
 - **Today → More → Verify my books** replays the tamper-evident log;
   **Export all data** downloads everything.
 
@@ -182,7 +191,14 @@ the same file never creates duplicates.
   line), what a receipt must show, the minimum gift that gets one and the
   $100 disclosure amount are all settings — **the financial agent must
   confirm receipt contents and thresholds with Elections BC** before
-  receipts go to donors or the disclosure is filed.
+  receipts go to donors or the disclosure is filed. The same goes for the
+  disclosure's **period**: unset, *This campaign* is the current calendar
+  year — confirm the election period with Elections BC and set it under
+  Receipts → Settings → More details.
+- Card gifts are dated by the campaign's day (Pacific). Card receipts issued
+  before this fix used the UTC day, so a card gift paid after 4–5 pm
+  Pacific may show the next day: compare card receipts with the Stripe
+  dashboard before filing.
 
 ### Texting and calls — confirm with counsel
 

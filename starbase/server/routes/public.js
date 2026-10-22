@@ -29,7 +29,7 @@ import { getDb } from '../db/client.js';
 import { runAction, newId } from '../lib/events.js';
 import { VOLUNTEER_ROLES, VOLUNTEER_ROLE_CODES } from '@starbase/shared/canvass';
 import { capFor, donorYearTotal } from '../lib/cap.js';
-import { logGift } from '../lib/gifts.js';
+import { logGift, campaignDay } from '../lib/gifts.js';
 import { stripeConfigured, createCheckoutSession, verifyStripeSignature } from '../lib/stripe.js';
 
 const app = new Hono();
@@ -681,7 +681,9 @@ app.post('/api/public/stripe/webhook', async (c) => {
     }
     const cents = paidOneTime ? Number(obj.amount_total) : Number(obj.amount_paid);
     const paidAt = new Date(((paidMonthly ? obj.status_transitions?.paid_at : obj.created) || evt.created) * 1000);
-    const date = paidAt.toISOString().slice(0, 10);
+    // The campaign's calendar day, not the UTC one: a card gift at 7:30 pm
+    // Pacific on Oct 21 is dated Oct 21 (and Dec 31 stays in its own year).
+    const date = campaignDay(paidAt, ws.settings.tz);
     // pledge_id links each card gift to its pledge (as pledge.receive does), so
     // voiding one keeps the pledge honest (lib/gifts.js).
     const { gift, compliance } = await logGift(tx, ws, {

@@ -169,6 +169,18 @@ export const restoreGift = async (tx, workspace, id, emit) => {
   return out;
 };
 
+// "2026-10-21" — the calendar day it is at `when` in the campaign's time zone
+// (a card payment at 7:30 pm Pacific on Oct 21 is the 21st, not the UTC
+// 22nd; Dec 31 evening stays in its own year). Unknown zone → Vancouver.
+export const campaignDay = (when, timeZone = 'America/Vancouver') => {
+  const d = when instanceof Date ? when : new Date(when);
+  const fmt = (tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+  let parts;
+  try { parts = fmt(timeZone || 'America/Vancouver'); } catch { parts = fmt('America/Vancouver'); }
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+};
+
 // 'YYYY-MM' → 'October 2026'.
 export const monthName = (ym) => new Date(`${ym}-01T00:00:00Z`)
   .toLocaleString('en-CA', { month: 'long', year: 'numeric', timeZone: 'UTC' });

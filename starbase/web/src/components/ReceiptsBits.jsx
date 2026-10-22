@@ -1,7 +1,7 @@
 // Receipts — small pieces shared by the receipts screens and Money's gift
-// line: the status chip (Sent · Not sent · Sending · Void · Sample), dates in
-// words, and the receipt itself as the donor reads it (the server sends the
-// same fields to the donor's page and the email).
+// line: the status chip (Sent · Not sent · Sending · Needs address · Not sure
+// · Void · Sample), dates in words, and the receipt itself as the donor reads
+// it (the server sends the same fields to the donor's page and the email).
 import { fmtMoney, fmtDate } from '../api.js';
 import '../pages/receipts.css';
 
@@ -25,12 +25,20 @@ export const shortDate = (value) => {
   return new Date(y, m - 1, d).toLocaleDateString('en-CA', opts);
 };
 
+// Sent is green; void and sample are quiet; on its way is a plain chip;
+// everything that waits on a person (Not sent, Needs address, Not sure) is
+// the warning chip.
 const CHIP = {
   sent: 'chip chip-ok',
   void: 'chip ops-chip-muted',
   sample: 'chip ops-chip-muted',
   sending: 'chip',
+  queued: 'chip',
 };
+// The donor may already hold it ("Not sure it went"): it's a Send again.
+export const sendWord = (r) => (r.sent_count > 0 || r.status?.code === 'unsure' ? 'Send again' : 'Send');
+// While an email is on its way, look again until it has gone (or not).
+export const onItsWay = (s) => s?.code === 'sending' || s?.code === 'queued';
 export const StatusChip = ({ status }) => (
   <span className={CHIP[status?.code] || 'chip chip-warn'} title={status?.line || undefined}>{status?.word ?? '…'}</span>
 );
