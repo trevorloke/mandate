@@ -5,9 +5,12 @@
 //                          (desk only)
 //   texting_messages       every text in and out, with what the provider said
 //   texting_optouts        STOP / START per number — the app never texts an
-//                          opted-out number, whatever its tags say
+//                          opted-out number, whatever its tags say; tagged:
+//                          the people its STOP tagged do-not-text (START takes
+//                          the tag off them only, never one the desk set)
 //   texting_reads          when each member last read a conversation (unread)
 //   texting_settings       the first-text template and the hours texts may go
+//                          (Monday–Friday, and Saturday–Sunday)
 //   texting_member_phones  a caller's own phone for "Call through the
 //                          campaign" — seen only by them and managers, never
 //                          written to the event log
@@ -45,6 +48,7 @@ create table if not exists texting_messages (
 );
 create index if not exists texting_msg_conv_idx on texting_messages (conversation_id, created_at);
 create index if not exists texting_msg_phone_idx on texting_messages (phone, direction, created_at desc);
+create index if not exists texting_conv_ws_phone_idx on texting_conversations (workspace_id, phone, last_at desc);
 create index if not exists texting_msg_sender_idx on texting_messages (workspace_id, sent_by, created_at desc);
 create unique index if not exists texting_msg_sid_idx on texting_messages (workspace_id, provider_sid) where provider_sid is not null;
 
@@ -57,6 +61,7 @@ create table if not exists texting_optouts (
   changed_at timestamptz not null default now(),
   unique (workspace_id, phone)
 );
+alter table texting_optouts add column if not exists tagged jsonb not null default '[]'::jsonb;
 
 create table if not exists texting_reads (
   conversation_id uuid not null references texting_conversations(id) on delete cascade,
@@ -72,6 +77,8 @@ create table if not exists texting_settings (
   allow_until int not null default 21 check (allow_until between 1 and 24),
   updated_at timestamptz not null default now()
 );
+alter table texting_settings add column if not exists weekend_from int not null default 10 check (weekend_from between 0 and 23);
+alter table texting_settings add column if not exists weekend_until int not null default 18 check (weekend_until between 1 and 24);
 
 create table if not exists texting_member_phones (
   workspace_id uuid not null references workspaces(id) on delete cascade,

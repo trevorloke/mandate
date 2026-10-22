@@ -4,6 +4,10 @@
 // channel, sign request, add a person, profile) sits under "More". Several
 // people at one door → simple tabs at the top. The map decides where it sits
 // (bottom sheet on phones, right panel on desktop).
+// With the campaign's Twilio number connected, More's Call and Text open the
+// person's card on Calls (the campaign's number, the STOP line, the Inbox,
+// quiet hours) — never the phone's own dialler or Messages; Text is gone for
+// anyone who opted out of texts.
 // Also exports AddDoorForm — person.create for a tapped spot that has no door
 // yet (desk only) — and, for the walk list's door: SignAsk (the "Wants a
 // sign?" row), AddPersonInline and signCancelOffered.
@@ -43,6 +47,7 @@ import { isOffline, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText } from './RatingButtons.jsx';
 import SurveyQuestions, { answersSaid, answersTail, useSurvey } from './SurveyQuestions.jsx';
+import { callsCard, noTexts, textingOn, useTextingStatus } from './TextingCard.jsx';
 import '../pages/map.css';
 
 // "Wants a sign?" — one tap files a request (Undo is on the toast). A kind
@@ -349,6 +354,8 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [more, setMore] = useState(false);
+  // true / false, or null while nobody knows: then the Calls card, never a guess.
+  const on = textingOn(useTextingStatus(me));
   // Whether Undo on a sign request can really cancel it (sign.cancel).
   useEffect(() => { queryClient.prefetchQuery(ACTIONS_QUERY); }, [queryClient]);
 
@@ -607,8 +614,12 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
           <div className="door-more__row">
             {sel.phone ? (
               <>
-                <a className="btn door-act" href={telHref(sel.phone)} onClick={() => startReach(sel, 'phone')}>Call</a>
-                <a className="btn door-act" href={smsHref(sel.phone, smsBody(sel))} onClick={() => startReach(sel, 'text')}>Text</a>
+                {on.voice === false
+                  ? <a className="btn door-act" href={telHref(sel.phone)} onClick={() => startReach(sel, 'phone')}>Call</a>
+                  : <Link className="btn door-act" to={callsCard(sel, 'phone')}>Call</Link>}
+                {!noTexts(sel) && (on.sms === false
+                  ? <a className="btn door-act" href={smsHref(sel.phone, smsBody(sel))} onClick={() => startReach(sel, 'text')}>Text</a>
+                  : <Link className="btn door-act" to={callsCard(sel, 'text')}>Text</Link>)}
                 <span className="door-more__phone mono">{sel.phone}</span>
               </>
             ) : (

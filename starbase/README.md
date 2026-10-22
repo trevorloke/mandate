@@ -97,7 +97,9 @@ them, blasts and shift notifications are recorded as **queued** per recipient
 — nothing is lost; connect the provider and resend. Without Twilio, calling
 and texting use `tel:` / `sms:` links (the phone's own dialer and messages)
 with one-tap logging; with it, texts and calls go through the campaign's
-number (setup and the compliance notes are in TESTING.md).
+number — from Calls, the profile and the door card alike, and shift notices
+keep the same opt-outs and quiet hours (setup and the compliance notes are
+in TESTING.md).
 
 ## Map tiles and offline field mode
 

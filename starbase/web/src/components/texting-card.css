@@ -65,7 +65,16 @@
   font-size: 16px; color: var(--text-1);
 }
 
-/* Calls' "Replies · N": quiet, one tap to the inbox. */
+/* Your conversation's last texts on the card: who and when, then the words. */
+.tx-recent { list-style: none; margin: 0 0 var(--s-2); padding: 0; display: flex; flex-direction: column; gap: var(--s-1); }
+.tx-recent__msg { padding: var(--s-2) var(--s-3); border-radius: 10px; border: 1px solid var(--rule-2); max-width: 92%; }
+.tx-recent__msg--out { align-self: flex-end; background: var(--paper-0); border-color: var(--ink); }
+.tx-recent__msg--in { align-self: flex-start; background: var(--paper-2); }
+.tx-recent__who { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+.tx-recent__body { display: block; font-size: 16px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tx-quiet.tx-next { color: var(--text-1); font-size: 13px; }
+
+/* Calls' "New replies · N" (else "Inbox"): quiet, one tap to the inbox. */
 .tx-replies {
   display: inline-flex; align-items: center; gap: 4px; min-height: 48px; margin: 0 0 var(--s-2); padding: 0 var(--s-1);
   font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;

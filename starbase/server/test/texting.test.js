@@ -12,7 +12,8 @@ import { getDb } from '../db/client.js';
 import { app } from '../index.js';
 import { verifyChain } from '../lib/events.js';
 import { twilioSignature } from '../ext/texting/twilio.js';
-import { _setClockForTest, keywordOf, e164 } from '../ext/texting/rules.js';
+import { _setClockForTest, keywordOf, asksToStop, quietNow, e164 } from '../ext/texting/rules.js';
+import { randomUUID } from 'node:crypto';
 
 const tag = Math.random().toString(36).slice(2, 8);
 const PUBLIC = 'https://starbase.example';
@@ -110,6 +111,31 @@ test('the rules: numbers, keywords', () => {
   for (const w of ['STOP', 'stop', 'Stop.', ' STOPALL ', 'unsubscribe', 'Cancel', 'END', 'quit!']) assert.equal(keywordOf(w), 'stop', w);
   for (const w of ['START', 'unstop']) assert.equal(keywordOf(w), 'start', w);
   for (const w of ['Stop by the office?', 'yes', 'I will not stop supporting you', '']) assert.equal(keywordOf(w), null, w);
+  // Emoji and punctuation don't hide a STOP; a clear request is one too.
+  for (const w of ['STOP 🙏', 'Please stop texting me', 'Stop it', 'Don’t text me', 'remove me.']) assert.equal(keywordOf(w), 'stop', w);
+  // Not only a keyword, but asks to stop: flagged for a person, not automatic.
+  for (const w of ['No thanks, stop', 'Please stop texting me now', 'unsubscribe me from this list']) {
+    assert.equal(keywordOf(w), null, w);
+    assert.equal(asksToStop(w), true, w);
+  }
+  for (const w of ['STOP', 'yes', 'Count me in!']) assert.equal(asksToStop(w), false, w);
+});
+
+test('quiet hours: one window Monday to Friday, a narrower one on weekends', () => {
+  const s = { allow_from: 9, allow_until: 21, weekend_from: 10, weekend_until: 18 };
+  const tz = 'America/Vancouver';
+  assert.deepEqual(
+    [quietNow(s, new Date('2026-10-22T19:00:00Z'), tz).now, quietNow(s, new Date('2026-10-22T19:00:00Z'), tz).label],
+    [false, '9 am–9 pm'], 'Thursday noon',
+  );
+  const satEarly = quietNow(s, new Date('2026-10-24T16:30:00Z'), tz); // Saturday 9:30 am
+  assert.equal(satEarly.now, true);
+  assert.equal(satEarly.label, '10 am–6 pm');
+  assert.equal(satEarly.opens, '10 am');
+  assert.equal(quietNow(s, new Date('2026-10-25T00:30:00Z'), tz).now, false, 'Saturday 5:30 pm');
+  assert.equal(quietNow(s, new Date('2026-10-25T01:30:00Z'), tz).opens, '10 am tomorrow', 'Saturday 6:30 pm → Sunday');
+  assert.equal(quietNow(s, new Date('2026-10-24T05:30:00Z'), tz).opens, '10 am tomorrow', 'Friday 10:30 pm → Saturday');
+  assert.equal(quietNow(s, new Date('2026-10-26T05:30:00Z'), tz).opens, '9 am tomorrow', 'Sunday 10:30 pm → Monday');
 });
 
 test('without Twilio: the screens are told so and nothing pretends to send', async () => {
@@ -209,17 +235,20 @@ test('quiet hours are enforced on the server; only managers change them', async 
   const s = await vol.get('/api/texting/status');
   assert.equal(s.json.quiet.now, true);
   assert.equal(s.json.quiet.label, '9 am–9 pm');
+  assert.equal(s.json.quiet.opens, '9 am tomorrow');
   let r = await desk.action('text.send', { person_id: P.harjit.id, body: 'Late one' });
   assert.equal(r.status, 409);
-  assert.match(r.json.error, /Quiet hours — texts go out 9 am–9 pm/);
+  assert.match(r.json.error, /Quiet hours — sending opens at 9 am tomorrow/);
   const conv = (await desk.get(`/api/texting/people/${P.harjit.id}`)).json.conversation;
   r = await desk.action('text.reply', { conversation_id: conv.id, body: 'Late reply' });
   assert.equal(r.status, 409, 'replies too');
   r = await desk.action('call.start', { person_id: P.harjit.id, my_phone: '604-555-0171' });
   assert.equal(r.status, 409);
-  assert.match(r.json.error, /Quiet hours — calls/);
+  assert.match(r.json.error, /Quiet hours — calls open at 9 am tomorrow/);
   at('2026-10-22T15:30:00Z'); // 8:30 am
-  assert.equal((await desk.action('text.send', { person_id: P.harjit.id, body: 'Early one' })).status, 409);
+  r = await desk.action('text.send', { person_id: P.harjit.id, body: 'Early one' });
+  assert.equal(r.status, 409);
+  assert.match(r.json.error, /sending opens at 9 am$/);
   assert.equal(twilio.length, n, 'nothing went to Twilio');
 
   assert.equal((await vol.action('texting.settings', { allow_until: 24 })).status, 403);
@@ -234,6 +263,23 @@ test('quiet hours are enforced on the server; only managers change them', async 
   r = await desk.action('texting.settings', { allow_from: 9, allow_until: 21 });
   assert.equal(r.status, 200);
   assert.equal((await desk.action('text.send', { person_id: P.harjit.id, body: 'Late one' })).status, 409, 'back to 9–9');
+
+  // Weekends: 10 am–6 pm unless a manager changes it.
+  at('2026-10-24T16:30:00Z'); // Saturday 9:30 am
+  r = await desk.action('text.send', { person_id: P.harjit.id, body: 'Saturday one' });
+  assert.equal(r.status, 409);
+  assert.match(r.json.error, /sending opens at 10 am$/);
+  const sat = (await desk.get('/api/texting/status')).json.quiet;
+  assert.equal(sat.label, '10 am–6 pm');
+  assert.equal(sat.weekdays, '9 am–9 pm');
+  assert.equal(sat.weekends, '10 am–6 pm');
+  assert.equal((await desk.action('texting.settings', { weekend_from: 18, weekend_until: 10 })).status, 400);
+  assert.equal((await desk.action('texting.settings', { weekend_from: 9 })).status, 200);
+  assert.equal((await desk.action('text.send', { person_id: P.harjit.id, body: 'Saturday one' })).status, 200, '9:30 am is inside 9 am–6 pm');
+  at('2026-10-25T02:00:00Z'); // Saturday 7 pm
+  assert.equal((await desk.action('text.send', { person_id: P.harjit.id, body: 'Saturday night' })).status, 409);
+  assert.equal((await desk.action('texting.settings', { weekend_from: 10, weekend_until: 18 })).status, 200);
+  assert.equal((await desk.get('/api/texting/settings')).json.settings.weekend_from, 10);
   _setClockForTest(() => NOON);
 });
 
@@ -302,6 +348,11 @@ test('volunteers only receive the conversations they started — and no emails',
   const card = await vol.get(`/api/texting/people/${P.tom.id}`);
   assert.equal(card.json.conversation, null, 'the card shows only your own conversation');
   assert.equal(card.json.first, true);
+  assert.equal(card.json.in_touch, true, 'the campaign is already texting Tom');
+  assert.equal(card.json.in_touch_id, null, 'but which conversation is the desk\'s to know');
+  r = await vol.action('text.send', { person_id: P.tom.id, body: `Hi Tom, it's Vol with ${campaign}.` });
+  assert.equal(r.status, 409, 'no second introduction from the same campaign number');
+  assert.match(r.json.error, /Already texting with the campaign/);
   const thread = await vol.get(`/api/texting/conversations/${volConv}`);
   assert.equal(thread.status, 200);
   assert.ok(!JSON.stringify(thread.json).includes('@'), 'no email in a volunteer\'s thread');
@@ -366,6 +417,10 @@ test('call through the campaign: rings you first, campaign number as caller ID, 
   assert.doesNotMatch(tw.text, /<Dial/, 'no key, no connection');
   tw = await hook(`${answerPath}/connect`, { CallSid: 'CAsomeoneelse', Digits: '1' });
   assert.doesNotMatch(tw.text, /<Dial/, 'another call cannot use this token');
+  tw = await hook(`${answerPath}/connect`, { CallSid: callSid, Digits: '9' });
+  assert.doesNotMatch(tw.text, /<Dial/, 'only 1 connects');
+  assert.match(tw.text, /<Gather numDigits="1"[^>]*><Say>Press 1 to connect\.<\/Say>/, 'any other key asks again');
+  assert.equal((await db.query('select token_used_at from texting_calls where id = $1', [callId])).rows[0].token_used_at, null, 'and the token is not spent');
   tw = await hook(`${answerPath}/connect`, { CallSid: callSid, Digits: '1' });
   assert.match(tw.text, new RegExp(`<Dial callerId="\\${CAMPAIGN_NUMBER}"`), 'the person sees the campaign number');
   assert.match(tw.text, /<Number>\+16045550135<\/Number>/);
@@ -440,10 +495,188 @@ test('a failed send says so; the carrier opting a number out is recorded', async
   assert.equal((await desk.action('text.send', { person_id: P.dev.id, body: 'again' })).status, 409);
 });
 
+test('one conversation per number: no second introduction, the Text list leaves them out, replies stay put', async () => {
+  const lena = await desk.createPerson('Lena Example', { phone: '604-555-0138' });
+  let r = await desk.action('text.send', { person_id: lena.id, body: `Hi Lena, it's Desk with ${campaign}.` });
+  assert.equal(r.json.sent, true);
+  const deskConv = r.json.conversation_id;
+  let q = (await desk.get('/api/texting/queue')).json;
+  assert.ok(q.away.includes(lena.id), 'texted: out of your Text list until she replies');
+  assert.ok(!q.replied.includes(lena.id));
+  let card = (await desk.get(`/api/texting/people/${lena.id}`)).json;
+  assert.equal(card.conversation.last.direction, 'out');
+  assert.equal(card.first, false, 'the next text from the card is a follow-up, not an introduction');
+
+  await inbound('+16045550138', 'Yes I support you!');
+  q = (await desk.get('/api/texting/queue')).json;
+  assert.ok(q.replied.includes(lena.id) && !q.away.includes(lena.id), 'she replied: first in your list');
+  card = (await desk.get(`/api/texting/people/${lena.id}`)).json;
+  assert.equal(card.in_touch, false, 'your own conversation is not "someone else"');
+  assert.deepEqual(card.conversation.recent.map((m) => m.direction), ['out', 'in']);
+  assert.equal(card.conversation.recent[1].body, 'Yes I support you!');
+  assert.equal(card.conversation.last.direction, 'in');
+  // Rated: back to an ordinary place in the list.
+  await desk.action('contact.log', { person_id: lena.id, channel: 'text', outcome: 'contacted', rating: '1' });
+  q = (await desk.get('/api/texting/queue')).json;
+  assert.ok(!q.replied.includes(lena.id) && !q.away.includes(lena.id));
+
+  // A volunteer: Lena is already texting with the campaign — no content, no thread.
+  const volCard = (await vol.get(`/api/texting/people/${lena.id}`)).json;
+  assert.equal(volCard.in_touch, true);
+  assert.equal(volCard.in_touch_id, null);
+  assert.equal(volCard.conversation, null);
+  assert.ok(!JSON.stringify(volCard).includes('support you'));
+  const vq = (await vol.get('/api/texting/queue')).json;
+  assert.ok(vq.away.includes(lena.id) && !vq.replied.includes(lena.id), 'out of their Text list too');
+  assert.deepEqual(Object.keys(vq).sort(), ['away', 'replied']);
+  assert.ok(!/@|555|Lena/.test(JSON.stringify(vq)), 'person ids only');
+  const n = texts().length;
+  r = await vol.action('text.send', { person_id: lena.id, body: `Hi Lena, it's Vol with ${campaign}.` });
+  assert.equal(r.status, 409);
+  assert.match(r.json.error, /Already texting with the campaign/);
+  assert.equal(texts().length, n, 'no second introduction went out');
+  assert.equal((await staff.get(`/api/texting/people/${lena.id}`)).json.in_touch_id, deskConv, 'the desk sees which thread to answer in');
+
+  // A newer duplicate (made before this rule): her next reply still goes where
+  // she last replied — the desk's — never to the newer one.
+  const volUser = (await vol.get('/api/auth/me')).json.user;
+  const dup = randomUUID();
+  await db.query(
+    `insert into texting_conversations (id, workspace_id, person_id, phone, started_by, created_at, last_at)
+     values ($1, $2, $3, '+16045550138', $4, now(), now())`, [dup, ws, lena.id, volUser.id],
+  );
+  await db.query(
+    `insert into texting_messages (id, workspace_id, conversation_id, direction, phone, body, status, first, sent_by, created_at)
+     values ($1, $2, $3, 'out', '+16045550138', 'Hi again', 'sent', true, $4, now() + interval '1 second')`,
+    [randomUUID(), ws, dup, volUser.id],
+  );
+  const volUnread = (await vol.get('/api/texting/status')).json.unread;
+  await inbound('+16045550138', 'STOP');
+  const stop = (await db.query(
+    `select conversation_id from texting_messages where workspace_id = $1 and phone = '+16045550138' and direction = 'in' and body = 'STOP'`, [ws],
+  )).rows[0];
+  assert.equal(stop.conversation_id, deskConv);
+  assert.equal((await vol.get('/api/texting/status')).json.unread, volUnread, 'nothing she says to the desk reaches the volunteer');
+  assert.ok(!JSON.stringify((await vol.get(`/api/texting/conversations/${dup}`)).json).includes('STOP'));
+
+  // She never replied: a reply goes to the first conversation that texted her lately.
+  const noah = await desk.createPerson('Noah Example', { phone: '604-555-0140' });
+  r = await desk.action('text.send', { person_id: noah.id, body: `Hi Noah, it's Desk with ${campaign}.` });
+  const noahDesk = r.json.conversation_id;
+  const dup2 = randomUUID();
+  await db.query(
+    `insert into texting_conversations (id, workspace_id, person_id, phone, started_by, created_at, last_at)
+     values ($1, $2, $3, '+16045550140', $4, now() + interval '1 second', now() + interval '1 second')`, [dup2, ws, noah.id, volUser.id],
+  );
+  await db.query(
+    `insert into texting_messages (id, workspace_id, conversation_id, direction, phone, body, status, first, sent_by, created_at)
+     values ($1, $2, $3, 'out', '+16045550140', 'Hi again', 'sent', true, $4, now() + interval '1 second')`,
+    [randomUUID(), ws, dup2, volUser.id],
+  );
+  await inbound('+16045550140', 'Yes I support you!');
+  const yes = (await db.query(
+    `select conversation_id from texting_messages where workspace_id = $1 and phone = '+16045550140' and direction = 'in'`, [ws],
+  )).rows[0];
+  assert.equal(yes.conversation_id, noahDesk);
+});
+
+test('a reply asking to stop is flagged; anyone in the thread opts the number out with one tap', async () => {
+  const pete = await desk.createPerson('Pete Example', { phone: '604-555-0145' });
+  let r = await vol.action('text.send', { person_id: pete.id, body: `Hi Pete, it's Vol with ${campaign}.` });
+  assert.equal(r.json.sent, true);
+  const conv = r.json.conversation_id;
+  await inbound('+16045550145', 'No thanks, stop');
+  let thread = (await vol.get(`/api/texting/conversations/${conv}`)).json;
+  assert.equal(thread.messages.at(-1).keyword, 'asks_stop');
+  assert.equal(thread.conversation.opted_out, false, 'flagged for a person — not opted out by itself');
+  const harjitConv = (await desk.get(`/api/texting/people/${P.harjit.id}`)).json.conversation.id;
+  assert.equal((await vol.action('text.optout', { conversation_id: harjitConv })).status, 404, 'not theirs to touch');
+  r = await vol.action('text.optout', { conversation_id: conv });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.opted_out, true);
+  thread = (await vol.get(`/api/texting/conversations/${conv}`)).json;
+  assert.equal(thread.conversation.opted_out, true);
+  assert.ok((await desk.get(`/api/persons/${pete.id}`)).json.person.tags.includes('do-not-text'));
+  assert.equal((await vol.action('text.reply', { conversation_id: conv, body: 'Sorry!' })).status, 409);
+  r = await staff.action('text.send', { person_id: pete.id, body: `Hi Pete, it's Sam with ${campaign}.` });
+  assert.equal(r.status, 409, 'nobody else can start again either');
+  assert.match(r.json.error, /opted out/i);
+  assert.equal((await vol.action('text.optout', { conversation_id: conv })).json.already, true, 'twice is harmless');
+  // "STOP 🙏" is a STOP.
+  const sky = await desk.createPerson('Sky Example', { phone: '604-555-0144' });
+  r = await vol.action('text.send', { person_id: sky.id, body: `Hi Sky, it's Vol with ${campaign}.` });
+  await inbound('+16045550144', 'STOP 🙏');
+  assert.ok((await desk.get(`/api/persons/${sky.id}`)).json.person.tags.includes('do-not-text'));
+});
+
+test('START takes off only the tag its STOP put on; a do-not-text set by hand stays', async () => {
+  const kim = await desk.createPerson('Kim Example', { phone: '604-555-0146' });
+  const ray = await desk.createPerson('Ray Example', { phone: '604 555 0146' });
+  await desk.action('person.update', { id: ray.id, tags: ['do-not-text'] });
+  assert.equal((await desk.action('text.send', { person_id: kim.id, body: `Hi Kim, it's Desk with ${campaign}.` })).json.sent, true);
+  await inbound('+16045550146', 'STOP');
+  const tags = async (p) => (await desk.get(`/api/persons/${p.id}`)).json.person.tags;
+  assert.ok((await tags(kim)).includes('do-not-text'));
+  assert.ok((await tags(ray)).includes('do-not-text'));
+  await inbound('+16045550146', 'START');
+  assert.ok(!(await tags(kim)).includes('do-not-text'), 'their STOP’s tag comes off');
+  assert.ok((await tags(ray)).includes('do-not-text'), 'the desk’s own do-not-text stays');
+  assert.equal((await desk.action('text.send', { person_id: ray.id, body: 'Hi Ray' })).status, 409);
+});
+
+test('shift notices texted from the campaign number follow the texting rules', async () => {
+  const sam = await desk.createPerson('Sam Example', { phone: '(604) 555-0147' });
+  const quinn = await desk.createPerson('Quinn Example', { phone: '604-555-0148', email: `quinn+${tag}@example.org` });
+  assert.equal((await desk.action('text.send', { person_id: quinn.id, body: `Hi Quinn, it's Desk with ${campaign}.` })).json.sent, true);
+  await inbound('+16045550148', 'STOP');
+  const shift = (await desk.action('shift.create', { title: 'Saturday canvass', starts_at: '2026-10-24T17:00:00.000Z' })).json.shift;
+  for (const p of [sam, quinn]) assert.equal((await desk.action('shift.assign', { shift_id: shift.id, person_id: p.id })).status, 200);
+  const by = (res) => Object.fromEntries(res.json.notified.map((x) => [x.name, x]));
+
+  at('2026-10-23T06:30:00Z'); // 11:30 pm in Surrey
+  const n = texts().length;
+  let r = await desk.action('shift.notify', { shift_id: shift.id });
+  assert.equal(r.status, 200);
+  let got = by(r);
+  assert.equal(got['Sam Example'].text, 'quiet');
+  assert.match(got['Sam Example'].text_note, /Quiet hours — sending opens at 9 am tomorrow/);
+  assert.equal(got['Quinn Example'].text, 'opted_out');
+  assert.equal(texts().length, n, 'nothing texted at 11:30 pm, nothing to a number that replied STOP');
+
+  _setClockForTest(() => NOON);
+  r = await desk.action('shift.notify', { shift_id: shift.id });
+  got = by(r);
+  assert.equal(got['Sam Example'].text, 'sent');
+  assert.equal(texts().at(-1).form.To, '+16045550147', 'to the E.164 number');
+  assert.match(texts().at(-1).form.Body, /^You're scheduled: Saturday canvass/);
+  assert.equal(got['Quinn Example'].text, 'opted_out', 'never to an opted-out number');
+  assert.equal(texts().length, n + 1);
+  const detail = (await desk.get(`/api/shifts/${shift.id}`)).json;
+  const row = detail.assignees.find((a) => a.name === 'Quinn Example');
+  assert.equal(row.notify_text, 'opted_out', 'the screen reads back what happened');
+});
+
+test('a text from a number nobody texted counts as new for the desk, not for a volunteer', async () => {
+  const slug = (await db.query('select slug from workspaces where id = $1', [ws])).rows[0].slug;
+  process.env.TWILIO_WORKSPACE = slug;
+  const before = (await desk.get('/api/texting/status')).json.unread;
+  const vBefore = (await vol.get('/api/texting/status')).json.unread;
+  try {
+    assert.equal((await inbound('+16045550188', 'Who is this?')).status, 200);
+  } finally {
+    delete process.env.TWILIO_WORKSPACE;
+  }
+  assert.equal((await desk.get('/api/texting/status')).json.unread, before + 1);
+  assert.equal((await vol.get('/api/texting/status')).json.unread, vBefore);
+  const conv = (await desk.get('/api/texting/all')).json.conversations.find((c) => c.phone === '604-555-0188');
+  assert.ok(conv && conv.unread && !conv.person_id);
+});
+
 test('one person tapping Send: a scripted burst is refused', async () => {
+  const burst = await desk.createPerson('Burst Example', { phone: '604-555-0149' });
   let refused = null;
   for (let i = 0; i < 25 && !refused; i += 1) {
-    const r = await staff.action('text.send', { person_id: P.lin.id, body: `Hello ${i} from ${campaign}` });
+    const r = await staff.action('text.send', { person_id: burst.id, body: `Hello ${i} from ${campaign}` });
     if (r.status === 429) refused = i;
   }
   assert.equal(refused, 20, 'twenty a minute at most');
@@ -451,7 +684,7 @@ test('one person tapping Send: a scripted burst is refused', async () => {
 
 test('every texting write is on the hash chain and the books verify', async () => {
   const actions = (await db.query('select distinct action from events where workspace_id = $1', [ws])).rows.map((r) => r.action);
-  for (const a of ['text.send', 'text.reply', 'text.read', 'call.start', 'texting.settings', 'twilio.sms_in', 'twilio.sms_status', 'twilio.voice_connect', 'twilio.call_dial', 'twilio.call_status']) {
+  for (const a of ['text.send', 'text.reply', 'text.read', 'text.optout', 'call.start', 'texting.settings', 'twilio.sms_in', 'twilio.sms_status', 'twilio.voice_connect', 'twilio.call_dial', 'twilio.call_status']) {
     assert.ok(actions.includes(a), `${a} is logged`);
   }
   assert.equal((await verifyChain(db, ws)).ok, true);

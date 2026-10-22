@@ -6,9 +6,15 @@
 //   text.reply        Send in the inbox: a reply in a conversation (volunteers:
 //                     only conversations they started)
 //   text.read         opening a conversation marks its replies read (for you)
+//   text.optout       "Opt out this number" in a thread (any role who can
+//                     see it): the same opt-out as a STOP reply
 //   call.start        "Call through the campaign": ring the caller's own phone,
 //                     then connect them to the person from the campaign number
 //   texting.settings  managers: the first-text template and the hours texts go
+//
+// One campaign conversation per number: while someone else's conversation
+// with a number is recent, text.send refuses ("Already texting with the
+// campaign") — the desk answers in that thread instead.
 //
 // Every send checks, on the server: Twilio connected, the number not opted
 // out (STOP) and the person not tagged do-not-text / do-not-contact, inside
@@ -23,7 +29,7 @@ import {
   namesCampaign, withFooter, hasBlanks,
 } from './rules.js';
 import { smsReady, voiceReady, publicBase, sendSms, ringCaller } from './twilio.js';
-import { settingsFor, quietState, isOptedOut, applyOptOut, isFirstOut, tagsOf } from './store.js';
+import { settingsFor, quietState, isOptedOut, applyOptOut, isFirstOut, tagsOf, inTouch } from './store.js';
 
 const ALL_ROLES = ['manager', 'treasurer', 'staff', 'volunteer'];
 const MANAGER_ONLY = ['manager'];
@@ -63,7 +69,7 @@ const checkTextable = async (tx, ctx, { phone, person }) => {
   }
   if (await isOptedOut(tx, ctx.workspaceId, phone)) throw httpError(409, 'Opted out of texts — they replied STOP');
   const quiet = quietState(await settingsFor(tx, ctx.workspaceId), ctx.workspace);
-  if (quiet.now) throw httpError(409, `Quiet hours — texts go out ${quiet.label}`);
+  if (quiet.now) throw httpError(409, `Quiet hours — sending opens at ${quiet.opens}`);
   const recent = (await tx.query(
     `select count(*)::int as n from texting_messages
      where workspace_id = $1 and sent_by = $2 and direction = 'out' and created_at > now() - interval '1 minute'`,
@@ -128,6 +134,9 @@ export const actions = {
       const phone = e164(person.phone);
       if (!phone) throw httpError(400, `No number to text for ${firstWord(person.name)}`);
       await checkTextable(tx, ctx, { phone, person });
+      if (await inTouch(tx, ctx.workspaceId, phone, ctx.user.id)) {
+        throw httpError(409, 'Already texting with the campaign');
+      }
       let conv = (await tx.query(
         `select id, phone from texting_conversations
          where workspace_id = $1 and person_id = $2 and started_by = $3 and phone = $4 order by created_at limit 1`,
@@ -170,6 +179,18 @@ export const actions = {
     },
   },
 
+  'text.optout': {
+    roles: ALL_ROLES,
+    input: z.object({ conversation_id: z.uuid() }),
+    handler: async (tx, ctx, input, emit) => {
+      const conv = await visibleConversation(tx, ctx, input.conversation_id);
+      if (!conv) throw httpError(404, 'conversation not found');
+      const already = await isOptedOut(tx, ctx.workspaceId, conv.phone);
+      if (!already) await applyOptOut(tx, emit, ctx.workspaceId, conv.phone, { out: true, keyword: 'ASKED TO STOP' });
+      return { conversation_id: conv.id, opted_out: true, already };
+    },
+  },
+
   'call.start': {
     roles: ALL_ROLES,
     input: z.object({ person_id: z.uuid(), my_phone: z.string().max(40).nullish() }),
@@ -180,7 +201,7 @@ export const actions = {
       if (!to) throw httpError(400, `No number to call for ${firstWord(person.name)}`);
       if (tagsOf(person).includes(NO_CONTACT_TAG)) throw httpError(409, `${firstWord(person.name)} is marked do not contact`);
       const quiet = quietState(await settingsFor(tx, ctx.workspaceId), ctx.workspace);
-      if (quiet.now) throw httpError(409, `Quiet hours — calls go out ${quiet.label}`);
+      if (quiet.now) throw httpError(409, `Quiet hours — calls open at ${quiet.opens}`);
 
       let mine;
       if (input.my_phone) {
@@ -242,6 +263,8 @@ export const actions = {
       template: z.string().trim().min(1).max(600).nullish(),
       allow_from: z.number().int().min(0).max(23).nullish(),
       allow_until: z.number().int().min(1).max(24).nullish(),
+      weekend_from: z.number().int().min(0).max(23).nullish(),
+      weekend_until: z.number().int().min(1).max(24).nullish(),
     }),
     handler: async (tx, ctx, input, emit) => {
       const cur = await settingsFor(tx, ctx.workspaceId);
@@ -249,16 +272,22 @@ export const actions = {
         template: input.template ?? cur.template,
         allow_from: input.allow_from ?? cur.allow_from,
         allow_until: input.allow_until ?? cur.allow_until,
+        weekend_from: input.weekend_from ?? cur.weekend_from,
+        weekend_until: input.weekend_until ?? cur.weekend_until,
       };
-      if (next.allow_from >= next.allow_until) throw httpError(400, 'The first hour must come before the last');
+      if (next.allow_from >= next.allow_until || next.weekend_from >= next.weekend_until) {
+        throw httpError(400, 'The first hour must come before the last');
+      }
       if (!next.template.includes('{{campaign}}') && !namesCampaign(next.template, ctx.workspace.name)) {
         throw httpError(400, `Name the campaign — keep {{campaign}} or “${ctx.workspace.name}”`);
       }
       await tx.query(
-        `insert into texting_settings (workspace_id, template, allow_from, allow_until) values ($1, $2, $3, $4)
+        `insert into texting_settings (workspace_id, template, allow_from, allow_until, weekend_from, weekend_until)
+         values ($1, $2, $3, $4, $5, $6)
          on conflict (workspace_id) do update set template = excluded.template, allow_from = excluded.allow_from,
-           allow_until = excluded.allow_until, updated_at = now()`,
-        [ctx.workspaceId, next.template, next.allow_from, next.allow_until],
+           allow_until = excluded.allow_until, weekend_from = excluded.weekend_from,
+           weekend_until = excluded.weekend_until, updated_at = now()`,
+        [ctx.workspaceId, next.template, next.allow_from, next.allow_until, next.weekend_from, next.weekend_until],
       );
       emit('texting_settings', ctx.workspaceId, 'update', next);
       return { settings: next };

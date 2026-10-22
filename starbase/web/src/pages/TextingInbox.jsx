@@ -1,12 +1,14 @@
 // Inbox — texts through the campaign's number, newest first. The desk sees
 // every conversation (?person= narrows it to one person); a volunteer sees
 // only the conversations they started (the server sends them nothing else).
-// A dot marks new replies. Tap one to read and reply.
+// A dot marks new replies; today's texts show the time, older ones the date.
+// Tap one to read and reply.
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api.js';
 import { isDesk } from '../Shell.jsx';
-import { MoreMenu, fmtShort, noSignal } from './People.jsx';
+import { MoreMenu, noSignal } from './People.jsx';
+import { whenShort } from '../components/TextingCard.jsx';
 import './people.css';
 import '../components/texting-card.css';
 import './texting.css';
@@ -33,7 +35,8 @@ export default function TextingInbox() {
         )}
       </div>
 
-      {q.data && !q.data.sms && <p className="tx-line">Texting from the app needs Twilio</p>}
+      {/* The desk can get it connected; a volunteer can't act on it. */}
+      {desk && q.data && !q.data.sms && <p className="tx-line">Texting from the app needs Twilio</p>}
       {person && (
         <p className="tx-filter">
           <span className="chip">One person</span>
@@ -65,7 +68,7 @@ export default function TextingInbox() {
                 </span>
                 {c.opted_out
                   ? <span className="chip chip-danger">Opted out</span>
-                  : <span className="tx-when mono">{fmtShort(c.last_at)}</span>}
+                  : <span className="tx-when mono">{whenShort(c.last_at)}</span>}
               </Link>
             </li>
           ))}

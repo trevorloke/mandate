@@ -2,6 +2,10 @@
 // Send is the screen's one yellow button. The server refuses a reply to an
 // opted-out number, in quiet hours, or without Twilio — and the screen says
 // so before you try. Opening it marks its replies read (for you only).
+// A reply that sounds like "stop" without being only STOP ("No thanks,
+// stop") is flagged, with "Opt out this number" right above the reply box;
+// otherwise that quiet button sits under it. Any role in the thread may tap
+// it: the same opt-out as a STOP reply.
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useParams, useOutletContext } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,13 +20,41 @@ import './texting.css';
 const OUT_WORD = { sent: 'Sent', delivered: 'Delivered', undelivered: 'Not delivered', failed: 'Not sent' };
 const first = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 
-function ReplyBox({ data, onSent }) {
+function OptOut({ conv, onDone }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action('text.optout', { conversation_id: conv.id });
+      // Their do-not-text tag shows on the profile, lists and the map.
+      for (const key of ['person', 'persons', 'doors']) qc.invalidateQueries({ queryKey: [key] });
+      await onDone();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No signal — not opted out');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button type="button" className="tx-quiet tx-quiet--block tx-optout" disabled={busy} onClick={run}>
+        {busy ? 'Opting out…' : 'Opt out this number'}
+      </button>
+      {error && <p className="error" role="alert">{error}</p>}
+    </>
+  );
+}
+
+function ReplyBox({ data, desk, onSent }) {
   const id = useId();
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const { conversation: conv, quiet, campaign } = data;
-  if (!data.sms) return <p className="tx-line tx-stop">Texting from the app needs Twilio</p>;
+  if (!data.sms) return <p className="tx-line tx-stop">{desk ? 'Texting from the app needs Twilio' : 'Texts open on your phone'}</p>;
   if (conv.opted_out || conv.no_texts) return <p className="tx-line tx-stop">Opted out — no more texts</p>;
   const missing = conv.first && body.trim() && !namesCampaign(body, campaign);
   const send = async () => {
@@ -48,7 +80,7 @@ function ReplyBox({ data, onSent }) {
         {conv.first && <p className="tx-foot">{FOOTER}</p>}
       </div>
       {missing && <p className="tx-line tx-line--warn">Say it’s {campaign} in the first text</p>}
-      {quiet?.now && <p className="tx-line">Quiet hours · texts go out {quiet.label}</p>}
+      {quiet?.now && <p className="tx-line">Quiet hours — sending opens at {quiet.opens || quiet.label}</p>}
       <button type="button" className="btn btn-primary pp-btn tx-send-btn"
         disabled={busy || quiet?.now || missing || !body.trim()} onClick={send}>
         {busy ? 'Sending…' : 'Send'}
@@ -93,9 +125,12 @@ export default function TextingThread() {
     );
   }
   const conv = q.data.conversation;
+  const blocked = conv.opted_out || conv.no_texts;
+  const asked = messages.some((m) => m.keyword === 'asks_stop');
   const refresh = () => Promise.all([
     qc.invalidateQueries({ queryKey: ['texting', 'thread', id] }),
     qc.invalidateQueries({ queryKey: ['texting', 'inbox'] }),
+    qc.invalidateQueries({ queryKey: ['texting', 'person'] }),
   ]);
 
   return (
@@ -119,13 +154,22 @@ export default function TextingThread() {
               {m.direction === 'out' && desk && m.sent_by_name ? ` · ${first(m.sent_by_name)}` : ''}
             </span>
             {m.keyword === 'stop' && <span className="chip chip-danger tx-kw">Opted out</span>}
+            {m.keyword === 'asks_stop' && <span className="chip chip-warn tx-kw">Asked to stop?</span>}
             {m.keyword === 'start' && <span className="chip chip-ok tx-kw">Opted back in</span>}
           </li>
         ))}
       </ol>
       <div ref={endRef} />
 
-      <ReplyBox data={q.data} onSent={refresh} />
+      {/* Not opted out yet: the one tap that stops every later text. */}
+      {!blocked && asked && (
+        <div className="tx-asked" role="note">
+          <p className="tx-line tx-line--warn">They may be asking to stop</p>
+          <OptOut conv={conv} onDone={refresh} />
+        </div>
+      )}
+      <ReplyBox data={q.data} desk={desk} onSent={refresh} />
+      {!blocked && !asked && <OptOut conv={conv} onDone={refresh} />}
     </div>
   );
 }

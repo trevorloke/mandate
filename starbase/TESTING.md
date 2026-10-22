@@ -107,14 +107,22 @@ one tap away under **More**.
   odd side up, even side back). Tap a door → **1 · 2 · 3 · 4** (each says what
   it means). **4** asks *Voting for?* — McCallum · Locke · Annis · van Vliet ·
   Randhawa · Not sure. A toast confirms; *Change* fixes a mis-tap.
-- **More** on a door: note, Call / Text (the phone's own dialer), request a
-  lawn / large sign or billboard (with Undo), add a person at the door.
+- **More** on a door: note, Call / Text (the phone's own dialer; with Twilio
+  connected, the person's card on Calls), request a lawn / large sign or
+  billboard (with Undo), add a person at the door.
 - **Calls** — one person at a time: Call or Text, then rate; *No answer*,
   *Refused*, *Skip*.
 - **Texts** (Twilio connected) — Calls → Text: the message is filled in; edit
-  it, *Send*. Replies show as *Replies · N* → **Inbox**; answer from there.
-  **Call** rings your own phone first (enter it once): answer, press 1, and
-  you're connected — they see the campaign's number.
+  it, *Send*, then *Next →*. Whoever you texted leaves the list until they
+  reply; then they come back first, with their reply on the card and a blank
+  reply box. Someone another volunteer (or the desk) is texting says
+  *Already texting with the campaign*. New replies show as *New replies · N*
+  (a count on the Calls tab, a row on Today) → **Inbox**; answer from there.
+  A reply like "No thanks, stop" is flagged with *Opt out this number*.
+  With no signal Send stays off (*Texts send with signal*). A profile's Call
+  and Text open the same card. **Call** rings your own phone first (enter it
+  once): answer, press 1, and you're connected — they see the campaign's
+  number.
 - **Shifts** — *Count me in* on an open shift; *Can't make it* to drop out.
 - **Signs** (from Today when there are signs to put up) — *Put up ✓*.
 - **Offline**: turn on airplane mode, rate three doors (they say *Saved
@@ -221,9 +229,21 @@ Built conservatively; the campaign should confirm these rules with counsel
   scheduled sends, no auto-dialer.
 - The first text to someone names the campaign and ends "Reply STOP to opt
   out".
-- STOP, STOPALL, UNSUBSCRIBE, CANCEL, END or QUIT opts that number out at
-  once and for good (tagged *do-not-text*); START or UNSTOP opts it back in.
-- Quiet hours: texts and calls go out only 9 am–9 pm Surrey time by
-  default; managers change them under **Inbox → More → Texting settings**.
-  The server refuses anything outside them.
+- STOP, STOPALL, UNSUBSCRIBE, CANCEL, END or QUIT (punctuation and emoji
+  ignored — "STOP 🙏"; clear requests such as "Please stop texting me" too)
+  opts that number out at once and for good (tagged *do-not-text*); START or
+  UNSTOP opts it back in, and takes off only the tag its STOP put on — a
+  *do-not-text* the desk set by hand stays. A reply that only has a stop
+  word in it ("No thanks, stop") is flagged in the thread; *Opt out this
+  number* (any role in the thread) is the same opt-out.
+- One campaign conversation per number: while someone's conversation with a
+  number had a text in the last 7 days, nobody else sends another
+  introduction, and replies stay in the conversation the voter last replied
+  in.
+- Quiet hours: texts and calls go out only 9 am–9 pm Monday to Friday and
+  10 am–6 pm on weekends (the CRTC's telemarketing hours), Surrey time, by
+  default — **confirm both with counsel**; managers change them under
+  **Inbox → More → Texting settings**. The server refuses anything outside
+  them, shift notices included (*Text not sent — quiet hours*). Shift
+  notices are never texted to an opted-out or do-not-text number.
 - Calls show the campaign's number, never the caller's own.

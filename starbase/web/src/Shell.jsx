@@ -5,6 +5,8 @@
 // every label whole at 390px, never cut off ("OUTREACH", not "OUTRE…").
 // One account menu (the avatar) holds the name, the campaign, Team (managers)
 // and Sign out. Keyboard: 'n' anywhere → log a gift (desk roles).
+// Calls carries a small count of new replies to your texts (volunteers; the
+// desk's Today has a "new texts" row).
 // Under the nav, a slim strip says when the phone is offline or field work
 // is still waiting in the outbox (src/offline.js): a "3 saved on this phone"
 // chip opens the list (refused ones with the server's reason, Try again /
@@ -18,6 +20,7 @@ import {
 } from './offline.js';
 import OfflineSheet from './components/OfflineSheet.jsx';
 import { forgetPhoneCopies, keepOnlyMine } from './components/OfflineCache.js';
+import { useTextingStatus } from './components/TextingStatus.js';
 import './pages/offline.css';
 
 // Staff, treasurers and managers. App.jsx guards the desk-only routes with it.
@@ -238,6 +241,11 @@ function SignedInShell({ me }) {
 
   const desk = isDesk(me);
   const nav = desk ? NAV_DESK : NAV_VOLUNTEER;
+  // New replies to your texts: a small count on Calls.
+  const unread = Number(useTextingStatus(me).data?.unread) || 0;
+  const badge = (n) => (n.to === '/calls' && unread > 0
+    ? <span className="tab-badge mono"><span aria-hidden="true">{unread}</span><span className="tab-sr">{` · ${unread} new ${unread === 1 ? 'reply' : 'replies'}`}</span></span>
+    : null);
   useEffect(() => {
     if (!desk) return undefined;
     const onKey = (e) => {
@@ -386,7 +394,7 @@ function SignedInShell({ me }) {
         <div className="nav-inner">
           <NavLink to="/" className="brand">Starbase</NavLink>
           <nav className="links" aria-label="Main">
-            {nav.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}</NavLink>)}
+            {nav.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}{badge(n)}</NavLink>)}
           </nav>
           <span className="spacer" />
           <AccountMenu me={me} signingOut={signingOut} confirmLeft={confirmLeft}
@@ -411,7 +419,7 @@ function SignedInShell({ me }) {
         style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(min-content, 1fr))` }}>
         {nav.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end}>
-            <Icon name={n.icon} />
+            <span className="tab-iconwrap"><Icon name={n.icon} />{badge(n)}</span>
             <span className="tab-label">{n.label}</span>
           </NavLink>
         ))}

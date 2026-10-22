@@ -29,6 +29,9 @@
 
 .tx-reply { border-top: 1px solid var(--rule); padding-top: var(--s-3); }
 .btn.tx-send-btn { width: 100%; font-size: 13px; }
+.tx-asked { margin: 0 0 var(--s-3); padding: var(--s-2) var(--s-3) 0; border: 1px solid var(--warn, var(--danger)); border-radius: var(--r-ctrl); }
+.tx-asked .tx-line { margin: 0; }
+.tx-asked .tx-optout { margin: 0; color: var(--text-1); }
 .tx-stop { padding: var(--s-3) 0; border-top: 1px solid var(--rule); font-size: 15px; }
 
 .tx-status { list-style: none; margin: 0 0 var(--s-4); padding: 0; border-top: 1px solid var(--rule); }

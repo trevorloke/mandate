@@ -15,7 +15,14 @@
 //   brief(db, ctx, brief)           GET /api/brief, just before it is sent:
 //                                   a feature may correct the counts it owns
 //                                   (texts sent through the app, say).
-const registry = { events: [], contactLogged: [], brief: [] };
+//   textOut(tx, ctx, { phone, personId, kind }, out)
+//                                   before the core texts someone from the
+//                                   campaign's number (a shift notice): a
+//                                   feature may set out.to (the number to
+//                                   use) or out.status + out.detail
+//                                   ('opted_out', 'quiet', 'failed') to hold
+//                                   it back — nothing is sent then.
+const registry = { events: [], contactLogged: [], brief: [], textOut: [] };
 
 export const onHook = (name, fn) => {
   if (!registry[name]) throw new Error(`unknown hook ${name}`);

@@ -19,7 +19,9 @@ import { queuedText } from '../components/queued.js';
 import { phoneCopy, showingCopy, useKeepCopy } from '../components/OfflineCache.js';
 import { apiGet, action, ApiError } from '../api.js';
 import './people.css';
-import { TextingCallButton, TextingRepliesLink, noTexts } from '../components/TextingCard.jsx';
+import {
+  TextingCallButton, TextingRepliesLink, noTexts, textingOn, useTextingStatus, useTextQueue, useTextingPerson,
+} from '../components/TextingCard.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared widgets + helpers (also used by Person.jsx)
@@ -613,7 +615,8 @@ function PeopleScreen() {
   if (canDesk(me)) return <PeopleList />;
   const f = Object.fromEntries(FILTER_KEYS.map((k) => [k, params.get(k) || '']));
   const text = params.get('bank') === 'text' || params.get('channel') === 'text';
-  return <Navigate replace to={`/calls${carry(f, { channel: text ? 'text' : null })}`} />;
+  const phone = params.get('bank') === 'phone' || params.get('channel') === 'phone';
+  return <Navigate replace to={`/calls${carry(f, { channel: text ? 'text' : phone ? 'phone' : null })}`} />;
 }
 
 function PeopleList() {
@@ -658,10 +661,13 @@ function PeopleList() {
   const anyFilter = Boolean(picked || f.q);
   const closeFilter = useCallback(() => { setFilterOpen(false); filterBtn.current?.focus(); }, []);
 
+  // A number dials from your own phone only when calls through the campaign are off.
+  const ownDialler = textingOn(useTextingStatus(me)).voice === false;
+
   // Old phone/text bank links (?bank=phone|text) now open Calls.
   const bank = params.get('bank');
   if (bank === 'phone' || bank === 'text') {
-    return <Navigate replace to={`/calls${carry(f, { channel: bank === 'text' ? 'text' : null })}`} />;
+    return <Navigate replace to={`/calls${carry(f, { channel: bank === 'text' ? 'text' : 'phone' })}`} />;
   }
 
   const offline = noSignal(persons);
@@ -676,7 +682,7 @@ function PeopleList() {
         <div className="head-actions">
           <MoreMenu
             items={[
-              { to: `/calls${carry(f)}`, label: 'Call list', icon: 'phone' },
+              { to: `/calls${carry(f, { channel: 'phone' })}`, label: 'Call list', icon: 'phone' },
               { to: `/calls${carry(f, { channel: 'text' })}`, label: 'Text list', icon: 'text' },
               { to: '/inbox', label: 'Inbox', icon: 'text' },
               desk && { to: '/people/import', label: 'Import', icon: 'upload' },
@@ -765,9 +771,9 @@ function PeopleList() {
                   </td>
                   <td>{p.rating && <RatingTag code={p.rating} />}</td>
                   <td>
-                    {p.phone
-                      ? <a className="tel" href={telHref(p.phone)} onClick={(e) => e.stopPropagation()}>{p.phone}</a>
-                      : <span className="muted">—</span>}
+                    {!p.phone ? <span className="muted">—</span>
+                      : ownDialler ? <a className="tel" href={telHref(p.phone)} onClick={(e) => e.stopPropagation()}>{p.phone}</a>
+                        : <span className="tel">{p.phone}</span>}
                   </td>
                   <td>{streetLine(p) || <span className="muted">—</span>}</td>
                 </tr>
@@ -800,6 +806,15 @@ const readDone = () => {
 const writeDone = (map) => {
   try { sessionStorage.setItem(DONE_KEY, JSON.stringify(map)); } catch { /* private mode: memory only */ }
 };
+// Phone or Text: the last one you used, per sign-in on this phone (Calls
+// opens on it). A convenience: a link that names one (?channel=) wins.
+const channelKey = (me) => `starbase.calls.channel:${me?.workspace?.id || ''}:${me?.user?.id || ''}`;
+const readChannel = (me) => {
+  try { return localStorage.getItem(channelKey(me)) === 'text' ? 'text' : 'phone'; } catch { return 'phone'; }
+};
+const saveChannel = (me, c) => {
+  try { localStorage.setItem(channelKey(me), c); } catch { /* private mode: not remembered */ }
+};
 const OUTCOME_WORD = { no_answer: 'No answer', refused: 'Refused' };
 const outcomeWord = (outcome, channel) => (outcome === 'no_answer' && channel === 'text' ? 'No reply' : OUTCOME_WORD[outcome] || outcome);
 
@@ -830,8 +845,20 @@ function CallsScreen() {
   const queryClient = useQueryClient();
   const { params, f, update } = useFilters();
   // contact.log's channel is an enum — never pass a hand-edited value through.
-  const channel = params.get('channel') === 'text' ? 'text' : 'phone';
+  const asked = params.get('channel');
+  const channel = asked === 'text' ? 'text' : asked === 'phone' ? 'phone' : readChannel(me);
+  useEffect(() => { if (asked === 'text' || asked === 'phone') saveChannel(me, asked); }, [asked, me]);
   const noun = channel === 'text' ? 'text' : 'call';
+  // Texts through the campaign's number: the Text list leaves out whoever
+  // someone else is texting, and whoever you texted until they reply (or a
+  // day goes by); whoever replied to you comes first.
+  const texting = useTextingStatus(me);
+  const smsOn = channel === 'text' && Boolean(texting.data?.sms);
+  const textQueue = useTextQueue(me, smsOn);
+  const away = textQueue.data?.away;
+  const replied = textQueue.data?.replied;
+  const [textedHere, setTextedHere] = useState(() => new Set()); // sent from this card, this sitting
+  const [sentId, setSentId] = useState(null); // the card just sent: "✓ Sent" and Next, nothing else
 
   const qs = new URLSearchParams({ q: f.q, limit: String(LIMIT), has: 'phone' });
   if (f.tag) qs.set('tag', f.tag);
@@ -849,11 +876,19 @@ function CallsScreen() {
   const listCopy = showingCopy(persons);
   const seed = me?.user?.id || '';
   const list = persons.data?.persons;
-  const rows = useMemo(
-    // Text mode also skips anyone who opted out of texts (replied STOP).
-    () => callOrder((list ?? []).filter((p) => p.phone && !isDnc(p) && !(channel === 'text' && noTexts(p))), seed),
-    [list, seed, channel],
+  // Text mode also skips anyone who opted out of texts (replied STOP).
+  const reachable = useMemo(
+    () => (list ?? []).filter((p) => p.phone && !isDnc(p) && !(channel === 'text' && noTexts(p))),
+    [list, channel],
   );
+  const rows = useMemo(() => {
+    const ok = reachable;
+    if (!smsOn) return callOrder(ok, seed);
+    const awaySet = new Set(away ?? []);
+    const repliedSet = new Set(replied ?? []);
+    const open = callOrder(ok.filter((p) => repliedSet.has(p.id) || (!awaySet.has(p.id) && !textedHere.has(p.id))), seed);
+    return [...open.filter((p) => repliedSet.has(p.id)), ...open.filter((p) => !repliedSet.has(p.id))];
+  }, [reachable, seed, smsOn, away, replied, textedHere]);
   const offline = noSignal(persons);
 
   const [done, setDone] = useState(readDone);
@@ -884,6 +919,29 @@ function CallsScreen() {
   const at = current ? queue.indexOf(current) : -1; // -1: a held person outside the list
   const calledHere = rows.length - queue.length;
   const mine = (current && picked[current.id]) || null;
+  // The card stays on whoever is up (a reply arriving doesn't swap it).
+  useEffect(() => { if (current && current.id !== currentId) setCurrentId(current.id); }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Opened from a profile or the door card (?person=): that person's card,
+  // even when the list would leave them out for now.
+  const wantId = params.get('person');
+  const wanted = useRef(null);
+  useEffect(() => {
+    if (!wantId || wanted.current === wantId || !list) return;
+    const p = list.find((x) => x.id === wantId);
+    if (!p) return;
+    wanted.current = wantId;
+    if (!p.phone || isDnc(p) || (channel === 'text' && noTexts(p))) return;
+    setHeld(p);
+    setCurrentId(p.id);
+  }, [wantId, list, channel]);
+  // Through the campaign's number, "No reply" is true only once you texted
+  // them and they haven't answered (a later visit — never right after Send).
+  // Just sent, or someone else is texting them: nothing to log here, only Next.
+  const txPerson = useTextingPerson(current?.id, smsOn);
+  const txCard = smsOn ? txPerson.data : null;
+  const showNoReply = !smsOn || txCard?.conversation?.last?.direction === 'out';
+  const justSent = Boolean(current && sentId === current.id);
+  const nothingToLog = justSent || Boolean(txCard?.in_touch);
   // The active calls survey's questions for this person (answers go with the next tap).
   const survey = useSurvey({ context: 'calls', personId: current?.id, lat: current?.lat, lng: current?.lng });
   const after = (i) => (i < 0 ? queue[0] || null : queue.length > 1 ? queue[(i + 1) % queue.length] : null);
@@ -941,6 +999,22 @@ function CallsScreen() {
     showToast(`${firstName(p.name)} · ${what}${res.queued ? ` · ${queuedText(res)}` : ''}`, p);
   };
   const skip = () => { const next = after(at); if (next) { refocus.current = focusInCard(); setCurrentId(next.id); } };
+  // Sent from the card: it says so and offers Next; they leave the list
+  // until they reply.
+  const onSent = (p) => {
+    setTextedHere((s) => new Set(s).add(p.id));
+    setSentId(p.id);
+    setHeld(p);
+    setCurrentId(p.id);
+  };
+  const onNext = () => {
+    const p = current;
+    const next = after(at);
+    refocus.current = focusInCard();
+    setSentId(null);
+    setHeld(null);
+    setCurrentId(next && next.id !== p?.id ? next.id : null);
+  };
   const change = () => {
     const p = toast?.person;
     setToast(null);
@@ -959,7 +1033,11 @@ function CallsScreen() {
     setDone(next);
     setCurrentId(null);
   };
-  const setChannel = (c) => update({ channel: c === 'text' ? 'text' : null });
+  const setChannel = (c) => {
+    saveChannel(me, c === 'text' ? 'text' : 'phone');
+    setSentId(null);
+    update({ channel: c === 'text' ? 'text' : null, person: null });
+  };
 
   const filterChips = <FilterChips f={f} update={update} keys={['rating', 'tag', 'role', 'q']} />;
 
@@ -978,18 +1056,19 @@ function CallsScreen() {
       </div>
 
       {filterChips}
-      <TextingRepliesLink />
+      <TextingRepliesLink me={me} />
 
       {listCopy && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
       {persons.isError && !offline && !listCopy && <p className="error">{persons.error.message}</p>}
 
       {offline ? (
         <p className="pp-offline" role="status">No signal — your list loads when you’re back online.</p>
-      ) : persons.isLoading ? (
+      ) : persons.isLoading || (channel === 'text' && texting.isLoading) || (smsOn && textQueue.isLoading) ? (
         <p className="muted">Loading…</p>
       ) : rows.length === 0 && !current ? (
         <div className="pp-empty">
-          <p>No one to {noun} yet.</p>
+          {/* Everyone here has a text from the campaign: replies come to the Inbox. */}
+          <p>{reachable.length > 0 ? `No one left to ${noun}.` : `No one to ${noun} yet.`}</p>
           {desk && <Link className="btn pp-btn" to="/people">Go to People</Link>}
         </div>
       ) : !current ? (
@@ -1031,7 +1110,7 @@ function CallsScreen() {
             </div>
 
             {/* Through the campaign's Twilio number when connected; else the phone's own apps. */}
-            <TextingCallButton person={current} me={me} channel={channel}>
+            <TextingCallButton person={current} me={me} channel={channel} onSent={onSent} onNext={onNext}>
               {channel === 'text' ? (
                 <a className="btn cl-call" href={smsHref(current.phone, textBody(current, me))}>
                   <Icon name="text" size={22} /> Text {firstName(current.name)}
@@ -1043,20 +1122,27 @@ function CallsScreen() {
               )}
             </TextingCallButton>
 
-            <div className="cl-rate">
-              <RatingButtons value={mine} onPick={(code) => log('contacted', code)} disabled={act.busy} />
-            </div>
+            {/* Just texted (or someone else is): nothing to rate yet — the card offers Next. */}
+            {!nothingToLog && (
+              <>
+                <div className="cl-rate">
+                  <RatingButtons value={mine} onPick={(code) => log('contacted', code)} disabled={act.busy} />
+                </div>
 
-            <div className="cl-outcomes">
-              <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('no_answer')}>
-                {channel === 'text' ? 'No reply' : 'No answer'}
-              </button>
-              <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('refused')}>Refused</button>
-              <button type="button" className="cl-out cl-skip" disabled={act.busy || !after(at)} onClick={skip}>
-                Skip <Icon name="next" size={18} />
-              </button>
-            </div>
-            <SurveyQuestions survey={survey} disabled={act.busy} onSave={() => log('contacted')} />
+                <div className="cl-outcomes">
+                  {showNoReply && (
+                    <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('no_answer')}>
+                      {channel === 'text' ? 'No reply' : 'No answer'}
+                    </button>
+                  )}
+                  <button type="button" className="cl-out" disabled={act.busy} onClick={() => log('refused')}>Refused</button>
+                  <button type="button" className="cl-out cl-skip" disabled={act.busy || !after(at)} onClick={skip}>
+                    Skip <Icon name="next" size={18} />
+                  </button>
+                </div>
+                <SurveyQuestions survey={survey} disabled={act.busy} onSave={() => log('contacted')} />
+              </>
+            )}
             {act.error && <p className="error" role="alert">{act.error}</p>}
           </section>
 

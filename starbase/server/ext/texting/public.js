@@ -11,15 +11,19 @@
 // hash-chained event log covers it like any desk action:
 //   twilio.sms_in  twilio.sms_status  twilio.voice_connect  twilio.call_dial  twilio.call_status
 //
-// A reply goes to the conversation that last texted that number. A reply that
-// is only STOP (STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT …) opts the number
+// A reply goes to the campaign that last texted that number, and there to the
+// conversation the voter last replied in (within RECENT_DAYS), else the first
+// of the conversations that texted them lately — never a newer duplicate —
+// else the one that texted them last. A reply that is only STOP (STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT …) opts the number
 // out at once in every campaign that texted it — tagged do-not-text, never
 // texted again from the app — and START / UNSTOP opts it back in. Nothing is
-// ever sent back automatically; Twilio itself confirms opt-outs.
+// ever sent back automatically; Twilio itself confirms opt-outs. A reply with a
+// stop or unsubscribe word in it that isn't only a keyword ("No thanks, stop")
+// is flagged (keyword asks_stop) for a person to opt out with one tap.
 import { Hono } from 'hono';
 import { getDb } from '../../db/client.js';
 import { runAction, newId } from '../../lib/events.js';
-import { e164, keywordOf } from './rules.js';
+import { e164, keywordOf, asksToStop, ASKS_STOP_KEYWORD, RECENT_DAYS } from './rules.js';
 import { verifyTwilio, twiml, xmlEsc, publicBase, campaignNumber } from './twilio.js';
 import { applyOptOut, personByPhone } from './store.js';
 import { hashToken } from './actions.js';
@@ -37,17 +41,43 @@ const bad = (c) => c.json({ error: 'bad signature' }, 403);
 
 // Which campaign a reply belongs to: the one that last texted that number,
 // else the last conversation with it, else the only campaign on this server
-// (or TWILIO_WORKSPACE, a slug, when several share one number).
+// (or TWILIO_WORKSPACE, a slug, when several share one number). Then which
+// conversation in it: see the top of this file.
+const conversationFor = async (db, workspaceId, phone) => {
+  const replied = (await db.query(
+    `select conversation_id from texting_messages
+     where workspace_id = $1 and phone = $2 and direction = 'in' and created_at > now() - interval '${RECENT_DAYS} days'
+     order by created_at desc limit 1`, [workspaceId, phone],
+  )).rows[0];
+  if (replied) return replied.conversation_id;
+  const original = (await db.query(
+    `select c.id from texting_conversations c
+     where c.workspace_id = $1 and c.phone = $2
+       and exists (select 1 from texting_messages m where m.conversation_id = c.id and m.direction = 'out'
+                     and m.created_at > now() - interval '${RECENT_DAYS} days')
+     order by c.created_at limit 1`, [workspaceId, phone],
+  )).rows[0];
+  if (original) return original.id;
+  const sent = (await db.query(
+    `select conversation_id from texting_messages
+     where workspace_id = $1 and phone = $2 and direction = 'out' order by created_at desc limit 1`, [workspaceId, phone],
+  )).rows[0];
+  if (sent) return sent.conversation_id;
+  const conv = (await db.query(
+    'select id from texting_conversations where workspace_id = $1 and phone = $2 order by last_at desc limit 1', [workspaceId, phone],
+  )).rows[0];
+  return conv?.id || null;
+};
 const routeInbound = async (db, phone) => {
   const sent = (await db.query(
-    `select workspace_id, conversation_id from texting_messages
+    `select workspace_id from texting_messages
      where phone = $1 and direction = 'out' order by created_at desc limit 1`, [phone],
   )).rows[0];
-  if (sent) return { workspaceId: sent.workspace_id, conversationId: sent.conversation_id };
-  const conv = (await db.query(
-    'select workspace_id, id from texting_conversations where phone = $1 order by last_at desc limit 1', [phone],
+  const conv = sent ? null : (await db.query(
+    'select workspace_id from texting_conversations where phone = $1 order by last_at desc limit 1', [phone],
   )).rows[0];
-  if (conv) return { workspaceId: conv.workspace_id, conversationId: conv.id };
+  const known = sent?.workspace_id || conv?.workspace_id;
+  if (known) return { workspaceId: known, conversationId: await conversationFor(db, known, phone) };
   const slug = String(process.env.TWILIO_WORKSPACE || '').trim();
   const ws = slug
     ? (await db.query('select id from workspaces where slug = $1', [slug])).rows
@@ -66,6 +96,7 @@ publicRoutes.post('/api/public/twilio/sms', async (c) => {
   const route = await routeInbound(db, from);
   if (!route) return twiml(c); // no campaign has this number: nothing to file it under
   const keyword = keywordOf(body);
+  const flag = keyword || (asksToStop(body) ? ASKS_STOP_KEYWORD : null);
 
   await runAction(db, { workspaceId: route.workspaceId, actorId: null, action: 'twilio.sms_in' }, async (tx, emit) => {
     if (sid && (await tx.query(
@@ -93,10 +124,10 @@ publicRoutes.post('/api/public/twilio/sms', async (c) => {
     await tx.query(
       `insert into texting_messages (id, workspace_id, conversation_id, direction, phone, body, status, keyword, provider_sid)
        values ($1, $2, $3, 'in', $4, $5, 'received', $6, $7)`,
-      [id, route.workspaceId, convId, from, body, keyword, sid],
+      [id, route.workspaceId, convId, from, body, flag, sid],
     );
     await tx.query('update texting_conversations set last_at = now() where id = $1', [convId]);
-    emit('texting_message', id, 'create', { conversation_id: convId, direction: 'in', status: 'received', body, keyword });
+    emit('texting_message', id, 'create', { conversation_id: convId, direction: 'in', status: 'received', body, keyword: flag });
     if (keyword) await applyOptOut(tx, emit, route.workspaceId, from, { out: keyword === 'stop', keyword: body.trim().toUpperCase().slice(0, 40) });
     return { id };
   });
@@ -145,6 +176,12 @@ const callByToken = async (db, token) => (await db.query(
 const ended = (c) => twiml(c, '<Say>This call has ended. Goodbye.</Say><Hangup/>');
 const sameCall = (call, params) => !call.provider_sid || !params.get('CallSid') || call.provider_sid === params.get('CallSid');
 
+const pressOne = (token, words) => {
+  const action = `${publicBase()}/api/public/twilio/voice/${encodeURIComponent(token)}/connect`;
+  return `<Gather numDigits="1" timeout="10" action="${xmlEsc(action)}" method="POST">`
+    + `<Say>${xmlEsc(words)}</Say></Gather><Say>No key pressed. Goodbye.</Say><Hangup/>`;
+};
+
 // The caller picked up. Ask for a key first, so a voicemail that answers
 // never gets connected to the person.
 publicRoutes.post('/api/public/twilio/voice/:token', async (c) => {
@@ -153,19 +190,23 @@ publicRoutes.post('/api/public/twilio/voice/:token', async (c) => {
   const token = c.req.param('token');
   const call = await callByToken(await getDb(), token);
   if (!call || call.token_used_at || !call.live || !sameCall(call, params)) return ended(c);
-  const action = `${publicBase()}/api/public/twilio/voice/${encodeURIComponent(token)}/connect`;
-  return twiml(c, `<Gather numDigits="1" timeout="10" action="${xmlEsc(action)}" method="POST">`
-    + '<Say>Campaign call. Press 1 to connect.</Say></Gather><Say>No key pressed. Goodbye.</Say><Hangup/>');
+  return twiml(c, pressOne(token, 'Campaign call. Press 1 to connect.'));
 });
 
-// They pressed a key: spend the token (single use) and dial the person with
-// the campaign's number as caller ID — never the caller's own.
+// They pressed 1: spend the token (single use) and dial the person with the
+// campaign's number as caller ID — never the caller's own. Any other key
+// asks again ("Press 1 to connect"); nobody is dialled.
 publicRoutes.post('/api/public/twilio/voice/:token/connect', async (c) => {
   const params = await signedForm(c);
   if (!params) return bad(c);
   const db = await getDb();
-  const call = await callByToken(db, c.req.param('token'));
+  const token = c.req.param('token');
+  const call = await callByToken(db, token);
   if (!call || !params.get('Digits') || !sameCall(call, params)) return ended(c);
+  if (params.get('Digits') !== '1') {
+    if (call.token_used_at || !call.live) return ended(c);
+    return twiml(c, pressOne(token, 'Press 1 to connect.'));
+  }
   const { result } = await runAction(db, { workspaceId: call.workspace_id, actorId: null, action: 'twilio.voice_connect' }, async (tx, emit) => {
     const spent = (await tx.query(
       `update texting_calls set token_used_at = now(), status = 'connecting'

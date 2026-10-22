@@ -145,28 +145,39 @@ const normalizeLink = (link) => {
 const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || ''));
 
 const ASSIGN_TONE = { assigned: '', confirmed: 'ok', completed: 'ok', declined: 'danger', no_show: 'danger' };
-const NOTIFY_CHIP = { sent: 'chip-ok', queued: 'chip-warn', failed: 'chip-danger', skipped: '' };
+const NOTIFY_CHIP = { sent: 'chip-ok', queued: 'chip-warn', failed: 'chip-danger', skipped: '', opted_out: '', quiet: 'chip-warn' };
 // What happened to one message, in plain words ("Email not sent"). 'queued'
 // means the server sent nothing because that channel isn't connected, and
 // nothing sends it later: connect it, then Notify again.
 const NOTIFY_WORDS = {
   email: { sent: 'Email sent', queued: 'Email not sent', failed: 'Email didn’t send', skipped: 'No email on file' },
-  text: { sent: 'Text sent', queued: 'Text not sent', failed: 'Text didn’t send', skipped: 'No phone on file' },
+  text: {
+    sent: 'Text sent', queued: 'Text not sent', failed: 'Text didn’t send', skipped: 'No phone on file',
+    // The texting rules hold a notice back too (server/ext/texting).
+    opted_out: 'Opted out of texts', quiet: 'Text not sent — quiet hours',
+  },
 };
 const NOTIFY_TITLE = {
   email: { queued: 'Not sent — email isn’t connected', failed: 'Try again, or reach them another way' },
-  text: { queued: 'Not sent — texting isn’t connected', failed: 'Try again, or reach them another way' },
+  text: {
+    queued: 'Not sent — texting isn’t connected', failed: 'Try again, or reach them another way',
+    opted_out: 'They replied STOP or are marked do not text', quiet: 'Texts go out only in the campaign’s hours',
+  },
 };
 
 // One person's outcome across both channels:
 //   reached — at least one message went out
 //   failed  — nothing went out, and a provider turned one down
 //   offline — nothing went out: that channel isn't connected
+//   quiet   — nothing went out: the text waits for the campaign's hours
+//   optedout — nothing went out: no email, and they opted out of texts
 //   skipped — no email or phone on file
 const outcomeOf = (email, text) => {
   if (email === 'sent' || text === 'sent') return 'reached';
   if (email === 'failed' || text === 'failed') return 'failed';
   if (email === 'queued' || text === 'queued') return 'offline';
+  if (text === 'quiet') return 'quiet';
+  if (text === 'opted_out') return 'optedout';
   return 'skipped';
 };
 const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
@@ -178,7 +189,9 @@ const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
 // Green only when everyone was reached.
 function notifySummary(results) {
   const total = results.length;
-  const n = { reached: 0, failed: 0, offline: 0, skipped: 0 };
+  const n = { reached: 0, failed: 0, offline: 0, quiet: 0, optedout: 0, skipped: 0 };
+  // Texts held back for quiet hours, whoever else reached them by email.
+  const quietTexts = results.filter((r) => r.text === 'quiet');
   let offEmail = false;
   let offText = false;
   for (const r of results) {
@@ -199,8 +212,15 @@ function notifySummary(results) {
     const next = `connect ${connect}, then Notify again`;
     say(`Not sent · ${people(n.offline)} — ${next}`, `${n.offline} not sent — ${next}`);
   }
+  if (quietTexts.length) {
+    // "Quiet hours — sending opens at 9 am" (the server's words).
+    const note = quietTexts.find((r) => r.text_note)?.text_note || 'Quiet hours';
+    const k = quietTexts.length;
+    say(`${note} · ${k} ${k === 1 ? 'text' : 'texts'} not sent`, `${k} ${k === 1 ? 'text' : 'texts'} not sent — ${note.toLowerCase()}`);
+  }
+  if (n.optedout) say(`Opted out of texts · ${people(n.optedout)}`, `${n.optedout} opted out of texts`);
   if (n.skipped) say(`No email or phone on file · ${people(n.skipped)}`, `${n.skipped} with no email or phone`);
-  return { text: parts.join(' · '), ok: total > 0 && n.reached === total };
+  return { text: parts.join(' · '), ok: total > 0 && n.reached === total && quietTexts.length === 0 };
 }
 
 function NotifyChip({ channel, status }) {
@@ -212,7 +232,7 @@ function NotifyChip({ channel, status }) {
   );
 }
 
-const NOTIFIED_WORD = { reached: 'Notified', failed: 'Tried', offline: 'Saved', skipped: 'Saved' };
+const NOTIFIED_WORD = { reached: 'Notified', failed: 'Tried', offline: 'Saved', quiet: 'Saved', optedout: 'Saved', skipped: 'Saved' };
 
 // ── Fill bar: filled / capacity ──
 export function FillBar({ filled = 0, capacity }) {

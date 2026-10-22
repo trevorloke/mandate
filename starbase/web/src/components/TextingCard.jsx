@@ -1,15 +1,29 @@
 // Texting and calling on the Calls card, through the campaign's Twilio number.
 //
-//   <TextingCallButton person me channel>{the phone's own sms:/tel: link}</…>
-//       Text mode, Twilio connected: the message (the campaign's template with
-//       their first name, editable) and Send — sent by the server, one tap,
-//       one person. The first text in a conversation shows the line the server
-//       adds ("Reply STOP to opt out") and must name the campaign.
+//   <TextingCallButton person me channel onSent onNext>{the phone's own sms:/tel: link}</…>
+//       Text mode, Twilio connected — one of:
+//         · they opted out → "<name> opted out of texts"
+//         · someone else at the campaign is texting this number → "Already
+//           texting with the campaign" (the desk gets Open, to that thread),
+//           no Send: one campaign conversation per number
+//         · your conversation with them → its last texts and a blank reply
+//           (no first-text wording, no STOP line)
+//         · otherwise the first text: the campaign's template with their
+//           first name, editable, and the line the server adds ("Reply STOP
+//           to opt out"); it must name the campaign
+//       Send is the server's, one tap, one person; then "✓ Sent to <name>"
+//       and one quiet "Next →" (onSent / onNext — the Calls screen moves on
+//       and leaves them out of the Text list until they reply).
 //       Phone mode, calls connected: "Call <name>" rings your own phone first
 //       (you enter it once) and connects you from the campaign's number.
-//       Otherwise the children — today's sms: / tel: link — plus, in Text
-//       mode, one plain line: "Texting from the app needs Twilio".
-//   <TextingRepliesLink />   Calls' quiet "Replies · N" (your unread replies)
+//       No signal: the same card with Send / Call off — never the phone's
+//       own Messages or dialler while Twilio is on (the status is kept on
+//       the phone: TextingStatus.js).
+//       Twilio not connected: the children (today's sms: / tel: link) and, in
+//       Text mode, one line — "Texts open on your phone" (volunteers) or
+//       "Texting from the app needs Twilio" (the desk).
+//   <TextingRepliesLink me />   Calls' quiet "New replies · N" ("New texts" for
+//                            the desk), else "Inbox"
 //   <TextingPersonLink personId />   a profile's "Texts" row (desk)
 //   noTexts(person)          true when they must not be texted
 //
@@ -18,7 +32,11 @@ import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action, ApiError } from '../api.js';
+import { isDesk } from '../Shell.jsx';
+import { useTextingStatus, statusOffline, textingOn, useTextingPerson, useOnline } from './TextingStatus.js';
 import './texting-card.css';
+
+export { useTextingStatus, statusOffline, textingOn, useTextQueue, useTextingPerson, callsCard } from './TextingStatus.js';
 
 export const NO_TEXT_TAGS = ['do-not-text', 'do-not-contact'];
 export const noTexts = (p) => Array.isArray(p?.tags) && p.tags.some((t) => NO_TEXT_TAGS.includes(t));
@@ -34,17 +52,19 @@ export const clock = (ts) => {
   const d = new Date(ts || Date.now());
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
 };
+// "12:08 a.m." today, "Oct 21" before.
+export const whenShort = (ts) => {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return clock(d);
+  return d.toLocaleDateString('en-CA', d.getFullYear() === now.getFullYear()
+    ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+};
 const minutes = (s) => (s == null ? '' : s < 60 ? `${s} sec` : `${Math.round(s / 60)} min`);
 const errorText = (e) => (e instanceof ApiError ? e.message : 'No signal — not sent');
-
-export function useTextingStatus() {
-  return useQuery({
-    queryKey: ['texting', 'status'],
-    queryFn: () => apiGet('/texting/status'),
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-}
+// "Quiet hours — sending opens at 9 am" (the server's own words for when).
+const quietLine = (quiet, what = 'sending opens') => `Quiet hours — ${what} at ${quiet?.opens || quiet?.label || 'the allowed hours'}`;
 
 function TxIcon({ name }) {
   return (
@@ -57,67 +77,103 @@ function TxIcon({ name }) {
   );
 }
 
+// Your conversation's last texts, oldest first: "Sent · 12:08 a.m." / "Lena · 12:10 a.m.".
+function Recent({ recent, fn }) {
+  if (!recent?.length) return null;
+  return (
+    <ol className="tx-recent" aria-label="Last texts">
+      {recent.map((m, i) => (
+        <li key={i} className={`tx-recent__msg tx-recent__msg--${m.direction}`}>
+          <span className="tx-recent__who">{m.direction === 'in' ? fn : 'Sent'} · {whenShort(m.created_at)}</span>
+          <span className="tx-recent__body">{m.body}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 // ── Text mode: write, then Send ──
-function SendBox({ person, me, status }) {
+function SendBox({ person, me, status, offline, onSent, onNext }) {
   const qc = useQueryClient();
   const id = useId();
   const fn = first(person.name);
-  const card = useQuery({
-    queryKey: ['texting', 'person', person.id],
-    queryFn: () => apiGet(`/texting/people/${person.id}`),
-    staleTime: 10_000,
-  });
-  const [body, setBody] = useState(() => fillTemplate(status.template, { person, me, campaign: status.campaign }));
+  const card = useTextingPerson(person.id);
+  const info = card.data;
+  const conv = info?.conversation || null;
+  // A follow-up in your own conversation: blank, no first-text wording.
+  const replying = Boolean(conv && info && !info.first);
+  const [typed, setTyped] = useState(null); // null until they type
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);   // the text the server sent
   const [error, setError] = useState(null);
-  const info = card.data;
+  const body = typed ?? (replying ? '' : fillTemplate(status.template, { person, me, campaign: status.campaign }));
+
   if (info?.opted_out || info?.no_contact || noTexts(person)) {
     return <p className="tx-line tx-line--block" role="note">{fn} opted out of texts</p>;
+  }
+  if (done) {
+    return (
+      <div className="tx-done" role="status">
+        <span>✓ Sent to {fn} · {clock(done.at)}</span>
+        {onNext
+          ? <button type="button" className="tx-quiet tx-next" onClick={onNext}>Next →</button>
+          : <Link className="tx-quiet" to={`/inbox/${done.conversation_id}`}>Open</Link>}
+      </div>
+    );
+  }
+  if (info?.in_touch) {
+    return (
+      <div className="tx-send">
+        <p className="tx-line tx-line--block" role="note">Already texting with the campaign</p>
+        {info.in_touch_id && <Link className="tx-quiet tx-quiet--block" to={`/inbox/${info.in_touch_id}`}>Open</Link>}
+        {onNext && <button type="button" className="tx-quiet tx-quiet--block tx-next" onClick={onNext}>Next →</button>}
+      </div>
+    );
   }
   const isFirst = info ? info.first : true;
   const missing = isFirst && !namesCampaign(body, status.campaign);
   const quiet = Boolean(status.quiet?.now);
-  const thread = done?.conversation_id || info?.conversation?.id;
 
   const send = async () => {
     setBusy(true);
     setError(null);
     try {
-      const r = await action('text.send', { person_id: person.id, body });
-      if (r.sent) setDone({ at: r.message.created_at, conversation_id: r.conversation_id });
-      else setError(`Not sent — ${r.message?.error || 'Twilio refused it'}`);
+      const r = replying
+        ? await action('text.reply', { conversation_id: conv.id, body })
+        : await action('text.send', { person_id: person.id, body });
+      if (r.sent) {
+        setDone({ at: r.message.created_at, conversation_id: r.conversation_id });
+        onSent?.(person);
+      } else setError(`Not sent — ${r.message?.error || 'Twilio refused it'}`);
       qc.invalidateQueries({ queryKey: ['texting'] });
+      qc.invalidateQueries({ queryKey: ['brief'] }); // Today's "texts this week"
     } catch (e) {
       setError(errorText(e));
+      if (e instanceof ApiError) qc.invalidateQueries({ queryKey: ['texting', 'person', person.id] });
     } finally {
       setBusy(false);
     }
   };
 
-  if (done) {
-    return (
-      <div className="tx-done" role="status">
-        <span>✓ Sent to {fn} · {clock(done.at)}</span>
-        <Link className="tx-quiet" to={`/inbox/${done.conversation_id}`}>Open</Link>
-      </div>
-    );
-  }
   return (
     <div className="tx-send">
+      {replying && <Recent recent={conv.recent} fn={fn} />}
       <div className="tx-msg">
-        <label className="pp-sr" htmlFor={id}>Message to {fn}</label>
-        <textarea id={id} className="tx-body" rows={4} maxLength={1000} value={body}
-          onChange={(e) => { setBody(e.target.value); setError(null); }} />
+        <label className="pp-sr" htmlFor={id}>{replying ? `Reply to ${fn}` : `Message to ${fn}`}</label>
+        <textarea id={id} className="tx-body" rows={replying ? 3 : 4} maxLength={1000} value={body}
+          placeholder={replying ? 'Write a reply' : undefined}
+          onChange={(e) => { setTyped(e.target.value); setError(null); }} />
         {isFirst && !endsWithFooter(body) && <p className="tx-foot" title="Added to every first text">{FOOTER}</p>}
       </div>
       {missing && <p className="tx-line tx-line--warn">Say it’s {status.campaign} in the first text</p>}
-      {quiet && <p className="tx-line">Quiet hours · texts go out {status.quiet.label}</p>}
-      <button type="button" className="btn cl-call tx-go" disabled={busy || quiet || missing || !body.trim()} onClick={send}>
+      {offline
+        ? <p className="tx-line">Texts send with signal</p>
+        : quiet && <p className="tx-line">{quietLine(status.quiet)}</p>}
+      <button type="button" className="btn cl-call tx-go" disabled={busy || card.isLoading || offline || quiet || missing || !body.trim()} onClick={send}>
         <TxIcon name="text" /> {busy ? 'Sending…' : `Send to ${fn}`}
       </button>
       {error && <p className="error" role="alert">{error}</p>}
-      {thread && !error && <Link className="tx-quiet tx-quiet--block" to={`/inbox/${thread}`}>Earlier texts</Link>}
+      {conv && !error && <Link className="tx-quiet tx-quiet--block" to={`/inbox/${conv.id}`}>All texts</Link>}
     </div>
   );
 }
@@ -137,7 +193,7 @@ const callWords = (call, fn) => {
   }
 };
 
-function CampaignCall({ person, status }) {
+function CampaignCall({ person, status, offline }) {
   const qc = useQueryClient();
   const id = useId();
   const fn = first(person.name);
@@ -180,13 +236,16 @@ function CampaignCall({ person, status }) {
           <input id={id} className="input tx-input" type="tel" inputMode="tel" autoComplete="tel" maxLength={40}
             value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="604-555-0100" />
           <p className="tx-line">We ring you, then connect you. They see the campaign’s number.</p>
+          <p className="tx-line">Managers can see this number.</p>
         </div>
       )}
-      {quiet && <p className="tx-line">Quiet hours · calls go out {status.quiet.label}</p>}
+      {offline
+        ? <p className="tx-line">Calls need signal</p>
+        : quiet && <p className="tx-line">{quietLine(status.quiet, 'calls open')}</p>}
       {live ? (
         <p className="tx-live" role="status" aria-live="polite">{callWords(now, fn)}</p>
       ) : (
-        <button type="button" className="btn cl-call" disabled={busy || quiet || (needPhone && !phone.trim())} onClick={start}>
+        <button type="button" className="btn cl-call" disabled={busy || offline || quiet || (needPhone && !phone.trim())} onClick={start}>
           <TxIcon name="phone" /> {busy ? 'Calling…' : now ? `Call ${fn} again` : `Call ${fn}`}
         </button>
       )}
@@ -201,30 +260,41 @@ function CampaignCall({ person, status }) {
   );
 }
 
-export function TextingCallButton({ person, me, channel, children }) {
-  const status = useTextingStatus();
+export function TextingCallButton({ person, me, channel, onSent, onNext, children }) {
+  const status = useTextingStatus(me);
   const s = status.data;
+  const on = textingOn(status);
+  const online = useOnline();
+  const offline = !online || statusOffline(status);
   if (channel === 'text') {
-    if (s?.sms) return <SendBox person={person} me={me} status={s} />;
-    return (
-      <>
-        {children}
-        {s && !s.sms && <p className="tx-line tx-line--under">Texting from the app needs Twilio</p>}
-      </>
-    );
+    if (on.sms) return <SendBox person={person} me={me} status={s} offline={offline} onSent={onSent} onNext={onNext} />;
+    if (on.sms === false) {
+      return (
+        <>
+          {children}
+          <p className="tx-line tx-line--under">{isDesk(me) ? 'Texting from the app needs Twilio' : 'Texts open on your phone'}</p>
+        </>
+      );
+    }
+    // Not known yet: never guess the phone's own Messages.
+    return offline ? <p className="tx-line tx-line--block" role="note">Texts need signal</p> : null;
   }
-  if (s?.voice) return <CampaignCall person={person} status={s} />;
-  return children;
+  if (on.voice) return <CampaignCall person={person} status={s} offline={offline} />;
+  if (on.voice === false) return children;
+  return offline ? <p className="tx-line tx-line--block" role="note">Calls need signal</p> : null;
 }
 
-export function TextingRepliesLink() {
-  const status = useTextingStatus();
-  const s = status.data;
-  if (!s?.conversations) return null;
-  return (
-    <Link className={`tx-replies${s.unread ? ' is-new' : ''}`} to="/inbox">
-      Replies · <span className="mono">{s.unread}</span>
-    </Link>
+// Calls' quiet link to the Inbox: "New replies · 2" when there are, else
+// "Inbox". The desk's count also holds texts from numbers nobody texted
+// first, so it says "New texts".
+export function TextingRepliesLink({ me }) {
+  const s = useTextingStatus(me).data;
+  const desk = isDesk(me);
+  if (!s || !(s.conversations || s.unread || (desk && s.sms))) return null;
+  return s.unread > 0 ? (
+    <Link className="tx-replies is-new" to="/inbox">{desk ? 'New texts' : 'New replies'} · <span className="mono">{s.unread}</span></Link>
+  ) : (
+    <Link className="tx-replies" to="/inbox">Inbox</Link>
   );
 }
 

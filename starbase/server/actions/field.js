@@ -465,7 +465,9 @@ export const FIELD_ACTIONS = {
   // result is recorded per-assignee; missing providers record 'queued' (not
   // sent, and nothing sends it later). Every run messages everyone on the
   // shift whatever their last result, so "Notify again" after connecting
-  // email/text is how the 'queued' ones are reached.
+  // email/text is how the 'queued' ones are reached. A text the texting rules
+  // hold back records why: 'opted_out' (STOP or do-not-text) or 'quiet'
+  // (outside the hours texts may go).
   'shift.notify': {
     roles: DESK_ROLES,
     input: z.object({ shift_id: uuid() }),
@@ -488,15 +490,23 @@ export const FIELD_ACTIONS = {
         const emailRes = a.email
           ? await sendEmail({ to: a.email, subject: `Your shift: ${shift.title}`, text: message })
           : { status: 'skipped', detail: 'no email on file' };
-        const textRes = a.phone
-          ? await sendText({ to: a.phone, body: message })
-          : { status: 'skipped', detail: 'no phone on file' };
+        // The texting rules (server/ext/texting) apply to notices too: never
+        // an opted-out or do-not-text number, never in quiet hours.
+        let textRes = { status: 'skipped', detail: 'no phone on file' };
+        if (a.phone) {
+          const guard = { to: a.phone, status: null, detail: null };
+          await runHooks('textOut', tx, ctx, { phone: a.phone, personId: a.id, kind: 'shift' }, guard);
+          textRes = guard.status ? { status: guard.status, detail: guard.detail } : await sendText({ to: guard.to, body: message });
+        }
         await tx.query(
           `update shift_assignments set notified_at = now(), notify_email = $3, notify_text = $4
            where id = $1 and workspace_id = $2`,
           [a.assignment_id, ctx.workspaceId, emailRes.status, textRes.status],
         );
-        results.push({ person_id: a.id, name: a.name, email: emailRes.status, text: textRes.status });
+        results.push({
+          person_id: a.id, name: a.name, email: emailRes.status, text: textRes.status,
+          ...(['opted_out', 'quiet'].includes(textRes.status) ? { text_note: textRes.detail } : {}),
+        });
       }
       emit('shift', shift.id, 'update', { notified: results.length });
       return { shift_id: shift.id, notified: results };

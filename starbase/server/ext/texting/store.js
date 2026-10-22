@@ -2,9 +2,10 @@
 // the Twilio webhooks. Writes here take the caller's transaction and emit,
 // so they always land on the event log with the action that caused them.
 import { newId } from '../../lib/events.js';
+import { textConfigured } from '../../lib/notify.js';
 import {
-  DEFAULT_TEMPLATE, DEFAULT_FROM, DEFAULT_UNTIL, NO_TEXT_TAG, PHONE_DIGITS_SQL, last10,
-  isQuiet, windowWord, now,
+  DEFAULT_TEMPLATE, DEFAULT_FROM, DEFAULT_UNTIL, DEFAULT_WEEKEND_FROM, DEFAULT_WEEKEND_UNTIL,
+  NO_TEXT_TAG, NO_CONTACT_TAG, PHONE_DIGITS_SQL, last10, RECENT_DAYS, quietNow, windowWord, now, e164,
 } from './rules.js';
 
 const parseJ = (v, fb) => (typeof v === 'string' ? JSON.parse(v) : (v ?? fb));
@@ -12,23 +13,25 @@ export const tagsOf = (p) => parseJ(p?.tags, []);
 
 export const settingsFor = async (q, workspaceId) => {
   const r = (await q.query(
-    'select template, allow_from, allow_until from texting_settings where workspace_id = $1', [workspaceId],
+    'select template, allow_from, allow_until, weekend_from, weekend_until from texting_settings where workspace_id = $1', [workspaceId],
   )).rows[0];
   return {
     template: r?.template || DEFAULT_TEMPLATE,
     allow_from: r?.allow_from ?? DEFAULT_FROM,
     allow_until: r?.allow_until ?? DEFAULT_UNTIL,
+    weekend_from: r?.weekend_from ?? DEFAULT_WEEKEND_FROM,
+    weekend_until: r?.weekend_until ?? DEFAULT_WEEKEND_UNTIL,
   };
 };
 
 export const tzOf = (workspace) => workspace?.settings?.tz || 'America/Vancouver';
 
-// { now: true|false, from, until, label: '9 am–9 pm' }
+// Today's window: { now: true|false, from, until, label: '9 am–9 pm',
+// opens: '9 am' | '10 am tomorrow' (when quiet), weekend, weekdays, weekends }
 export const quietState = (settings, workspace) => ({
-  now: isQuiet(now(), tzOf(workspace), settings.allow_from, settings.allow_until),
-  from: settings.allow_from,
-  until: settings.allow_until,
-  label: windowWord(settings.allow_from, settings.allow_until),
+  ...quietNow(settings, now(), tzOf(workspace)),
+  weekdays: windowWord(settings.allow_from, settings.allow_until),
+  weekends: windowWord(settings.weekend_from, settings.weekend_until),
 });
 
 export const isOptedOut = async (q, workspaceId, phone) => !!(await q.query(
@@ -37,39 +40,105 @@ export const isOptedOut = async (q, workspaceId, phone) => !!(await q.query(
 
 // STOP (out = true) or START (out = false) for one number in one workspace:
 // the opt-out row, and the do-not-text tag on everyone with that number.
+// The row remembers whom its STOP tagged (tagged), so START takes the tag off
+// them only — a do-not-text the desk set by hand stays.
 export const applyOptOut = async (tx, emit, workspaceId, phone, { out, keyword }) => {
   const prev = (await tx.query(
-    'select id, opted_out from texting_optouts where workspace_id = $1 and phone = $2 for update', [workspaceId, phone],
+    'select id, opted_out, tagged from texting_optouts where workspace_id = $1 and phone = $2 for update', [workspaceId, phone],
   )).rows[0];
-  if (prev) {
-    await tx.query(
-      'update texting_optouts set opted_out = $3, keyword = $4, changed_at = now() where id = $1 and workspace_id = $2',
-      [prev.id, workspaceId, out, keyword],
-    );
-    if (prev.opted_out !== out) emit('texting_optout', prev.id, 'update', { phone, opted_out: out, keyword });
-  } else {
-    const id = newId();
-    await tx.query(
-      'insert into texting_optouts (id, workspace_id, phone, opted_out, keyword) values ($1, $2, $3, $4, $5)',
-      [id, workspaceId, phone, out, keyword],
-    );
-    emit('texting_optout', id, 'create', { phone, opted_out: out, keyword });
-  }
   const people = (await tx.query(
     `select id, tags from persons where workspace_id = $1 and deleted_at is null
        and ${PHONE_DIGITS_SQL('phone')} = $2`,
     [workspaceId, last10(phone)],
   )).rows;
+  const before = new Set(parseJ(prev?.tagged, []));
+  const tagged = new Set(out ? before : []);
   for (const p of people) {
     const tags = tagsOf(p);
     const has = tags.includes(NO_TEXT_TAG);
-    if (out === has) continue;
+    if (out ? has : !has || !before.has(p.id)) continue;
     const next = out ? [...tags, NO_TEXT_TAG] : tags.filter((t) => t !== NO_TEXT_TAG);
+    if (out) tagged.add(p.id);
     await tx.query('update persons set tags = $3, updated_at = now() where id = $1 and workspace_id = $2',
       [p.id, workspaceId, JSON.stringify(next)]);
     emit('person', p.id, 'update', { tags: next, source: out ? 'text-stop' : 'text-start' });
   }
+  const taggedJson = JSON.stringify([...tagged]);
+  if (prev) {
+    await tx.query(
+      'update texting_optouts set opted_out = $3, keyword = $4, tagged = $5::jsonb, changed_at = now() where id = $1 and workspace_id = $2',
+      [prev.id, workspaceId, out, keyword, taggedJson],
+    );
+    if (prev.opted_out !== out) emit('texting_optout', prev.id, 'update', { phone, opted_out: out, keyword });
+  } else {
+    const id = newId();
+    await tx.query(
+      'insert into texting_optouts (id, workspace_id, phone, opted_out, keyword, tagged) values ($1, $2, $3, $4, $5, $6::jsonb)',
+      [id, workspaceId, phone, out, keyword, taggedJson],
+    );
+    emit('texting_optout', id, 'create', { phone, opted_out: out, keyword });
+  }
   return { people: people.length };
+};
+
+// One campaign conversation per number: someone else's conversation with
+// this number that had a text in or out in the last RECENT_DAYS (the newest
+// one), or null. exceptUser: the member asking (their own doesn't count).
+export const inTouch = async (q, workspaceId, phone, exceptUser) => (await q.query(
+  `select id, started_by from texting_conversations
+   where workspace_id = $1 and phone = $2 and started_by is distinct from $3
+     and last_at > now() - interval '${RECENT_DAYS} days'
+   order by last_at desc limit 1`,
+  [workspaceId, phone, exceptUser || null],
+)).rows[0] || null;
+
+// The Text list, for one member: who to leave out for now, and who replied.
+//   away     someone else is texting their number (RECENT_DAYS), or you
+//            texted them within awaitHours and they haven't answered yet
+//   replied  they answered your text and you haven't logged a text contact
+//            for them since — first in the list
+// Person ids only: no message, no number, no other member.
+export const textQueue = async (q, workspaceId, userId, { awaitHours }) => {
+  // The recent conversations (few), then the people with those numbers (one
+  // pass over the people), then your text contacts for them.
+  const convs = (await q.query(
+    `select c.id, right(c.phone, 10) as digits, c.started_by, l.direction, l.created_at,
+            (l.created_at > now() - ($2 || ' hours')::interval) as fresh
+     from texting_conversations c
+     join lateral (
+       select direction, created_at from texting_messages m
+       where m.conversation_id = c.id order by m.created_at desc, m.id desc limit 1
+     ) l on true
+     where c.workspace_id = $1 and c.last_at > now() - interval '${RECENT_DAYS} days'
+     order by c.last_at desc limit 5000`,
+    [workspaceId, String(awaitHours)],
+  )).rows;
+  const away = new Set();
+  const replied = new Set();
+  if (!convs.length) return { away: [], replied: [] };
+  const people = (await q.query(
+    `select id, ${PHONE_DIGITS_SQL('phone')} as digits from persons
+     where workspace_id = $1 and deleted_at is null and ${PHONE_DIGITS_SQL('phone')} = any($2::text[])`,
+    [workspaceId, [...new Set(convs.map((c) => c.digits))]],
+  )).rows;
+  const logged = new Map((await q.query(
+    `select person_id, max(created_at) as at from contacts
+     where workspace_id = $1 and channel = 'text' and created_by = $2 and person_id = any($3::uuid[])
+     group by person_id`,
+    [workspaceId, userId, people.map((p) => p.id)],
+  )).rows.map((r) => [r.person_id, new Date(r.at).getTime()]));
+  const byDigits = new Map();
+  for (const p of people) byDigits.set(p.digits, [...(byDigits.get(p.digits) || []), p.id]);
+  for (const c of convs) {
+    for (const personId of byDigits.get(c.digits) || []) {
+      const loggedSince = (logged.get(personId) || 0) > new Date(c.created_at).getTime();
+      if (c.started_by !== userId) away.add(personId);
+      else if (c.direction === 'in' && !loggedSince) replied.add(personId);
+      else if (c.direction === 'out' && c.fresh && !loggedSince) away.add(personId);
+    }
+  }
+  for (const id of replied) away.delete(id);
+  return { away: [...away], replied: [...replied] };
 };
 
 // The first person in the workspace with this number (oldest record first).
@@ -117,13 +186,15 @@ export const listConversations = async (q, { workspaceId, viewerId, mine = false
   return rows.map((r) => ({ ...r, unread: !!r.unread, opted_out: !!r.opted_out }));
 };
 
-export const unreadCount = async (q, workspaceId, userId) => (await q.query(
+// New texts for you: replies in conversations you started — and, for the
+// desk, texts from numbers nobody texted first (they wrote in).
+export const unreadCount = async (q, workspaceId, userId, { desk = false } = {}) => (await q.query(
   `select count(*)::int as n from texting_conversations c
    left join texting_reads r on r.conversation_id = c.id and r.user_id = $2
-   where c.workspace_id = $1 and c.started_by = $2
+   where c.workspace_id = $1 and (c.started_by = $2 or ($3 and c.started_by is null))
      and exists (select 1 from texting_messages m where m.conversation_id = c.id and m.direction = 'in'
                    and m.created_at > coalesce(r.read_at, '-infinity'::timestamptz))`,
-  [workspaceId, userId],
+  [workspaceId, userId, desk],
 )).rows[0].n;
 
 export const myConversationCount = async (q, workspaceId, userId) => (await q.query(
@@ -159,4 +230,29 @@ export const briefTexts = async (db, ctx, brief) => {
   const f = brief.field;
   f.texts = Math.max(0, (Number(f.texts) || 0) + r.sent - r.logged);
   if (f.mine) f.mine.texts = Math.max(0, (Number(f.mine.texts) || 0) + r.my_sent - r.my_logged);
+};
+
+// The textOut hook: a text the core sends from the campaign's number (a
+// shift notice) goes to the E.164 number, never to an opted-out or
+// do-not-text one, and never in quiet hours. Without Twilio the core says
+// "not sent" on its own.
+export const textOutRules = async (tx, ctx, { phone, personId }, out) => {
+  if (!textConfigured()) return;
+  const to = e164(phone);
+  if (!to) { out.status = 'failed'; out.detail = 'That number can’t be texted'; return; }
+  out.to = to;
+  const person = personId ? (await tx.query(
+    'select tags from persons where id = $1 and workspace_id = $2', [personId, ctx.workspaceId],
+  )).rows[0] : null;
+  const tags = tagsOf(person);
+  if (tags.includes(NO_TEXT_TAG) || tags.includes(NO_CONTACT_TAG) || await isOptedOut(tx, ctx.workspaceId, to)) {
+    out.status = 'opted_out';
+    out.detail = 'Opted out of texts';
+    return;
+  }
+  const quiet = quietState(await settingsFor(tx, ctx.workspaceId), ctx.workspace);
+  if (quiet.now) {
+    out.status = 'quiet';
+    out.detail = `Quiet hours — sending opens at ${quiet.opens}`;
+  }
 };

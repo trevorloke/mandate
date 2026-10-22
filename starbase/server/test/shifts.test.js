@@ -3,6 +3,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshDb, Client } from './helpers.js';
+import { _setClockForTest } from '../ext/texting/rules.js';
 
 let c;
 
@@ -155,6 +156,8 @@ test('nothing sends by itself: "Notify again" after connecting reaches the peopl
   Object.assign(process.env, {
     RESEND_API_KEY: 'test-key', TWILIO_ACCOUNT_SID: 'AC-test', TWILIO_AUTH_TOKEN: 'tok', TWILIO_FROM: '+16045550100',
   });
+  // Texts keep to the campaign's hours (server/ext/texting): noon in Surrey.
+  _setClockForTest(() => new Date('2026-10-22T19:00:00Z'));
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u.startsWith('https://api.resend.com/')) { emails.push(JSON.parse(init.body)); return new Response('{}', { status: 200 }); }
@@ -168,11 +171,12 @@ test('nothing sends by itself: "Notify again" after connecting reaches the peopl
     assert.deepEqual([byName['Notify Both'].email, byName['Notify Both'].text], ['sent', 'sent']);
     assert.deepEqual([byName['Notify Text'].email, byName['Notify Text'].text], ['skipped', 'sent']);
     assert.deepEqual(emails.map((m) => m.to[0]), ['notify.both@example.org']);
-    assert.deepEqual(texts.map((m) => m.To).sort(), ['604-555-0123', '604-555-0124']);
+    assert.deepEqual(texts.map((m) => m.To).sort(), ['+16045550123', '+16045550124'], 'to the E.164 number');
     assert.match(emails[0].text, /Notify again — Fleetwood/);
     assert.match(texts[0].Body, /Where: Fleetwood Park/);
   } finally {
     globalThis.fetch = realFetch;
+    _setClockForTest(null);
     for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   }
   const detail = (await c.get(`/api/shifts/${s.id}`)).json.assignees;

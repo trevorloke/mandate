@@ -1,5 +1,8 @@
 // Person profile. Top: name, rating, donor tier (desk), and Call · Text ·
-// Email (desk) · Map. Then the rating card (one tap logs a contact; Call/Text
+// Email (desk) · Map. With the campaign's Twilio number connected, Call and
+// Text open their card on Calls (the campaign's number, the STOP line, the
+// Inbox, quiet hours) — never the phone's own dialler or Messages; Text is
+// gone for anyone who opted out of texts. Then the rating card (one tap logs a contact; Call/Text
 // set how it is logged, remembered per person for this tab so it survives a
 // trip to the dialer). Everything else sits in sections that open on a tap —
 // Details (their own note + edit live here), Tags, Roles, Signs, Shifts, Gifts
@@ -24,7 +27,9 @@ import {
   canDesk, invalidatePersonData, isDnc, tagWord, RatingTag,
 } from './People.jsx';
 import './people.css';
-import { TextingPersonLink } from '../components/TextingCard.jsx';
+import {
+  TextingPersonLink, callsCard, noTexts, textingOn, useTextingPerson, useTextingStatus,
+} from '../components/TextingCard.jsx';
 
 const TIER_LABEL = {
   superstar: DONOR_TIERS.superstar.label,
@@ -134,6 +139,12 @@ function BackLink({ desk, className = 'eyebrow pf-back' }) {
 // Header: name, rating, donor tier, Call · Text · Email · Map
 // ─────────────────────────────────────────────────────────────────────────────
 function Header({ person, donor, me, desk, onLog, contacted, level }) {
+  const texting = useTextingStatus(me);
+  // true / false, or null while nobody knows (no signal, nothing kept): then
+  // the Calls card, which says so — never a guess at the phone's own apps.
+  const on = textingOn(texting);
+  const txPerson = useTextingPerson(person.id, Boolean(on.sms && person.phone));
+  const canText = Boolean(person.phone) && !noTexts(person) && !txPerson.data?.opted_out;
   const r = ratingByCode(person.rating);
   const named = r?.band === 'opposed' && r.code !== '4'; // "4 · Locke" says it all
   // The date of the rating only when no contact says it below.
@@ -172,16 +183,24 @@ function Header({ person, donor, me, desk, onLog, contacted, level }) {
       </div>
       {(tiles || person.address) && (
         <div className={`pf-acts${tiles ? '' : ' pf-acts--quiet'}`}>
-          {person.phone && (
+          {person.phone && (on.voice === false ? (
             <a className="btn pf-act" href={telHref(person.phone)} onClick={() => onLog('phone')}>
               <Icon name="phone" /> Call
             </a>
-          )}
-          {person.phone && (
+          ) : (
+            <Link className="btn pf-act" to={callsCard(person, 'phone')}>
+              <Icon name="phone" /> Call
+            </Link>
+          ))}
+          {canText && (on.sms === false ? (
             <a className="btn pf-act" href={smsHref(person.phone, textBody(person, me))} onClick={() => onLog('text')}>
               <Icon name="text" /> Text
             </a>
-          )}
+          ) : (
+            <Link className="btn pf-act" to={callsCard(person, 'text')}>
+              <Icon name="text" /> Text
+            </Link>
+          ))}
           {email && (
             <a className="btn pf-act" href={`mailto:${person.email}`}>
               <Icon name="email" /> Email
@@ -441,8 +460,10 @@ function Socials({ person, refresh, desk }) {
   );
 }
 
-function Details({ person, household, refresh, desk }) {
+function Details({ person, household, refresh, desk, me }) {
   const [editing, setEditing] = useState(false);
+  // The number dials from your own phone only when calls through the campaign are off.
+  const ownDialler = textingOn(useTextingStatus(me)).voice === false;
   if (desk && editing) return <EditDetailsForm person={person} refresh={refresh} onClose={() => setEditing(false)} />;
   const addr = [
     [person.address, person.unit ? `#${person.unit}` : null].filter(Boolean).join(' '),
@@ -455,7 +476,9 @@ function Details({ person, household, refresh, desk }) {
       <ul className="contact-lines">
         <li>
           <span className="k">Phone</span>
-          <span className="v">{person.phone ? <a className="mono" href={telHref(person.phone)}>{person.phone}</a> : none}</span>
+          <span className="v">{person.phone
+            ? (ownDialler ? <a className="mono" href={telHref(person.phone)}>{person.phone}</a> : <span className="mono">{person.phone}</span>)
+            : none}</span>
         </li>
         {desk && (
           <li>
@@ -812,7 +835,7 @@ export default function Person() {
 
       <div className="pf-sections">
         <Section title="Details" open={!!open.details} onToggle={toggle('details')}>
-          <Details person={person} household={household} refresh={refresh} desk={desk} />
+          <Details person={person} household={household} refresh={refresh} desk={desk} me={me} />
         </Section>
         {/* Tags and roles are desk work: volunteers can't change them (person.update / volunteer.* are desk-only). */}
         {desk && (

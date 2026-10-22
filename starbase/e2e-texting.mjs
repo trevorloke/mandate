@@ -8,17 +8,24 @@
 //   2. Connected: a manager sets quiet hours on Texting settings and Calls
 //      refuses to send inside them; the first text (their first name filled
 //      in, editable) must name the campaign and goes out with "Reply STOP to
-//      opt out" — exactly what the screen showed; a signed reply lands in the
-//      Inbox ("Replies · 1"); unsigned ones are refused; the desk answers from
-//      the thread; STOP opts the number out (tag, no Send, no card) and START
-//      opts it back in. A volunteer on a 390×844 phone texts from the Calls
+//      opt out" — exactly what the screen showed; then only "✓ Sent" and
+//      "Next →" (no ratings, no "No reply"), and they leave the Text list; a
+//      signed reply lands in the Inbox ("New replies · 1", "1 new text" on
+//      Today) and brings them back first, with the reply on the card and a
+//      blank reply box; unsigned ones are refused; the desk answers from the
+//      thread; STOP opts the number out (tag, no Send, no card, no Text on the
+//      profile) and START opts it back in. A volunteer on a 390×844 phone texts from the Calls
 //      card, sees only their own conversation (screens and the JSON their
 //      browser receives: no emails, nobody else's texts or phone), replies
 //      from the Inbox, and calls through the campaign: "Calling your phone…",
 //      Twilio's answer → press 1 → the person dialled with the campaign's
-//      number as caller ID, the token spent once, the length recorded. The
-//      desk sees every conversation, the profile's Texts link, and the books
-//      verify. New screens are measured (words, yellow buttons, sideways
+//      number as caller ID, the token spent once, the length recorded. Someone
+//      the desk is texting is "Already texting with the campaign" for them (no
+//      second introduction); the profile's Call / Text open the Calls card,
+//      never the phone's own apps; with no signal the card keeps Send off
+//      ("Texts send with signal"); Calls remembers Text; a reply asking to
+//      stop is flagged and "Opt out this number" works. The desk sees every
+//      conversation, the profile's Texts link, and the books verify. New screens are measured (words, yellow buttons, sideways
 //      scroll, 48px field targets).
 //
 //   PORT=4105 SHOTS=/tmp/texting node e2e-texting.mjs     (after npm run build)
@@ -220,10 +227,13 @@ let server = await startServer({ TWILIO_API_BASE: STUB });
   await D.shot('01-calls-text-not-connected');
   await simple(page, 'Calls · Text, not connected (phone)', CARD + ', .cl-card a.cl-call');
 
-  await D.go('/calls?q=Harjit');
+  await D.go('/calls?channel=phone&q=Harjit');
   await page.waitForSelector('.cl-card', { timeout: 8000 }).catch(() => {});
   check('not connected: Call keeps the phone\'s own dialler (tel: link)',
     (await page.locator('.cl-card a.cl-call[href^="tel:"]').count()) === 1 && (await page.locator('.tx-call').count()) === 0);
+  await D.go(`/people/${harjit.id}`);
+  check('not connected: the profile keeps the phone\'s own Call and Text',
+    (await page.locator('.pf-acts a[href^="tel:"]').count()) === 1 && (await page.locator('.pf-acts a[href^="sms:"]').count()) === 1);
   await D.go('/inbox');
   t = await D.text();
   check('not connected: Inbox says it once, with an empty list', count(t, 'Texting from the app needs Twilio') === 1 && /No texts yet\./.test(t), t.slice(0, 160));
@@ -250,7 +260,7 @@ const mk = async (key, data) => { P[key] = (await D.api('/actions/person.create'
 await mk('harjit', { name: 'Harjit Example', phone: '604-555-0141' });
 await mk('maya', { name: 'Maya Example', phone: '(604) 555-0142' });
 await mk('grace', { name: 'Grace Example', phone: '604 555 0143', email: `grace.${tag}@example.org` });
-await mk('dev', { name: 'Dev Example', phone: '604-555-0144', email: `dev.${tag}@example.org` });
+await mk('dev', { name: 'Dev Example', phone: '604-555-0144', email: `dev.${tag}@example.org`, address: '13450 104 Ave', lat: 49.1913, lng: -122.849 });
 check('connected: four people with phones', Object.values(P).every((p) => p?.id));
 const status = (await D.api('/texting/status')).json;
 check('connected: texts and calls on', status?.sms === true && status?.voice === true, JSON.stringify(status));
@@ -265,26 +275,32 @@ await page.waitForURL(`${BASE}/inbox/settings`, { timeout: 8000 }).catch(() => {
 await sleep(600);
 let t = await D.text();
 check('settings: says what is connected', /Texts\s*On · 604-555-0100/i.test(t) && /Calls\s*Through the campaign/i.test(t), t.slice(0, 200));
+check('settings: weekends have their own hours (10 am–6 pm by default)',
+  await page.getByLabel('Sat–Sun from').inputValue().catch(() => '') === '10' && await page.getByLabel('Sat–Sun until').inputValue().catch(() => '') === '18');
 await simple(page, 'Texting settings (desk)');
 await D.shot('02-settings');
-await page.getByLabel('Texts and calls from').selectOption(String(qFrom));
-await page.getByLabel('Until', { exact: true }).selectOption(String(qUntil));
+for (const days of ['Mon–Fri', 'Sat–Sun']) {
+  await page.getByLabel(`${days} from`).selectOption(String(qFrom));
+  await page.getByLabel(`${days} until`).selectOption(String(qUntil));
+}
 await page.getByRole('button', { name: 'Save', exact: true }).click();
 await page.waitForSelector('text=✓ Saved', { timeout: 8000 }).catch(() => {});
 const saved = (await D.api('/texting/settings')).json;
-check('settings: Saved means saved', /✓ Saved/.test(await D.text()) && saved.settings.allow_from === qFrom && saved.settings.allow_until === qUntil,
+check('settings: Saved means saved', /✓ Saved/.test(await D.text()) && saved.settings.allow_from === qFrom && saved.settings.allow_until === qUntil
+  && saved.settings.weekend_from === qFrom && saved.settings.weekend_until === qUntil,
   JSON.stringify(saved.settings));
 await D.go('/calls?channel=text&q=Harjit');
 await page.waitForSelector('.tx-send', { timeout: 8000 }).catch(() => {});
 t = await D.text();
 const sendBtn = page.locator('.tx-send button.tx-go');
-check('quiet hours: the card says so and Send is off', /Quiet hours · texts go out/.test(t) && await sendBtn.isDisabled().catch(() => false), t.slice(0, 220));
+check('quiet hours: the card says when sending opens, and Send is off', /Quiet hours — sending opens at \d/.test(t) && await sendBtn.isDisabled().catch(() => false), t.slice(0, 220));
 const n0 = twilio.length;
 const quiet = await D.api('/actions/text.send', { person_id: P.harjit.id, body: `Hi Harjit, it's Riley with ${CAMPAIGN}.` });
 check('quiet hours: the server refuses, nothing reaches Twilio', quiet.status === 409 && /Quiet hours/.test(quiet.json?.error) && twilio.length === n0,
   `${quiet.status} ${quiet.json?.error}`);
 await D.shot('03-calls-quiet-hours');
-check('settings: any time, for the rest of this run', (await D.api('/actions/texting.settings', { allow_from: 0, allow_until: 24 })).status === 200);
+check('settings: any time, for the rest of this run',
+  (await D.api('/actions/texting.settings', { allow_from: 0, allow_until: 24, weekend_from: 0, weekend_until: 24 })).status === 200);
 
 // ── The first text, from the Calls card ──
 await D.go('/calls?channel=text&q=Harjit');
@@ -312,9 +328,19 @@ check('first text: from the campaign number, to Harjit, ends with the STOP line'
 check('first text: the screen says Sent only because the server sent it', /Sent to Harjit/.test(doneText)
   && thread?.messages?.[0]?.status === 'sent' && thread.messages[0].body === first.form.Body && thread.messages[0].first === true, doneText);
 check('first text: one tap, one text', texts().length === 1, texts().length);
+const brief = (await D.api('/brief')).json;
+check('Today\'s "texts this week" counts the text sent from the app', brief?.field?.texts === 1 && brief.field.mine.texts === 1, JSON.stringify(brief?.field));
 check('first text: Twilio is told where to report delivery',
   first?.form.StatusCallback === `${BASE}/api/public/twilio/sms-status/${thread?.messages?.[0]?.id}`, first?.form.StatusCallback);
+check('first text: then only "✓ Sent" and Next — no ratings, no "No reply" yet',
+  /Next →/i.test(doneText) && (await page.locator('.cl-rate').count()) === 0 && !/No reply/.test(await D.text()), (await D.text()).slice(0, 200));
 await D.shot('05-calls-text-sent');
+await page.locator('.tx-done .tx-next').click();
+await sleep(600);
+t = await D.text();
+check('Next: Harjit leaves the Text list until he replies', /No one left to text\./.test(t) && (await page.locator('.tx-send').count()) === 0, t.slice(0, 200));
+await D.go('/calls?channel=text&q=Harjit');
+check('Next: still out of the list after a reload (no second text offered)', /No one left to text\./.test(await D.text()) && (await page.locator('.tx-send').count()) === 0);
 
 // ── A reply comes in (signed); unsigned ones are refused ──
 const before = (await D.api(`/texting/conversations/${harjitConv}`)).json.messages.length;
@@ -330,15 +356,29 @@ const delivered = await fromTwilio(`/api/public/twilio/sms-status/${thread.messa
 check('webhook: the delivery report is recorded', delivered.status === 204
   && (await D.api(`/texting/conversations/${harjitConv}`)).json.messages[0].status === 'delivered', delivered.status);
 
+await D.go('/');
+await page.waitForSelector('.today-rows', { timeout: 8000 }).catch(() => {});
+t = await D.text();
+check('Today: "1 new text" under Needs you, a tap to the Inbox', /1 new text\b/.test(t)
+  && await page.locator('a.today-row[href="/inbox"]').count() === 1, t.slice(0, 300));
 await D.go('/calls?channel=text&q=Harjit');
 await page.waitForSelector('.tx-replies', { timeout: 8000 }).catch(() => {});
+await page.waitForSelector('.tx-recent', { timeout: 8000 }).catch(() => {});
 const replies = (await page.locator('.tx-replies').innerText().catch(() => '')).replace(/\s+/g, ' ');
-check('Calls: a quiet "Replies · 1" link', /^Replies · 1$/i.test(replies), replies);
+check('Calls: a quiet "New texts · 1" link (the desk\'s count)', /^New texts · 1$/i.test(replies), replies);
+const recent = (await page.locator('.tx-recent').innerText().catch(() => '')).replace(/\s+/g, ' ');
+check('card: he replied — back first, with his reply on the card', /Yes, put me down for a sign/.test(recent) && /Sent ·/.test(recent), recent);
+check('card: a blank reply — no first-text wording, no STOP line, no "No reply"',
+  (await page.locator('.tx-send textarea').inputValue().catch(() => 'x')) === '' && (await page.locator('.tx-foot').count()) === 0
+  && !/No reply/.test(await D.text()) && (await page.locator('.cl-rate button').count()) >= 4);
+await D.shot('05b-calls-text-replied');
 await page.locator('.tx-replies').click();
 await page.waitForURL(`${BASE}/inbox`, { timeout: 8000 }).catch(() => {});
 await page.waitForSelector('.tx-row', { timeout: 8000 }).catch(() => {});
 t = await D.text();
 check('Inbox: Harjit, new, with his reply', (await page.locator('.tx-row.is-new').count()) === 1 && /Harjit Example/.test(t) && /Yes, put me down for a sign/.test(t), t.slice(0, 200));
+const when = await page.locator('.tx-row .tx-when').first().innerText().catch(() => '');
+check('Inbox: a text from today shows the time, not the date', /^\d{1,2}:\d{2}\s?[ap]\.m\.$/i.test(when.trim()), when);
 await simple(page, 'Inbox (desk)');
 await D.shot('06-inbox-desk');
 await page.locator('.tx-row').first().click();
@@ -371,6 +411,10 @@ check('STOP: nothing went out — not even an automatic reply', twilio.length ==
 await D.go('/calls?channel=text&q=Maya');
 t = await D.text();
 check('STOP: she drops off the text list', /No one to text yet\./.test(t) && (await page.locator('.tx-send').count()) === 0, t.slice(0, 160));
+await D.go(`/people/${P.maya.id}`);
+await page.waitForSelector('.pf-acts', { timeout: 8000 }).catch(() => {});
+check('STOP: no Text on her profile (and no sms: link anywhere)', (await page.locator('.pf-acts').getByRole('link', { name: 'Text' }).count()) === 0
+  && (await page.locator('a[href^="sms:"]').count()) === 0, await page.locator('.pf-acts').innerText().catch(() => ''));
 await D.go(`/inbox/${mayaConv}`);
 await page.waitForSelector('.tx-bubble', { timeout: 8000 }).catch(() => {});
 t = await D.text();
@@ -407,7 +451,7 @@ await V.go('/calls?channel=text&q=Grace');
 await vPage.waitForSelector('.tx-send textarea', { timeout: 8000 }).catch(() => {});
 const vPre = await vPage.locator('.tx-send textarea').inputValue().catch(() => '');
 check('volunteer card: filled in with Grace and their own name', /^Hi Grace, it's Val with Imagine Surrey\./.test(vPre), vPre);
-check('volunteer: no "Replies" link before any conversation', (await vPage.locator('.tx-replies').count()) === 0);
+check('volunteer: no Inbox link before any conversation', (await vPage.locator('.tx-replies').count()) === 0);
 await simple(vPage, 'Calls · Text card (volunteer, 390px)', CARD);
 await V.shot('09-vol-calls-text');
 await vPage.locator('.tx-send button.tx-go').click();
@@ -417,6 +461,41 @@ const graceText = texts().at(-1);
 check('volunteer: Sent to Grace — from the campaign number, with the STOP line', /Sent to Grace/.test(vDone)
   && graceText?.form.To === '+16045550143' && graceText.form.From === CAMPAIGN_NUMBER && /\nReply STOP to opt out$/.test(graceText.form.Body), vDone);
 await V.shot('10-vol-text-sent');
+
+// ── One campaign conversation per number ──
+await V.go('/calls?channel=text&q=Harjit');
+check('volunteer: someone the desk is texting is out of their Text list', /No one left to text\./.test(await V.text()), (await V.text()).slice(0, 160));
+await V.go(`/calls?channel=text&q=Harjit&person=${P.harjit.id}`);
+await vPage.waitForSelector('.cl-card', { timeout: 8000 }).catch(() => {});
+await sleep(500);
+t = await V.text();
+check('volunteer card: "Already texting with the campaign", no Send, nothing to log — only Next', /Already texting with the campaign/.test(t)
+  && (await vPage.locator('.tx-send button.tx-go').count()) === 0 && (await vPage.locator('a[href^="sms:"]').count()) === 0
+  && (await vPage.locator('.cl-rate').count()) === 0 && !/No reply/.test(t) && /Next →/i.test(t), t.slice(0, 220));
+const vTwice = await V.api('/actions/text.send', { person_id: P.harjit.id, body: `Hi Harjit, it's Val with ${CAMPAIGN}.` });
+check('volunteer: the server refuses a second introduction too', vTwice.status === 409 && /Already texting/.test(vTwice.json?.error), `${vTwice.status} ${vTwice.json?.error}`);
+await V.shot('10b-vol-already-texting');
+
+// ── The profile: Call and Text go through the campaign's number ──
+await V.go(`/people/${P.dev.id}`);
+await vPage.waitForSelector('.pf-acts', { timeout: 8000 }).catch(() => {});
+const pfText = await vPage.locator('.pf-acts').getByRole('link', { name: 'Text' }).getAttribute('href').catch(() => '');
+const pfCall = await vPage.locator('.pf-acts').getByRole('link', { name: 'Call' }).getAttribute('href').catch(() => '');
+check('profile: Text and Call open the Calls card, never sms: / tel:', /^\/calls\?channel=text&.*person=/.test(pfText || '') && /^\/calls\?channel=phone&/.test(pfCall || '')
+  && (await vPage.locator('a[href^="sms:"], a[href^="tel:"]').count()) === 0, `${pfText} ${pfCall}`);
+await vPage.locator('.pf-acts').getByRole('link', { name: 'Text' }).click();
+await vPage.waitForSelector('.tx-send textarea', { timeout: 8000 }).catch(() => {});
+check('profile → Text: Dev\'s own text card', /^Hi Dev, it's Val with Imagine Surrey\./.test(await vPage.locator('.tx-send textarea').inputValue().catch(() => '')));
+
+// ── No signal: Send stays off, and never the phone's own Messages ──
+await volCtx.setOffline(true);
+await sleep(600);
+t = await V.text();
+check('no signal: "Texts send with signal", Send off, no sms: link', /Texts send with signal/.test(t)
+  && await vPage.locator('.tx-send button.tx-go').isDisabled().catch(() => false) && (await vPage.locator('a[href^="sms:"]').count()) === 0, t.slice(0, 220));
+await V.shot('10c-vol-no-signal');
+await volCtx.setOffline(false);
+await sleep(600);
 
 const mine = (await V.api('/texting/mine')).json;
 const graceConv = mine?.conversations?.[0]?.id;
@@ -436,7 +515,9 @@ check('a reply from Grace', (await inbound('+16045550143', 'Who is this?')).stat
 await V.go('/calls?channel=text&q=Grace');
 await vPage.waitForSelector('.tx-replies', { timeout: 8000 }).catch(() => {});
 const vReplies = (await vPage.locator('.tx-replies').innerText().catch(() => '')).replace(/\s+/g, ' ');
-check('volunteer Calls: "Replies · 1"', /^Replies · 1$/i.test(vReplies), vReplies);
+check('volunteer Calls: "New replies · 1"', /^New replies · 1$/i.test(vReplies), vReplies);
+const tab = (await vPage.locator('.tabbar a[href="/calls"] .tab-badge').innerText().catch(() => '')).replace(/\s+/g, ' ');
+check('volunteer: a small count on the Calls tab', /^1\b/.test(tab), tab);
 await vPage.locator('.tx-replies').click();
 await vPage.waitForURL(`${BASE}/inbox`, { timeout: 8000 }).catch(() => {});
 await vPage.waitForSelector('.tx-row', { timeout: 8000 }).catch(() => {});
@@ -457,8 +538,13 @@ check('volunteer: replied from the Inbox', texts().at(-1)?.form.Body === vAnswer
 await V.shot('12-vol-thread');
 
 // ── Call through the campaign ──
-await V.go('/calls?q=Dev');
+await V.go('/');
+await vPage.locator('.tabbar a[href="/calls"]').click();
+await vPage.waitForSelector('.cl-card', { timeout: 8000 }).catch(() => {});
+check('Calls tab: opens on Text, as they left it', /^Texts$/.test((await vPage.locator('h1').first().innerText().catch(() => '')).trim()));
+await V.go('/calls?channel=phone&q=Dev');
 await vPage.waitForSelector('.tx-call', { timeout: 8000 }).catch(() => {});
+check('volunteer call: says managers can see their number', /Managers can see this number\./.test(await V.text()));
 const callBtn = vPage.locator('.tx-call button.cl-call');
 check('volunteer call: asks for their own phone once, Call off until then',
   (await vPage.getByLabel('Your phone').count()) === 1 && await callBtn.isDisabled().catch(() => false) && (await vPage.locator('.cl-card a[href^="tel:"]').count()) === 0);
@@ -477,6 +563,8 @@ await V.shot('14-vol-calling-your-phone');
 const callId = ring.form.StatusCallback.split('/').pop();
 const answered = await fromTwilio(ring.form.Url, { CallSid: ring.sid, CallStatus: 'in-progress', AccountSid: `ACe2e${tag}` });
 check('call: they answer — asked to press 1, nobody dialled yet', /<Gather numDigits="1"/.test(answered.text) && !/6045550144/.test(answered.text), answered.text);
+const nine = await fromTwilio(`${ring.form.Url}/connect`, { CallSid: ring.sid, Digits: '9', AccountSid: `ACe2e${tag}` });
+check('call: any key but 1 asks again, nobody dialled', !/<Dial/.test(nine.text) && /Press 1 to connect/.test(nine.text), nine.text);
 const noSig = await fromTwilio(`${ring.form.Url}/connect`, { CallSid: ring.sid, Digits: '1' }, { signed: false });
 check('call: an unsigned connect is refused', noSig.status === 403, noSig.status);
 const connected = await fromTwilio(`${ring.form.Url}/connect`, { CallSid: ring.sid, Digits: '1', AccountSid: `ACe2e${tag}` });
@@ -494,6 +582,21 @@ check('call: ended, length recorded, and the screen says what the server has', !
   JSON.stringify(callRow));
 check('call: rate after the call — the rating buttons are right there', (await vPage.locator('.cl-rate button').count()) >= 4);
 await V.shot('15-vol-call-ended');
+
+// ── A reply asking to stop: flagged, and one tap opts the number out ──
+check('a reply from Grace asking to stop', (await inbound('+16045550143', 'No thanks, stop')).status === 200);
+await V.go(`/inbox/${graceConv}`);
+await vPage.waitForSelector('.tx-asked', { timeout: 8000 }).catch(() => {});
+t = await V.text();
+check('thread: flagged "Asked to stop?", with "Opt out this number"', /Asked to stop\?/i.test(t) && /They may be asking to stop/i.test(t)
+  && (await vPage.getByRole('button', { name: 'Opt out this number' }).count()) === 1, t.slice(-240));
+await simple(vPage, 'Thread, asked to stop (volunteer, 390px)');
+await V.shot('15b-vol-asked-to-stop');
+await vPage.getByRole('button', { name: 'Opt out this number' }).click();
+await vPage.waitForSelector('text=Opted out — no more texts', { timeout: 8000 }).catch(() => {});
+const graceNow = (await D.api(`/persons/${P.grace.id}`)).json.person;
+check('opt out: the thread says so, Grace is tagged, the server refuses her texts', /Opted out — no more texts/.test(await V.text())
+  && graceNow.tags.includes('do-not-text') && (await V.api('/actions/text.reply', { conversation_id: graceConv, body: 'Sorry!' })).status === 409, graceNow.tags);
 
 // ── What the volunteer's browser received ──
 const all = received.map((r) => r.body).join('\n');
@@ -520,6 +623,15 @@ check('profile: a Texts link with the count', /Texts\s*3/.test(await pf.innerTex
 await pf.click();
 await page.waitForURL(`${BASE}/inbox/${harjitConv}`, { timeout: 8000 }).catch(() => {});
 check('profile: the link opens Harjit\'s conversation', page.url() === `${BASE}/inbox/${harjitConv}`, page.url());
+await D.go(`/map?person=${P.dev.id}`);
+await page.waitForSelector('aside.door-card', { timeout: 8000 }).catch(() => {});
+await page.click('aside.door-card .fk-more__btn').catch(() => {});
+const doorText = await page.locator('aside.door-card').getByRole('link', { name: 'Text', exact: true }).getAttribute('href').catch(() => '');
+const doorCall = await page.locator('aside.door-card').getByRole('link', { name: 'Call', exact: true }).getAttribute('href').catch(() => '');
+check('door card: More → Call / Text open the Calls card, never tel: / sms:', /^\/calls\?channel=text&.*person=/.test(doorText || '')
+  && /^\/calls\?channel=phone&/.test(doorCall || '') && (await page.locator('aside.door-card a[href^="sms:"], aside.door-card a[href^="tel:"]').count()) === 0,
+  `${doorText} ${doorCall}`);
+await D.shot('16a-door-card-more');
 await D.go('/inbox/settings');
 await page.getByRole('button', { name: /Callers’ phones/ }).click();
 t = await D.text();

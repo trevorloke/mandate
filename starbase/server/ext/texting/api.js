@@ -6,8 +6,13 @@
 //   GET /texting/mine                any role: the conversations you started
 //   GET /texting/all[?person=]       desk: every conversation
 //   GET /texting/conversations/:id   a thread (volunteers: their own only)
-//   GET /texting/people/:id          the Calls card: opted out? and your own
-//                                    conversation with them (first text yet?)
+//   GET /texting/people/:id          the Calls card: opted out? your own
+//                                    conversation with them (first text yet?
+//                                    its last texts), and in_touch: someone
+//                                    else is texting this number (no content;
+//                                    the desk also gets that thread's id)
+//   GET /texting/queue               any role: the Text list's person ids —
+//                                    away (leave out for now), replied (first)
 //   GET /texting/people/:id/conversations   desk: a profile's conversations
 //   GET /texting/calls/:id           a call you placed (desk: any)
 //   GET /texting/settings            desk: settings, Twilio set-up addresses;
@@ -16,10 +21,11 @@
 // A volunteer's browser only ever receives conversations they started, and
 // never an email address: rows carry names and phone numbers only.
 import { Hono } from 'hono';
-import { NO_TEXT_TAG, NO_CONTACT_TAG, e164, showPhone } from './rules.js';
+import { NO_TEXT_TAG, NO_CONTACT_TAG, AWAIT_HOURS, e164, showPhone } from './rules.js';
 import { smsReady, voiceReady, publicBase, campaignNumber } from './twilio.js';
 import {
   settingsFor, quietState, isOptedOut, isFirstOut, listConversations, unreadCount, myConversationCount, tagsOf,
+  inTouch, textQueue,
 } from './store.js';
 import { visibleConversation } from './actions.js';
 
@@ -60,7 +66,7 @@ api.get('/texting/status', async (c) => {
     template: settings.template,
     campaign: ctx.workspace.name,
     myPhone: myPhone ? showPhone(myPhone) : null,
-    unread: await unreadCount(db, ctx.workspaceId, ctx.user.id),
+    unread: await unreadCount(db, ctx.workspaceId, ctx.user.id, { desk: isDesk(c) }),
     conversations: await myConversationCount(db, ctx.workspaceId, ctx.user.id),
   });
 });
@@ -130,17 +136,34 @@ api.get('/texting/people/:id', async (c) => {
      where workspace_id = $1 and person_id = $2 and started_by = $3 and phone = $4 order by created_at limit 1`,
     [ctx.workspaceId, person.id, ctx.user.id, phone],
   )).rows[0] : null;
-  const last = conv ? (await db.query(
-    `select direction, status, created_at from texting_messages where conversation_id = $1 order by created_at desc, id desc limit 1`,
+  // Your own conversation's last two texts (yours to read): the card shows
+  // where it stands — and a reply box, not a second introduction.
+  const recent = conv ? (await db.query(
+    `select direction, body, status, created_at from texting_messages where conversation_id = $1
+     order by created_at desc, id desc limit 2`,
     [conv.id],
-  )).rows[0] : null;
+  )).rows.reverse().map((m) => ({ ...m, body: String(m.body).slice(0, 400) })) : [];
+  const other = phone ? await inTouch(db, ctx.workspaceId, phone, ctx.user.id) : null;
+  const last = recent.at(-1);
   return c.json({
     textable: !!phone,
     opted_out: (phone ? await isOptedOut(db, ctx.workspaceId, phone) : false) || tags.includes(NO_TEXT_TAG),
     no_contact: tags.includes(NO_CONTACT_TAG),
-    conversation: conv ? { id: conv.id, last: last || null } : null,
+    conversation: conv ? {
+      id: conv.id,
+      last: last ? { direction: last.direction, status: last.status, created_at: last.created_at } : null,
+      recent,
+    } : null,
     first: conv ? await isFirstOut(db, conv.id) : true,
+    in_touch: !!other,
+    // Only the desk may open someone else's thread.
+    in_touch_id: other && isDesk(c) ? other.id : null,
   });
+});
+
+api.get('/texting/queue', async (c) => {
+  const ctx = c.get('ctx');
+  return c.json(await textQueue(c.get('db'), ctx.workspaceId, ctx.user.id, { awaitHours: AWAIT_HOURS }));
 });
 
 api.get('/texting/people/:id/conversations', async (c) => {

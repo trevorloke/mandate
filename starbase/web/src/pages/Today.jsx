@@ -4,7 +4,8 @@
 //     turf line still opens the walk list) — then ONE shift line: "Your next
 //     shift" only when they're on it, otherwise the next open shift with
 //     "5 spots left" (→ that shift, where they join it). Signs waiting to go
-//     up get one row (→ Signs to put up). One line of numbers, theirs first:
+//     up get one row (→ Signs to put up), new replies to their texts another
+//     ("2 replies" → the Inbox). One line of numbers, theirs first:
 //     "You 6 · Team 38 doors this week" (brief field.mine: contacts they
 //     logged; field: everyone's). Calls and texts in the same shape, a quiet
 //     "Signs" row (always — the sign crew's way to /signs and "Add a sign"),
@@ -15,7 +16,8 @@
 //     and money are taps to their screens (›); support opens its breakdown in
 //     place (+), opposed by candidate ("McCallum 3 · Locke 2"). Then "Needs
 //     you" (gifts over the limit, open pledges, filings due, new volunteers
-//     from the public form, short shifts, signs to put up) — name first, the
+//     from the public form, short shifts, signs to put up, new texts — replies
+//     and texts from numbers nobody texted, → the Inbox) — name first, the
 //     amount on the right, every row a tap to where it's fixed — then the
 //     next shift and event. Getting started shows only the steps not done,
 //     and only while the campaign is new. Walk lists, filings, team (managers),
@@ -31,6 +33,7 @@ import { RATINGS } from '@starbase/shared/canvass';
 import { ApiError, apiGet, apiPost, fmtMoney } from '../api.js';
 import { ratingWho } from '../components/RatingButtons.jsx';
 import { useFollowupCount } from '../components/LaddersCount.js';
+import { useTextingStatus } from '../components/TextingStatus.js';
 import './today.css';
 
 const greeting = () => {
@@ -347,7 +350,7 @@ function filingChip(n) {
   return { chip: `${n}d left`, chipCls: 'chip' };
 }
 
-function NeedsYou({ b }) {
+function NeedsYou({ b, me }) {
   // New volunteers from the public form. Under ['persons'], so the People
   // screen's edits (taking the tag off) refresh the count.
   const prospects = useQuery({
@@ -356,6 +359,8 @@ function NeedsYou({ b }) {
   });
   const newVols = prospects.data?.persons?.length ?? 0;
   const followups = useFollowupCount(); // ladder follow-ups for staff
+  // Texts waiting to be read: replies to yours, and numbers that wrote in.
+  const newTexts = Number(useTextingStatus(me).data?.unread) || 0;
   const flagged = b.flagged ?? [];
   const pledges = Number(b.pledges?.n) || 0;
   const filings = (b.filings ?? []).filter((f) => Number(f.days_left) <= 7);
@@ -365,7 +370,7 @@ function NeedsYou({ b }) {
   const signs = Number(b.signs?.requested) || 0;
   const shownFlags = flagged.length > 3 ? flagged.slice(0, 2) : flagged;
   const moreFlags = flagged.length - shownFlags.length;
-  const empty = !flagged.length && !pledges && !filings.length && !newVols && !shortShifts.length && !signs && !followups.n;
+  const empty = !flagged.length && !pledges && !filings.length && !newVols && !shortShifts.length && !signs && !followups.n && !newTexts;
 
   return (
     <section className="today-section" aria-labelledby="today-needs-h">
@@ -402,6 +407,9 @@ function NeedsYou({ b }) {
           )}
           {followups.n > 0 && (
             <LinkRow to="/follow-ups" main={<><strong className="mono">{followups.n}</strong> {plural(followups.n, 'follow-up')}</>} />
+          )}
+          {newTexts > 0 && (
+            <LinkRow to="/inbox" main={<><strong className="mono">{newTexts}</strong> new {plural(newTexts, 'text')}</>} />
           )}
         </ul>
       )}
@@ -670,6 +678,7 @@ function VolunteerToday({ b, me }) {
   const f = b.field ?? {};
   const mine = f.mine ?? {};
   const signs = Number(b.signs?.requested) || 0;
+  const replies = Number(useTextingStatus(me).data?.unread) || 0; // replies to their texts
 
   return (
     <div className="today today--field">
@@ -710,6 +719,9 @@ function VolunteerToday({ b, me }) {
         <VolunteerShiftRow shifts={b.shifts ?? []} me={me} />
         {signs > 0 && (
           <LinkRow to="/signs" main={<><strong className="mono">{signs}</strong> {plural(signs, 'sign')} to put up</>} />
+        )}
+        {replies > 0 && (
+          <LinkRow to="/inbox" main={<><strong className="mono">{replies}</strong> {plural(replies, 'reply', 'replies')}</>} />
         )}
       </ul>
 
@@ -777,7 +789,7 @@ function DeskToday({ b, me, toast }) {
 
       <Numbers b={b} pic={pic} />
 
-      <NeedsYou b={b} />
+      <NeedsYou b={b} me={me} />
 
       <section className="today-section" aria-labelledby="today-next-h">
         <h2 className="today-h" id="today-next-h">Coming up</h2>
