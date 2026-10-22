@@ -20,8 +20,9 @@ import RatingButtons, { OutcomeButtons, RatingChip, focusRating, ratingSay, rati
 import SurveyQuestions, { PersonAnswers, answersTail, usePersonAnswers, useSurvey } from '../components/SurveyQuestions.jsx';
 import { apiGet, fmtMoney, fmtDate } from '../api.js';
 import { EngagementChip, PersonLadders, usePersonLadders } from '../components/LaddersBits.jsx';
-import { queuedText } from '../components/queued.js';
-import { useOutbox } from '../offline.js';
+import { queuedText, useThisDevice } from '../components/queued.js';
+import { useOutbox, applyOutboxToProfile, pendingAbout } from '../offline.js';
+import { useOnline } from '../components/NoSignal.jsx';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
   canDesk, invalidatePersonData, isDnc, tagWord, RatingTag, noSignal,
@@ -254,7 +255,7 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
     const res = await act.run('contact.log', {
       person_id: person.id, channel, outcome, rating: rating || undefined, note: note.trim() || undefined,
       answers: answers.length ? answers : undefined, visit_of: visitOf,
-    });
+    }, { who: person.name });
     if (!res) survey.restore(answers);
     if (res) {
       survey.logged(res, { channel, outcome, rating, answers, visitOf });
@@ -308,7 +309,7 @@ function EditDetailsForm({ person, refresh, onClose }) {
     name: person.name || '', kind: person.kind || 'person', phone: person.phone || '', email: person.email || '',
     address: person.address || '', unit: person.unit || '', city: person.city || '', postal: person.postal || '',
   });
-  const act = useAction(refresh);
+  const act = useAction(refresh, { needsSignal: true });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const v = (s) => (s && s.trim() ? s.trim() : null);
 
@@ -390,7 +391,7 @@ function Socials({ person, refresh, desk }) {
   const [platform, setPlatform] = useState('instagram');
   const [handle, setHandle] = useState('');
   const [adding, setAdding] = useState(false);
-  const act = useAction(refresh);
+  const act = useAction(refresh, { needsSignal: true });
   const socials = cleanSocials(person.socials);
   const entries = Object.entries(socials);
 
@@ -542,6 +543,13 @@ function Tags({ person, refresh, desk }) {
   const [editing, setEditing] = useState(false);
   const act = useAction(refresh);
   const tags = Array.isArray(person.tags) ? person.tags : [];
+  // Only what changed (person.tag): with no signal it waits on this device
+  // and never undoes a tag someone else changed meanwhile.
+  const save = (next) => {
+    const add = next.filter((t) => !tags.includes(t));
+    const remove = tags.filter((t) => !next.includes(t));
+    if (add.length || remove.length) act.run('person.tag', { id: person.id, add, remove }, { who: person.name });
+  };
   if (desk && editing) {
     return (
       <>
@@ -550,7 +558,7 @@ function Tags({ person, refresh, desk }) {
           suggestions={SUGGESTED_TAGS}
           disabled={act.busy}
           autoFocus
-          onChange={(next) => act.run('person.update', { id: person.id, tags: next })}
+          onChange={save}
         />
         {act.error && <p className="error">{act.error}</p>}
         <div className="pf-row-acts">
@@ -582,7 +590,7 @@ function Tags({ person, refresh, desk }) {
 function Roles({ person, roles, refresh, desk }) {
   const [role, setRole] = useState('');
   const [detail, setDetail] = useState('');
-  const act = useAction(refresh);
+  const act = useAction(refresh, { needsSignal: true });
   const def = VOLUNTEER_ROLES.find((r) => r.code === role);
   const label = (code) => VOLUNTEER_ROLES.find((r) => r.code === code)?.label || code;
 
@@ -634,7 +642,7 @@ function Roles({ person, roles, refresh, desk }) {
 }
 
 function Signs({ person, signs, refresh, desk }) {
-  const act = useAction(refresh);
+  const act = useAction(refresh, { needsSignal: true });
   // sign.cancel (GET /api/actions, same key as the door card): only then can a
   // request that never went up be taken back from here.
   const actions = useQuery({ queryKey: ['actions'], queryFn: () => apiGet('/actions'), staleTime: 5 * 60_000 });
@@ -755,6 +763,7 @@ function History({ contacts }) {
           <span className="when">{fmtWhen(c.created_at)}</span>
           <span className="what">
             <span className="chip">{CHANNEL_LABEL[c.channel] || c.channel}</span>
+            {c.pending && <span className="chip obx-copy ds-pending">Not sent yet</span>}
             {c.rating ? <RatingTag code={c.rating} /> : <span>{OUTCOME_LABEL[c.outcome] || c.outcome}</span>}
             {c.by_name && <span className="by">{c.by_name}</span>}
             {c.note && <span className="note">{c.note}</span>}
@@ -785,6 +794,11 @@ export default function Person() {
   });
   const ladders = usePersonLadders(id, desk); // engagement level + ladders (desk only)
   const answers = usePersonAnswers(id, desk); // survey answers (desk only)
+  // What's saved on this device and not sent yet (a rating, a note, tags) is
+  // shown as it will be, and said once under the name.
+  const outbox = useOutbox();
+  const online = useOnline();
+  const device = useThisDevice();
 
   // Awaited by useAction so controls stay disabled until the profile refetches.
   // Covers the map (['doors']: pins, ratings, unlocated count after an address
@@ -819,7 +833,8 @@ export default function Person() {
   // Volunteers get gifts: [], totals: [], donor: null from the server.
   const {
     person, gifts = [], totals = [], contacts = [], roles = [], signs = [], shifts = [], donor = null, household = [],
-  } = profile.data;
+  } = applyOutboxToProfile(profile.data, outbox.items);
+  const waiting = pendingAbout(outbox.items, person.id);
   const tags = Array.isArray(person.tags) ? person.tags : [];
   const thisYear = totals.find((t) => String(t.year) === String(new Date().getFullYear()));
   const last = contacts[0];
@@ -832,6 +847,9 @@ export default function Person() {
   return (
     <div className="pf-page">
       <Header person={person} donor={donor} me={me} desk={desk} onLog={onLog} contacted={contacts.length > 0} level={ladders.data?.level} />
+      {waiting > 0 && (
+        <p className="ds-waiting" role="status">Saved on {device} — {online ? 'sends soon' : 'sends when you’re back online'}</p>
+      )}
 
       <RatingCard person={person} refresh={refresh} channel={channel} setChannel={setChannel} cardRef={ratingRef} />
 

@@ -31,6 +31,7 @@ import {
 import { apiGet, action, fmtMoney, fmtDate, todayISO, dollarsToCents } from '../api.js';
 import ReceiptsGiftLine from '../components/ReceiptsGiftLine.jsx';
 import { AddressRow, VoidNoticeAsk, receiptOf, receiptNote } from '../components/ReceiptsNeeds.jsx';
+import { NoSignal, noSignal, useOnline, NeedsSignalLine } from '../components/NoSignal.jsx';
 import './shifts.css';
 
 // gift.log / gift.void / gift.restore and GET /records/* are desk-only
@@ -201,6 +202,7 @@ function DonorPicker({ value, onChange }) {
 
 // ── Log a gift: donor, amount, date — the rest under "More details" ──
 function GiftForm({ presetPersonId, onSaved, onClose }) {
+  const online = useOnline(); // a gift is cap-checked by the server: never saved offline
   const [donor, setDonor] = useState(null);
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(todayISO());
@@ -309,7 +311,7 @@ function GiftForm({ presetPersonId, onSaved, onClose }) {
 
       {error && <p className="error" role="alert">{error}</p>}
       <div className="ops-actions">
-        <button type="submit" className="btn btn-primary ops-tap" disabled={busy}>{busy ? 'Saving…' : 'Save gift'}</button>
+        <button type="submit" className="btn btn-primary ops-tap" disabled={busy || !online}>{busy ? 'Saving…' : 'Save gift'}</button>
         <button type="button" className="btn btn-quiet ops-tap" onClick={onClose}>Cancel</button>
       </div>
     </form>
@@ -614,6 +616,9 @@ export default function Money() {
   const pledges = useQuery({ queryKey: ['pledges'], queryFn: () => apiGet('/pledges'), enabled: canMoney });
   const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), enabled: canMoney });
   const receiptNeeds = useQuery({ queryKey: ['receipts', 'needs'], queryFn: () => apiGet('/receipts/needs'), enabled: canMoney });
+  // No signal: this tab's last copy (components/KeptCopies.js), read only.
+  const online = useOnline();
+  const giftsOffline = noSignal(gifts);
 
   // Newest gift date first (the ledger itself pages in entry order).
   const rows = (gifts.data?.pages ?? []).flatMap((p) => p?.records ?? []).filter((g) => !voided.has(g.id))
@@ -762,12 +767,13 @@ export default function Money() {
         <div className="ops-head__actions">
           <Link className="btn btn-quiet ops-tap" to="/filings">Filings</Link>
           {!showNew && (
-            <button type="button" className="btn btn-primary ops-tap" onClick={() => setParams({ new: '1' })}>
+            <button type="button" className="btn btn-primary ops-tap" disabled={!online} onClick={() => setParams({ new: '1' })}>
               Log a gift
             </button>
           )}
         </div>
       </div>
+      {!online && <NeedsSignalLine>Gifts and pledges need signal</NeedsSignalLine>}
 
       {banner && (
         <div className="banner" role="status">
@@ -813,7 +819,8 @@ export default function Money() {
 
       <span className="eyebrow ops-label">Gifts</span>
       {error && <p className="error">{error}</p>}
-      {gifts.isError && <p className="error">{gifts.error.message}</p>}
+      {giftsOffline && <NoSignal />}
+      {gifts.isError && !giftsOffline && <p className="error">{gifts.error.message}</p>}
       {rows.length === 0 && gifts.isSuccess && <p className="ops-empty">No gifts yet.</p>}
       {rows.length > 0 && (
         <ul className="ops-rows" id="gift-list">

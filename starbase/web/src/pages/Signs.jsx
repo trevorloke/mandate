@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SIGN_KINDS, SIGN_STATUSES } from '@starbase/shared/canvass';
 import { apiGet, action } from '../api.js';
 import { PersonPicker } from './Shifts.jsx';
+import { NoSignal, noSignal, useOnline, NeedsSignalLine } from '../components/NoSignal.jsx';
 import './shifts.css';
 
 // The registry label carries the size ("Large sign (4×4)"); it rides along as a tooltip.
@@ -325,6 +326,10 @@ export default function Signs() {
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   const signsQ = useQuery({ queryKey: ['signs'], queryFn: () => apiGet('/signs') });
+  // No signal: the last copy this sign-in loaded (components/KeptCopies.js),
+  // read only — every change here needs signal.
+  const online = useOnline();
+  const offline = noSignal(signsQ);
   const all = signsQ.data?.signs ?? [];
   const ofKind = all.filter((s) => !kindFilter || s.kind === kindFilter);
   // The counters count within the chosen kind, so they always match the list.
@@ -443,19 +448,21 @@ export default function Signs() {
           />
         )}
         {error && <p className="error" role="alert">{error}</p>}
-        {signsQ.isPending && <p className="muted">Loading…</p>}
-        {signsQ.isError && <p className="error">{signsQ.error.message}</p>}
+        {offline && <NoSignal />}
+        {signsQ.isPending && !offline && <p className="muted">Loading…</p>}
+        {signsQ.isError && !offline && <p className="error">{signsQ.error.message}</p>}
+        {!online && toPutUp.length > 0 && <NeedsSignalLine>Putting signs up needs signal</NeedsSignalLine>}
         {empty && (
           <div className="ops-empty-block">
             <p className="ops-empty">Nothing to put up right now.</p>
-            {!showNew && <button type="button" className="btn btn-primary ops-tap" onClick={openForm}>Add a sign</button>}
+            {!showNew && <button type="button" className="btn btn-primary ops-tap" disabled={!online} onClick={openForm}>Add a sign</button>}
           </div>
         )}
 
         {toPutUp.length > 0 && (
           <ul className="ops-rows">
             {toPutUp.map((s) => (
-              <PutUpRow key={s.id} s={s} busy={busyId === s.id} onPutUp={() => putUp(s)} />
+              <PutUpRow key={s.id} s={s} busy={busyId === s.id || !online} onPutUp={() => putUp(s)} />
             ))}
           </ul>
         )}
@@ -467,7 +474,7 @@ export default function Signs() {
           </button>
           {more && (
             <div id="signs-more" className="ops-more-body ops-actions">
-              {!showNew && !empty && <button type="button" className="btn ops-tap" onClick={openForm}>Add a sign</button>}
+              {!showNew && !empty && <button type="button" className="btn ops-tap" disabled={!online} onClick={openForm}>Add a sign</button>}
               <button type="button" className="btn btn-quiet ops-tap" onClick={() => { const next = new URLSearchParams(params); next.set('all', '1'); setParams(next); }}>
                 All signs · {all.length}
               </button>
@@ -488,9 +495,10 @@ export default function Signs() {
       <div className="ops-head">
         <h1>Signs</h1>
         {!showNew && (
-          <button type="button" className="btn btn-primary ops-tap" onClick={openForm}>Add a sign</button>
+          <button type="button" className="btn btn-primary ops-tap" disabled={!online} onClick={openForm}>Add a sign</button>
         )}
       </div>
+      {!online && <NeedsSignalLine>Adding or changing a sign needs signal</NeedsSignalLine>}
 
       {showNew && (
         <PlaceSignForm
@@ -528,8 +536,9 @@ export default function Signs() {
       )}
 
       {error && <p className="error">{error}</p>}
-      {signsQ.isPending && <p className="muted">Loading…</p>}
-      {signsQ.isError && <p className="error">{signsQ.error.message}</p>}
+      {offline && <NoSignal />}
+      {signsQ.isPending && !offline && <p className="muted">Loading…</p>}
+      {signsQ.isError && !offline && <p className="error">{signsQ.error.message}</p>}
 
       {signsQ.isSuccess && all.length === 0 && <p className="ops-empty">No signs yet.</p>}
       {signsQ.isSuccess && all.length > 0 && rows.length === 0 && <p className="ops-empty">None here.</p>}
@@ -542,7 +551,7 @@ export default function Signs() {
               s={s}
               open={openId === s.id}
               onToggle={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
-              busy={busyId === s.id}
+              busy={busyId === s.id || !online}
               onUpdate={(patch) => (patch.status ? changeStatus(s, patch.status) : update(s, patch))}
               onCancel={canCancel ? () => cancelRequest(s) : undefined}
             />

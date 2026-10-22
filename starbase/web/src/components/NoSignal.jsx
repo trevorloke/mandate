@@ -7,9 +7,14 @@
 //                  "No signal — this loads when you’re back online."
 //   useOnline()    the browser's online / offline, as it changes — for a
 //                  send that needs signal (it's off, with <NeedsSignal />).
-//   <NeedsSignal /> "Needs signal — nothing sent"
+//   <NeedsSignal /> "Needs signal — nothing sent" (or its own words)
+//   <NeedsSignalLine>  a write that's off with no signal, said in one line
+//                  under the screen's title ("Adding people needs signal").
+// A desk screen this sign-in loaded before shows that copy instead of the
+// No signal line (components/KeptCopies.js; the strip says when it's from).
 import { useSyncExternalStore } from 'react';
 import { ApiError } from '../api.js';
+import './desk-offline.css';
 
 export const noSignal = (q) => !q.data && (
   (q.isPending && q.fetchStatus === 'paused') || (q.isError && !(q.error instanceof ApiError))
@@ -31,6 +36,9 @@ export function useOnline() {
 }
 
 export const NEEDS_SIGNAL = 'Needs signal — nothing sent';
-export function NeedsSignal({ className = 'ops-meta' }) {
-  return <span className={className} role="status">{NEEDS_SIGNAL}</span>;
+export function NeedsSignal({ className = 'ops-meta', children = NEEDS_SIGNAL }) {
+  return <span className={className} role="status">{children}</span>;
+}
+export function NeedsSignalLine({ children }) {
+  return <p className="ds-needs" role="status">{children}</p>;
 }
