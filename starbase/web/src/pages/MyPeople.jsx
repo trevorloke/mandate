@@ -13,7 +13,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import RatingButtons, { RatingChip, focusRating, ratingText } from '../components/RatingButtons.jsx';
+import RatingButtons, { RatingChip, focusRating, ratingText, useScale } from '../components/RatingButtons.jsx';
 import SurveyQuestions, { answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { TextingCallButton, noTexts } from '../components/TextingCard.jsx';
 import { KINDS, MINE_KEY, kindWord, useMyPeople } from '../components/RelationshipsBits.jsx';
@@ -128,6 +128,7 @@ function AddForm({ onClose, onAdded }) {
 // One person, opened: how you talked, the Calls card, the rating buttons.
 function Reach({ link, me, onClose }) {
   const p = link.person;
+  const scale = useScale();
   const queryClient = useQueryClient();
   const refresh = () => invalidatePersonData(queryClient);
   const act = useAction(refresh);
@@ -158,7 +159,7 @@ function Reach({ link, me, onClose }) {
     if (!res) { survey.restore(answers); return; }
     survey.logged(res, { channel: way, outcome, rating, answers, visitOf });
     if (rating) setPicked(rating);
-    const did = rating ? `Rated ${ratingText(rating)}` : outcome === 'contacted' ? 'Talked' : NO_ANSWER[way];
+    const did = rating ? `Rated ${ratingText(scale, rating)}` : outcome === 'contacted' ? 'Talked' : NO_ANSWER[way];
     const what = `${WAYS[way]} · ${did}${answersTail(answers, res.result)}`;
     setSaid({ text: res.queued ? `${queuedText(res)} · ${what}` : `✓ ${what}`, what, queued: Boolean(res.queued) });
   };
