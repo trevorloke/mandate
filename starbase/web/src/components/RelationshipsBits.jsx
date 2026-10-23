@@ -5,20 +5,27 @@
 //                                (query key ['persons', 'mine']: every write that
 //                                changes people refetches it)
 //   <MyPeopleLink me />          Calls' quiet "My people · 6" (→ /my-people)
-//   usePersonKnows(id, desk)     a profile's Knows (desk only)
+//   usePersonKnows(id, desk)     a profile's Knows (desk only; kept for no
+//                                signal like the profile — KeptCopies.js)
 //   <KnowsNudge query person />  "Ask Priya Nair — they know each other": one line
 //                                on the profile of someone undecided or not rated
-//   <PersonKnows person query /> the Knows section: who they know (name, kind,
-//                                rating), "Brought in by", "+ Someone they know"
-//                                (search the list, then how they know each
-//                                other), and Remove? Yes · No in place
+//                                (never someone tagged do-not-contact); and "May
+//                                be the same person as …" when a volunteer's add
+//                                may have doubled someone (same email or name)
+//   <PersonKnows person query /> the Knows section: who they know (name, kind ·
+//                                note, rating), "Brought in by", "+ Someone they
+//                                know" (search the list, then how they know each
+//                                other), and Remove? Yes · No in place — both
+//                                need signal, and say so
+//   linkWords(link)              "Neighbour · Same block": the kind, and the note
 // No pronouns are guessed from names: the words never need one.
-import { useId, useState } from 'react';
+import { Fragment, useId, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, action } from '../api.js';
 import { RatingChip } from './RatingButtons.jsx';
 import { phoneCopy, useKeepCopy } from './OfflineCache.js';
+import { NeedsSignal, NoSignal, noSignal, useOnline } from './NoSignal.jsx';
 import '../pages/relationships.css';
 
 export const KINDS = [
@@ -30,6 +37,7 @@ export const KINDS = [
   { code: 'other', label: 'Other' },
 ];
 export const kindWord = (code) => KINDS.find((k) => k.code === code)?.label || 'Other';
+export const linkWords = (link) => [kindWord(link?.kind), String(link?.note || '').trim()].filter(Boolean).join(' · ');
 
 export const MINE_KEY = ['persons', 'mine'];
 const MINE_COPY = 'my-people';
@@ -92,22 +100,41 @@ export const usePersonKnows = (id, desk) => useQuery({
 });
 
 const undecided = (p) => p && (p.rating == null || p.rating === '3');
+const dnc = (p) => Array.isArray(p?.tags) && p.tags.includes('do-not-contact');
 
 export function KnowsNudge({ query, person }) {
   const n = query.data?.nudge;
-  if (!n || !undecided(person)) return null;
+  const same = query.data?.same_as || [];
+  const nudge = n && undecided(person) && !dnc(person);
+  if (!nudge && !same.length) return null;
   return (
-    <p className="rel-nudge">
-      Ask <Link to={`/people/${n.id}`}>{n.name}</Link> — they know each other
-    </p>
+    <>
+      {nudge && (
+        <p className="rel-nudge">
+          Ask <Link to={`/people/${n.id}`}>{n.name}</Link> — they know each other
+        </p>
+      )}
+      {same.length > 0 && (
+        <p className="rel-same">
+          May be the same person as{' '}
+          {same.map((x, i) => (
+            <Fragment key={x.id}>{i ? ', ' : ''}<Link to={`/people/${x.id}`}>{x.name}</Link></Fragment>
+          ))}
+        </p>
+      )}
+    </>
   );
 }
+
+// Adding a link needs signal (it's a desk write, never saved on the device).
+const NEEDS = 'Adding someone they know needs signal';
 
 function AddKnown({ person, known, onClose }) {
   const [q, setQ] = useState('');
   const [pick, setPick] = useState(null);
   const inputId = useId();
   const act = useRun();
+  const online = useOnline();
   const term = q.trim();
   const found = useQuery({
     queryKey: ['persons', 'pick', term],
@@ -116,6 +143,8 @@ function AddKnown({ person, known, onClose }) {
     staleTime: 30_000,
   });
   const list = (found.data?.persons || []).filter((p) => p.id !== person.id && !known.has(p.id)).slice(0, 6);
+  // No signal: the search can't answer and the link can't go — said once, in place.
+  const off = !online || (term.length >= 2 && noSignal(found));
   const add = async (kind) => {
     const res = await act.run('relationship.add', { from_id: person.id, person_id: pick.id, kind });
     if (res) onClose();
@@ -126,10 +155,10 @@ function AddKnown({ person, known, onClose }) {
         <p className="rel-add__q">{pick.name} — how do they know each other?</p>
         <div className="rel-kinds" role="group" aria-label="How they know each other">
           {KINDS.map((k) => (
-            <button key={k.code} type="button" className="rel-kind" disabled={act.busy} onClick={() => add(k.code)}>{k.label}</button>
+            <button key={k.code} type="button" className="rel-kind" disabled={act.busy || !online} onClick={() => add(k.code)}>{k.label}</button>
           ))}
         </div>
-        {act.error && <p className="error" role="alert">{act.error}</p>}
+        {!online ? <NeedsSignal className="pf-empty">{NEEDS}</NeedsSignal> : act.error && <p className="error" role="alert">{act.error}</p>}
         <button type="button" className="btn btn-quiet pp-btn" onClick={() => setPick(null)}>Back</button>
       </div>
     );
@@ -139,7 +168,7 @@ function AddKnown({ person, known, onClose }) {
       <label className="rel-add__q" htmlFor={inputId}>Who do they know?</label>
       <input id={inputId} className="input" type="search" autoFocus autoComplete="off" placeholder="Search by name"
         value={q} onChange={(e) => setQ(e.target.value)} />
-      {list.length > 0 && (
+      {off ? <NeedsSignal className="pf-empty">{NEEDS}</NeedsSignal> : list.length > 0 && (
         <ul className="rel-picks">
           {list.map((p) => (
             <li key={p.id}>
@@ -151,7 +180,7 @@ function AddKnown({ person, known, onClose }) {
           ))}
         </ul>
       )}
-      {term.length >= 2 && found.isSuccess && list.length === 0 && <p className="pf-empty">No one matches.</p>}
+      {!off && term.length >= 2 && found.isSuccess && list.length === 0 && <p className="pf-empty">No one matches.</p>}
       <button type="button" className="btn btn-quiet pp-btn" onClick={onClose}>Cancel</button>
     </div>
   );
@@ -161,6 +190,9 @@ export function PersonKnows({ person, query }) {
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const act = useRun();
+  const online = useOnline();
+  // No signal and nothing kept: say so, never a "Loading…" that doesn't end.
+  if (noSignal(query)) return <NoSignal />;
   if (query.isPending) return <p className="muted">Loading…</p>;
   if (query.isError) return <p className="error">{query.error.message}</p>;
   const { knows = [], brought_in_by: by = null } = query.data || {};
@@ -179,30 +211,31 @@ export function PersonKnows({ person, query }) {
             <li key={k.id}>
               <span className="rel-knows__who">
                 <Link to={`/people/${k.person.id}`}>{k.person.name}</Link>
-                <span className="rel-knows__kind">{kindWord(k.kind)}</span>
+                <span className="rel-knows__kind">{linkWords(k)}</span>
               </span>
               <span className="rel-knows__end">
                 <RatingChip code={k.person.rating} who />
                 {confirm === k.id ? (
                   <span className="ops-confirm rel-confirm">
                     <span>Remove?</span>
-                    <button type="button" className="btn pp-btn" disabled={act.busy} onClick={() => remove(k.id)}>Yes</button>
+                    <button type="button" className="btn pp-btn" disabled={act.busy || !online} onClick={() => remove(k.id)}>Yes</button>
                     <button type="button" className="btn btn-quiet pp-btn" onClick={() => setConfirm(null)}>No</button>
                   </span>
                 ) : (
-                  <button type="button" className="btn btn-quiet pp-btn" aria-label={`Remove ${k.person.name}`} onClick={() => setConfirm(k.id)}>Remove</button>
+                  <button type="button" className="btn btn-quiet pp-btn" aria-label={`Remove ${k.person.name}`} disabled={!online} onClick={() => setConfirm(k.id)}>Remove</button>
                 )}
               </span>
             </li>
           ))}
         </ul>
       )}
-      {act.error && <p className="error" role="alert">{act.error}</p>}
+      {online && act.error && <p className="error" role="alert">{act.error}</p>}
       {adding ? (
         <AddKnown person={person} known={known} onClose={() => setAdding(false)} />
       ) : (
         <div className="pf-row-acts">
-          <button type="button" className="btn pp-btn" onClick={() => setAdding(true)}>+ Someone they know</button>
+          <button type="button" className="btn pp-btn" disabled={!online} onClick={() => setAdding(true)}>+ Someone they know</button>
+          {!online && <NeedsSignal className="ops-meta rel-needs">Adding and removing need signal</NeedsSignal>}
         </div>
       )}
     </>

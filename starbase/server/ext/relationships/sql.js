@@ -38,6 +38,9 @@ create unique index if not exists relationships_pair_idx on relationships (works
 create index if not exists relationships_a_idx on relationships (workspace_id, person_a) where removed_at is null;
 create index if not exists relationships_b_idx on relationships (workspace_id, person_b) where removed_at is null;
 create index if not exists relationships_in_idx on relationships (workspace_id, brought_in) where brought_in is not null;
+-- A profile's "May be the same person as …" (actions.js: a volunteer's new
+-- person whose email or name someone on the list already has).
+create index if not exists persons_same_as_idx on persons (workspace_id, (attrs->>'maybe_same_as')) where attrs ? 'maybe_same_as';
 
 do $$
 begin

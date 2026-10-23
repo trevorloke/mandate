@@ -64,6 +64,8 @@ function planFor(key, me) {
   // A profile's More details (ext/fields), kept beside the profile; a volunteer's comes already narrowed.
   if (key[0] === 'person' && key[2] === 'fields' && key.length === 3 && typeof key[1] === 'string') return q(`person:${key[1]}:fields`, money);
   const [k0, k1, k2] = key;
+  // A profile's Knows (ext/relationships; desk only), kept beside the profile.
+  if (k0 === 'person' && k2 === 'knows' && key.length === 3 && typeof k1 === 'string') return q(`person:${k1}:knows`, money);
   switch (k0) {
     // moneyIn: an answer with money in it goes to this tab only, whatever
     // the role says (MONEY_IN, below).

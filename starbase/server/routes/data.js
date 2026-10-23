@@ -284,7 +284,33 @@ app.post('/sample', async (c) => {
     // Made-up ratings use only what this campaign's scale offers: a candidate
     // it took off the list becomes plain 4 (Not sure).
     const offered = new Set(offeredCodes(await loadScale(tx, W)));
-    for (const s0 of [...S.people, ...S.media.map((m) => ({ ...m, key: m.name }))]) {
+    const everyone = [...S.people, ...S.media.map((m) => ({ ...m, key: m.name }))];
+    // A sample person already on the list — one an earlier Clear kept (your
+    // records on them), or whoever holds the sample's email (the sample
+    // volunteer Priya Nair's own sign-in record) — is used again, never added
+    // a second time with the same email. Not recorded as the sample's: the
+    // next Clear leaves them (and takes the sample's links, roles, bookings…
+    // on them, which are recorded).
+    const onList = (await tx.query(
+      `select p.id, p.name, lower(p.email) as email,
+              exists (select 1 from events e where e.workspace_id = $1 and e.entity_type = 'person'
+                        and e.entity_id = p.id and e.op = 'create' and e.payload->>'sample' = 'true') as was_sample
+       from persons p
+       where p.workspace_id = $1 and p.deleted_at is null and (lower(p.email) = any($2::text[]) or p.name = any($3::text[]))
+       order by p.created_at, p.id`,
+      [W, everyone.filter((p) => p.email).map((p) => p.email.toLowerCase()), everyone.map((p) => p.name)],
+    )).rows;
+    const reused = new Set();
+    const already = (p) => {
+      const e = p.email ? p.email.toLowerCase() : null;
+      const hit = (e && onList.find((r) => r.email === e && !reused.has(r.id)))
+        || onList.find((r) => r.was_sample && r.name === p.name && !reused.has(r.id));
+      if (hit) reused.add(hit.id);
+      return hit || null;
+    };
+    for (const s0 of everyone) {
+      const have = already(s0);
+      if (have) { id[s0.key] = have.id; continue; }
       const p = s0.rating && !offered.has(s0.rating) ? { ...s0, rating: '4' } : s0;
       const pid = newId();
       id[p.key] = pid;
@@ -314,21 +340,28 @@ app.post('/sample', async (c) => {
       }
     }
     for (const [who, role, detail] of S.roles) {
+      // Someone used again may hold that role already (yours).
+      if (reused.has(id[who]) && (await tx.query(
+        'select 1 from volunteer_roles where workspace_id = $1 and person_id = $2 and role = $3', [W, id[who], role],
+      )).rows.length) continue;
       const rid = newId();
       await tx.query('insert into volunteer_roles (id, workspace_id, person_id, role, detail) values ($1, $2, $3, $4, $5)',
         [rid, W, id[who], role, detail || null]);
       ids.roles.push(rid);
       emit('volunteer_role', rid, 'create', { person_id: id[who], role, sample: true });
     }
-    // Who knows whom (ext/relationships): each pair kept in order, once.
+    // Who knows whom (ext/relationships): each pair kept in order, once — a
+    // pair someone used again already has (your link) is left as it is.
     for (const [a, b, kind, note, broughtIn] of S.relationships) {
       const lid = newId();
       const link = (await tx.query(
         `insert into relationships (id, workspace_id, person_a, person_b, kind, note, brought_in, from_person, created_by)
          values ($1, $2, least($3::uuid, $4::uuid), greatest($3::uuid, $4::uuid), $5, $6, $7, $3, $8)
+         on conflict (workspace_id, person_a, person_b) where removed_at is null do nothing
          returning person_a, person_b`,
-        [lid, W, id[a], id[b], kind, note || null, broughtIn ? id[b] : null, ctx.user.id],
+        [lid, W, id[a], id[b], kind, note || null, broughtIn && !reused.has(id[b]) ? id[b] : null, ctx.user.id],
       )).rows[0];
+      if (!link) continue;
       ids.relationships.push(lid);
       emit('relationship', lid, 'create', { ...link, kind, sample: true });
     }

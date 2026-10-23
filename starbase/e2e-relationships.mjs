@@ -191,6 +191,38 @@ check('removed: off the server', !after.some((k) => k.person.id === maya.id));
 await sleep(500);
 check('…and off the screen', !(await knowsRows()).some((r) => /Maya Chen/.test(r)));
 m = await simple(page, 'profile with Knows open (desk 1360)');
+check('the link’s note shows beside its kind: "Neighbour · Same block"', rows.some((r) => /Priya Nair Neighbour · Same block/.test(r)) || (await knowsRows()).some((r) => /Priya Nair Neighbour · Same block/.test(r)), (await knowsRows()).join(' | '));
+
+// Knows with no signal (desk): its writes are off and say so; the search says it needs signal.
+await page.click('button:has-text("+ Someone they know")');
+await sleep(1500); // the profile's Knows is kept a moment after it loads
+await dctx.setOffline(true);
+await page.fill('.rel-add input[type="search"]', 'Harjit');
+await sleep(800);
+let addText = await tc(page, '.rel-add');
+check('no signal: "+ Someone they know" search says "Adding someone they know needs signal"', /Adding someone they know needs signal/.test(addText) && !/No one matches|Harjit Gill/.test(addText), addText);
+await page.click('.rel-add button:has-text("Cancel")');
+check('…"+ Someone they know" and Remove are off, said once: "Adding and removing need signal"',
+  await page.locator('button:has-text("+ Someone they know")').isDisabled() && await page.locator('.rel-knows li button:has-text("Remove")').first().isDisabled()
+  && /Adding and removing need signal/.test(await tc(page, '.pf-row-acts')), await tc(page, '.pf-row-acts'));
+await D.shot('02b-knows-no-signal-desk');
+// Through a reload with no signal: the kept Knows and the nudge, never "Loading…".
+await D.go(`/people/${jasmine.id}`);
+await page.waitForSelector('.pf-page h1', { timeout: 8000 }).catch(() => {});
+check('reload with no signal: the nudge is still there', (await page.innerText('.rel-nudge').catch(() => '')).trim() === 'Ask Priya Nair — they know each other');
+await page.click('.pf-sec__btn:has-text("Knows")');
+await sleep(400);
+rows = await knowsRows();
+check('…Knows from its kept copy (no "Loading…")', rows.some((r) => /Priya Nair Neighbour · Same block/.test(r)) && !/Loading…/.test(await D.text()), rows.join(' | ') || (await D.text()).slice(0, 200));
+m = await simple(page, 'profile Knows, no signal (desk 1360)');
+await dctx.setOffline(false);
+await sleep(1500);
+// Do not contact: no nudge to reach them through a friend.
+await D.api('/actions/person.update', { id: jasmine.id, tags: [...(jasmine.tags || []), 'do-not-contact'] });
+await D.go(`/people/${jasmine.id}`);
+await page.waitForSelector('.pf-page h1', { timeout: 8000 }).catch(() => {});
+check('tagged do-not-contact: no "Ask … — they know each other"', !(await page.$('.rel-nudge')) && /Do not contact/i.test(await D.text()), (await D.text()).slice(0, 160));
+await D.api('/actions/person.update', { id: jasmine.id, tags: jasmine.tags || [] });
 
 const sofia = await byName('Sofia Petrova');
 await D.go(`/people/${sofia.id}`);
@@ -234,6 +266,7 @@ const names = await vpage.$$eval('.ops-row .ops-row__name', (els) => els.map((e)
 check('My people: her six, as the server has them', names.join('|') === mine.people.map((x) => x.person.name).join('|'), names.join('|'));
 const chips = await vpage.$$eval('.ops-row .rb-chip', (els) => els.length);
 check('each with a rating chip', chips === 6, chips);
+check('a link’s note shows on the row: "Neighbour · Same block"', /Neighbour · Same block/.test(await tc(vpage, '.ops-row:has-text("Jasmine Wong") .ops-row__sub')), await tc(vpage, '.ops-row:has-text("Jasmine Wong") .ops-row__sub'));
 check('back link says "← Today"', (await tc(vpage, '.ops-back')) === '← Today');
 m = await simple(vpage, 'My people (volunteer 390)');
 check('My people: one yellow "Add someone"', m.yellow === 1 && (await tc(vpage, '.btn-primary')) === 'Add someone');
@@ -285,10 +318,18 @@ await vpage.fill('#rel-name', 'Rowan Example');
 await vpage.click('.rel-kind:has-text("Neighbour")');
 await vpage.click('form[aria-label="Add someone you know"] button[type="submit"]');
 check('no phone or email: "Add a phone or an email"', /Add a phone or an email/.test(await vpage.innerText('form[aria-label="Add someone you know"]')));
+await vpage.fill('#rel-email', 'typo@');
+await vpage.click('form[aria-label="Add someone you know"] button[type="submit"]');
+check('an email that isn’t one: "Check the email", nothing saved', /Check the email/.test(await vpage.innerText('form[aria-label="Add someone you know"]')) && (await vpage.$('form[aria-label="Add someone you know"]')));
+await vpage.fill('#rel-email', '');
 await vpage.fill('#rel-phone', '604-555-0177');
+await vpage.click('.rel-moredetails');
+await vpage.fill('#rel-note', 'Book club');
 await vpage.click('form[aria-label="Add someone you know"] button[type="submit"]');
 await vpage.waitForSelector('.ops-done', { timeout: 8000 }).catch(() => {});
 check('"✓ Added Rowan Example"', (await vpage.innerText('.ops-done').catch(() => '')).trim() === '✓ Added Rowan Example');
+await until(async () => /Book club/.test(await tc(vpage, '.ops-row:has-text("Rowan Example") .ops-row__sub')), 6000);
+check('the note they typed shows on the row: "Neighbour · Book club · 604-555-0177"', /^Neighbour · Book club ·\s*604-555-0177$/.test(await tc(vpage, '.ops-row:has-text("Rowan Example") .ops-row__sub')), await tc(vpage, '.ops-row:has-text("Rowan Example") .ops-row__sub'));
 const rowan = await byName('Rowan Example');
 const rk = rowan && (await D.api(`/persons/${rowan.id}/knows`)).json;
 check('on the server: Rowan, brought in by Priya Nair, a neighbour', rk?.brought_in_by?.id === priya.id && rk.knows[0]?.kind === 'neighbour' && rowan.phone === '604-555-0177', JSON.stringify(rk));
@@ -314,6 +355,22 @@ const sheet = await vpage.$$eval('.obx-sheet .obx-row', (els) => els.map((e) => 
 check('the sheet says it plainly: "Someone you know · Quinn Example · <time>"', sheet.length === 1 && /^Someone you know · Quinn Example · \d{1,2}:\d{2} (am|pm)$/.test(sheet[0]), sheet.join(' | '));
 await vpage.click('.obx-scrim').catch(() => {});
 await sleep(300);
+// Remove needs signal: said in place, Yes is off.
+if (!(await vpage.$('.ops-item[data-open]:has-text("Rowan Example")'))) await vpage.click('.ops-row:has-text("Rowan Example")');
+await vpage.click('.ops-item[data-open] .rel-foot button:has-text("Remove")');
+check('offline Remove: "Removing needs signal", Yes is off', /Removing needs signal/.test(await tc(vpage, '.ops-item[data-open]'))
+  && await vpage.locator('.ops-item[data-open] .rel-foot button:has-text("Yes")').isDisabled(), await tc(vpage, '.ops-item[data-open] .rel-foot'));
+await vpage.click('.ops-item[data-open] .rel-foot button:has-text("No")');
+// A rating saved offline shows on the row, marked, until it's sent.
+await vpage.click('.ops-row:has-text("Daniel Kim")');
+await vpage.waitForSelector('.ops-item[data-open]:has-text("Daniel Kim") .rel-reach', { timeout: 5000 }).catch(() => {});
+await vpage.click('.ops-item[data-open] .rel-how button:has-text("In person")');
+await vpage.click('.ops-item[data-open] .rel-reach .rb-btn[aria-label^="2:"]');
+await sleep(500);
+const danielEnd = async () => ((await vpage.innerText('.ops-row:has-text("Daniel Kim") .ops-row__end').catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+check('offline rating: the row shows it, "2 · Offline"', /^2 Offline$/i.test(await danielEnd()), await danielEnd());
+m = await simple(vpage, 'My people, a rating saved offline (volunteer 390)');
+await V.shot('07b-offline-rating-phone');
 await vctx.setOffline(false);
 const quinn = await until(() => byName('Quinn Example'));
 check('back online: Quinn reaches the server', !!quinn);
@@ -323,8 +380,33 @@ const qk = quinn && (await D.api(`/persons/${quinn.id}/knows`)).json;
 check('…once: one Quinn, one link to Priya', quinns.length === 1 && qk?.knows.length === 1 && qk.knows[0].person.id === priya.id, `${quinns.length} · ${qk?.knows.length}`);
 await until(async () => (await vpage.$$('.ops-row:has-text("Quinn Example")')).length === 1 && !(await vpage.$('.ops-item:has-text("Quinn Example") .chip-warn')));
 check('…and My people shows Quinn as one of hers', (await vpage.$$('.ops-row:has-text("Quinn Example")')).length === 1);
+check('…the line now says "✓ Added Quinn Example", not "Saved offline"', (await vpage.innerText('.ops-done').catch(() => '')).trim() === '✓ Added Quinn Example', await vpage.innerText('.ops-done').catch(() => ''));
+await until(async () => /^2$/.test(await danielEnd()), 8000);
+check('…Daniel’s rating sent: the row reads 2, no mark', /^2$/.test(await danielEnd()) && (await D.api(`/persons/${daniel.id}`)).json.person.rating === '2', await danielEnd());
 mine = (await V.api('/relationships/mine')).json;
 check('My people · 8 now', mine.people.length === 8);
+
+// Refused when it's sent (the server checks an email the form can't): the row says
+// "Not saved", the line above it goes, and the sheet says why in their words.
+await vctx.setOffline(true);
+await vpage.click('button:has-text("Add someone")');
+await vpage.fill('#rel-name', 'Pat Typo');
+await vpage.fill('#rel-email', 'pat,smith@example.org');
+await vpage.click('.rel-kind:has-text("Other")');
+await vpage.click('form[aria-label="Add someone you know"] button[type="submit"]');
+await sleep(500);
+check('offline: "Pat Typo · Saved offline"', /Pat Typo · Saved offline/.test(await vpage.innerText('.ops-done').catch(() => '')));
+await vctx.setOffline(false);
+await until(async () => /Not saved/i.test(await tc(vpage, '.ops-item:has-text("Pat Typo")')), 15000);
+check('refused: the row says "Not saved", and "Saved offline" is gone', /Not saved/i.test(await tc(vpage, '.ops-item:has-text("Pat Typo")'))
+  && !/Pat Typo/.test(await vpage.innerText('.ops-done').catch(() => '')), `${await tc(vpage, '.ops-item:has-text("Pat Typo")')} · ${await vpage.innerText('.ops-done').catch(() => '')}`);
+await vpage.click('.offline-strip__chip');
+await vpage.waitForSelector('.obx-sheet .is-refused', { timeout: 3000 }).catch(() => {});
+const why = await tc(vpage, '.obx-sheet .is-refused');
+check('the sheet: "Invalid email address", never the field path', /Invalid email address/.test(why) && !/person\.|Person\./.test(why), why);
+await vpage.click('.obx-sheet .is-refused button:has-text("Dismiss")');
+await vpage.click('.obx-scrim').catch(() => {});
+await sleep(300);
 
 // Remove in place.
 if (!(await vpage.$('.ops-item[data-open]:has-text("Rowan Example")'))) await vpage.click('.ops-row:has-text("Rowan Example")');
@@ -334,6 +416,23 @@ await vpage.click('.ops-item[data-open] .rel-foot button:has-text("Yes")');
 await until(async () => !(await vpage.$('.ops-row:has-text("Rowan Example")')));
 check('Rowan is off her list (and the server’s)', !(await vpage.$('.ops-row:has-text("Rowan Example")')) && !(await V.api('/relationships/mine')).json.people.some((x) => x.person.name === 'Rowan Example'));
 check('…still brought in by Priya on the books', (await D.api(`/persons/${rowan.id}/knows`)).json.brought_in_by?.id === priya.id);
+
+// Jasmine's email under a nickname: someone new for her (she's told nothing
+// more), who never takes Jasmine's email — and the desk is told they may be one.
+const guess = await V.api('/actions/relationship.add', { person: { name: 'Jas Wong', email: 'jasmine.wong@example.org' }, kind: 'friend' });
+check('a nickname with Jasmine’s email: someone new, no email handed back', guess.status === 200 && guess.json.created_person === true
+  && guess.json.matched === false && guess.json.person.email === null && guess.json.person.id !== jasmine.id, JSON.stringify(guess.json).slice(0, 200));
+const jas = guess.json.person?.id ? (await D.api(`/persons/${guess.json.person.id}`)).json.person : null;
+check('…on the books with no email: Jasmine’s stays Jasmine’s', jas && jas.email === null, jas?.email);
+if (jas) {
+  await D.go(`/people/${jas.id}`);
+  check('desk: "May be the same person as Jasmine Wong"', (await page.innerText('.rel-same').catch(() => '')).trim() === 'May be the same person as Jasmine Wong', await page.innerText('.rel-same').catch(() => ''));
+  m = await simple(page, 'profile with "May be the same person" (desk 1360)');
+  await D.shot('02c-maybe-same-desk');
+  await D.go(`/people/${jasmine.id}`);
+  check('…and on Jasmine’s: "May be the same person as Jas Wong"', (await page.innerText('.rel-same').catch(() => '')).trim() === 'May be the same person as Jas Wong', await page.innerText('.rel-same').catch(() => ''));
+  await V.api('/actions/relationship.remove', { id: guess.json.relationship.id });
+}
 
 // The desk's reads stay closed; her profile view is the volunteer one.
 for (const path of ['/relationships/connected', `/persons/${jasmine.id}/knows`]) {
@@ -377,6 +476,22 @@ await sleep(300);
 check('Priya’s profile Knows: her seven', (await knowsRows()).length === 7);
 m = await simple(page, 'profile with Knows open (desk 390)');
 await D.shot('10-profile-knows-phone');
+// A long note with no spaces (a link, say) wraps in Knows; the page never scrolls sideways.
+{
+  const ada = (await D.api('/actions/person.create', { name: 'Ada Anchor', phone: '604-555-0171' })).json.person;
+  const notes = ['https://www.facebook.com/groups/newtonlibrarybookclub.wednesdays', 'x'.repeat(90)];
+  for (const [i, note] of notes.entries()) {
+    const bea = (await D.api('/actions/person.create', { name: `Bea Book ${i + 1}`, phone: `604-555-017${i + 2}` })).json.person;
+    await D.api('/actions/relationship.add', { from_id: ada.id, person_id: bea.id, kind: 'community', note });
+  }
+  await D.go(`/people/${ada.id}`);
+  await page.click('.pf-sec__btn:has-text("Knows")');
+  await sleep(300);
+  const long = await knowsRows();
+  check('Knows shows a long unbroken note, wrapped', long.length === 2 && long.some((t) => t.replace(/\s+/g, '').includes(notes[0])), long.join(' | '));
+  m = await simple(page, 'profile Knows with a long unbroken note (desk 390)');
+  await D.shot('10b-profile-knows-long-note-phone');
+}
 await D.go('/my-people');
 check('the manager’s own My people starts empty: one line + one button', /Add the people you know — friends, family, neighbours\./.test(await D.text()) && (await measure(page)).yellow === 1);
 m = await simple(page, 'My people (desk 390)');
@@ -390,6 +505,22 @@ check('hash chain verifies after the whole journey', v.ok === true && v.checked 
 const evs = (await D.api('/events?limit=1000')).json.events.filter((e) => e.entity_type === 'relationship');
 check('every link change is on the event log', evs.some((e) => e.op === 'create' && e.action === 'relationship.add')
   && evs.some((e) => e.op === 'void' && e.action === 'relationship.remove') && evs.some((e) => e.action === 'sample.load'), evs.length);
+
+// ── 7. Clear the sample, load it again: Priya is still one person, with her six ──
+const before7 = (await V.api('/relationships/mine')).json.people.map((x) => x.person.name).sort();
+const cleared = await page.evaluate(async () => (await fetch('/api/data/sample', { method: 'DELETE' })).status);
+const reloaded = (await D.api('/data/sample', {})).status;
+check('sample cleared and loaded again', cleared === 200 && reloaded === 200, `${cleared} ${reloaded}`);
+const priyas = (await D.api('/persons?q=Priya%20Nair&limit=50')).json.persons.filter((p) => p.name === 'Priya Nair');
+check('one Priya Nair, the one she signs in as', priyas.length === 1 && priyas[0].id === priya.id, priyas.map((p) => p.id).join());
+const after7 = (await V.api('/relationships/mine')).json.people.map((x) => x.person.name).sort();
+check('…her people as before: the sample’s six and hers', after7.join('|') === before7.join('|') && after7.length === 7, after7.join(', '));
+await V.go('/');
+await vpage.waitForSelector('a[href="/my-people"]', { timeout: 8000 }).catch(() => {});
+check('Today: "My people · 7"', /^My people · 7/.test(await tc(vpage, 'a[href="/my-people"]')), await tc(vpage, 'a[href="/my-people"]'));
+const conn7 = (await D.api('/relationships/connected')).json.people.filter((p) => p.name === 'Priya Nair');
+check('Most connected: one Priya Nair', conn7.length === 1 && conn7[0].knows === 7, JSON.stringify(conn7));
+check('hash chain still verifies', (await D.api('/audit/verify')).json.ok === true);
 check('no page errors', errors.length === 0, errors.join(' | '));
 
 await browser.close();

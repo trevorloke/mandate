@@ -3,12 +3,14 @@
 // name, phone and/or email, how you know them (a note under More details) —
 // someone already on the list is linked, not added twice. It goes through
 // the offline outbox, so with no signal it's saved on the phone and sent once.
-// Each row is the person, how you know them and their rating chip; a tap
-// opens it in place to reach them: Phone · Text · In person, the Calls card
-// (Call / Text — the campaign's number when connected, else the phone's own),
-// the rating buttons and the calls questions. One tap logs the contact
-// (contact.log, through the outbox) with the way you really talked: a phone
-// call, a text, or "In person". Remove? Yes · No in place.
+// Each row is the person, how you know them (the kind and its note) and their
+// rating chip — a rating saved on the phone and not sent yet shows, marked
+// "Offline" / "Not sent", even after a reload; a tap opens it in place to
+// reach them: Phone · Text · In person, the Calls card (Call / Text — the
+// campaign's number when connected, else the phone's own), the rating
+// buttons and the calls questions. One tap logs the contact (contact.log,
+// through the outbox) with the way you really talked: a phone call, a text,
+// or "In person". Remove? Yes · No in place (it needs signal, and says so).
 // The server sends only your own people, through the volunteer rule.
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
@@ -16,11 +18,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import RatingButtons, { RatingChip, focusRating, ratingText, useScale } from '../components/RatingButtons.jsx';
 import SurveyQuestions, { answersTail, useSurvey } from '../components/SurveyQuestions.jsx';
 import { TextingCallButton, noTexts } from '../components/TextingCard.jsx';
-import { KINDS, MINE_KEY, kindWord, useMyPeople } from '../components/RelationshipsBits.jsx';
-import { NoSignal, noSignal } from '../components/NoSignal.jsx';
+import { KINDS, MINE_KEY, linkWords, useMyPeople } from '../components/RelationshipsBits.jsx';
+import { NeedsSignal, NoSignal, noSignal, useOnline } from '../components/NoSignal.jsx';
 import { showingCopy } from '../components/OfflineCache.js';
 import { queuedChip, queuedText } from '../components/queued.js';
-import { newClientId, queueAction, useOutbox } from '../offline.js';
+import { newClientId, onOutboxSent, queueAction, useOutbox } from '../offline.js';
 import { Icon, firstName, invalidatePersonData, isDnc, smsHref, telHref, textBody, useAction } from './People.jsx';
 import './shifts.css';
 import './people.css';
@@ -28,6 +30,10 @@ import './relationships.css';
 
 const WAYS = { phone: 'Phone', text: 'Text', in_person: 'In person' };
 const NO_ANSWER = { phone: 'No answer', text: 'No reply' };
+
+// Looks like an email (the server checks it properly): "typo@" is caught here,
+// before it's saved on the phone and refused later.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
 
 // A server refusal in plain words: "person: add a phone…" → "Add a phone…".
 const say = (msg) => {
@@ -57,6 +63,7 @@ function AddForm({ onClose, onAdded }) {
     const email = form.email.trim();
     if (!name) { setError('Add their name'); return; }
     if (!phone && !email) { setError('Add a phone or an email'); return; }
+    if (email && !EMAIL_RE.test(email)) { setError('Check the email'); return; }
     if (!kind) { setError('Pick how you know them'); return; }
     setBusy(true);
     setError(null);
@@ -73,7 +80,7 @@ function AddForm({ onClose, onAdded }) {
         queryClient.invalidateQueries({ queryKey: MINE_KEY }),
         queryClient.invalidateQueries({ queryKey: ['brief'] }),
       ]);
-      onAdded(res, name);
+      onAdded(res, name, input.id);
       onClose();
     } catch (err) {
       setError(say(err.message));
@@ -132,7 +139,9 @@ function Reach({ link, me, onClose }) {
   const queryClient = useQueryClient();
   const refresh = () => invalidatePersonData(queryClient);
   const act = useAction(refresh);
-  const rm = useAction(refresh);
+  // Remove goes straight to the server: off with no signal, and said so.
+  const rm = useAction(refresh, { needsSignal: true });
+  const online = useOnline();
   const dnc = isDnc(p);
   const ways = [p.phone && 'phone', p.phone && !noTexts(p) && 'text', 'in_person'].filter(Boolean);
   const [way, setWay] = useState(ways[0]);
@@ -218,13 +227,13 @@ function Reach({ link, me, onClose }) {
           <span className="ops-confirm">
             <span>Remove?</span>
             <button type="button" className="btn ops-tap" disabled={rm.busy} onClick={remove}>Yes</button>
-            <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirm(false)}>No</button>
+            <button type="button" className="btn btn-quiet ops-tap" onClick={() => { setConfirm(false); rm.clearError(); }}>No</button>
           </span>
         ) : (
-          <button type="button" className="btn btn-quiet ops-tap" onClick={() => setConfirm(true)}>Remove</button>
+          <button type="button" className="btn btn-quiet ops-tap" onClick={() => { rm.clearError(); setConfirm(true); }}>Remove</button>
         )}
       </div>
-      {rm.error && <p className="error" role="alert">{rm.error}</p>}
+      {confirm && (!online ? <NeedsSignal>Removing needs signal</NeedsSignal> : rm.error && <p className="error" role="alert">{rm.error}</p>)}
     </div>
   );
 }
@@ -241,16 +250,33 @@ export default function MyPeople() {
   const ids = new Set(people.map((x) => x.id));
   // Added on this phone and not on the server yet (or refused: the strip says why).
   const waiting = outbox.items.filter((i) => i.name === 'relationship.add' && i.input?.person && !ids.has(i.input.id));
+  // A rating saved on this phone and not sent yet: on the row, marked so.
+  const queuedRating = {};
+  for (const i of outbox.items) {
+    if (i.state === 'pending' && i.name === 'contact.log' && i.input?.person_id && i.input.rating) queuedRating[i.input.person_id] = i.input.rating;
+  }
   const offline = noSignal(q);
   const copy = showingCopy(q);
   const location = useLocation();
 
-  const onAdded = (res, name) => {
-    if (res.queued) { setNote({ text: `${name} · ${queuedText(res)}`, wait: true }); return; }
+  const addedText = (r, name) => (r?.duplicate ? `${r.person?.name || name} is one of your people already` : `✓ Added ${r?.person?.name || name}`);
+  const onAdded = (res, name, linkId) => {
+    if (res.queued) { setNote({ text: `${name} · ${queuedText(res)}`, wait: true, cid: res.client_id, linkId, name }); return; }
     const r = res.result || {};
-    setNote({ text: r.duplicate ? `${r.person?.name || name} is one of your people already` : `✓ Added ${r.person?.name || name}` });
+    setNote({ text: addedText(r, name) });
     if (r.relationship?.id) setOpen(r.relationship.id);
   };
+  // "Quinn · Saved offline" stays true: "✓ Added Quinn" once it's sent; gone
+  // once it's refused (the row's "Not saved" says so) or taken off the phone.
+  useEffect(() => onOutboxSent(({ name, input, result }) => {
+    if (name !== 'relationship.add') return;
+    setNote((n) => (n?.wait && n.linkId === input?.id ? { text: addedText(result, n.name) } : n));
+  }), []);
+  useEffect(() => {
+    if (!note?.wait) return;
+    const it = outbox.items.find((i) => i.cid === note.cid);
+    if (!it || it.state === 'refused') setNote((n) => (n === note ? null : n));
+  }, [note, outbox.items]);
 
   return (
     <div className="ops-page rel-page">
@@ -279,7 +305,7 @@ export default function MyPeople() {
               <div className="ops-row ops-row--static">
                 <span className="ops-row__main">
                   <span className="ops-row__name">{i.input.person.name}</span>
-                  <span className="ops-row__sub">{kindWord(i.input.kind)}</span>
+                  <span className="ops-row__sub"><span className="rel-note">{linkWords(i.input)}</span></span>
                 </span>
                 <span className="ops-row__end">
                   <span className={`chip ${i.state === 'refused' ? 'chip-danger' : 'chip-warn'}`}>{i.state === 'refused' ? 'Not saved' : queuedChip(true)}</span>
@@ -296,10 +322,13 @@ export default function MyPeople() {
                   <span className="ops-row__main">
                     <span className="ops-row__name">{p.name}</span>
                     <span className="ops-row__sub">
-                      {kindWord(link.kind)}{p.phone ? <> · <span>{p.phone}</span></> : null}
+                      <span className="rel-note">{linkWords(link)}{p.phone ? ' ·' : ''}</span>{p.phone ? <span className="rel-phone">{p.phone}</span> : null}
                     </span>
                   </span>
-                  <span className="ops-row__end"><RatingChip code={p.rating} who /></span>
+                  <span className="ops-row__end">
+                    <RatingChip code={queuedRating[p.id] || p.rating} who />
+                    {queuedRating[p.id] && <span className="chip chip-warn">{queuedChip(true)}</span>}
+                  </span>
                 </button>
                 {isOpen && <Reach link={link} me={me} onClose={() => setOpen(null)} />}
               </li>
