@@ -188,11 +188,26 @@ test('a volunteer’s guess at someone’s email tells them nothing, and the new
   assert.deepEqual((await knowsOf(P.eve.id)).same_as.map((x) => x.id), [right.person.id, wrong.person.id]);
   assert.deepEqual((await knowsOf(P.ben.id)).same_as, [], 'nobody doubled: nothing said');
 
-  // The same name and typed email again (another volunteer): that one person, not a third.
-  const again = ok(await add(vol2, { person: { name: ' eve  EXAMPLE', email: `EVE+${tag}@example.org` }, kind: 'work' }));
+  // The same name and typed email again, from the same volunteer: that one person, not a third.
+  const again = ok(await add(vol, { person: { name: ' eve  EXAMPLE', email: `EVE+${tag}@example.org` }, kind: 'work' }));
   assert.equal(again.person.id, right.person.id);
-  assert.equal(again.matched, true);
+  assert.equal(again.duplicate, true, '…and the same link');
   assert.equal((await db.query(`select count(*)::int as n from persons where workspace_id = $1 and name = 'Eve Example'`, [ws])).rows[0].n, 3);
+  // Another volunteer's guess never finds what someone else typed: right or wrong, the same answer.
+  const theirRight = ok(await add(vol2, { person: { name: 'Eve Example', email: `eve+${tag}@example.org` }, kind: 'work' }));
+  const theirWrong = ok(await add(vol2, { person: { name: 'Eve Example', email: `eve.wrong+${tag}@example.org` }, kind: 'work' }));
+  assert.deepEqual(shape(theirRight), shape(theirWrong), 'nothing says another volunteer typed it before');
+  assert.equal(theirRight.matched, false);
+  assert.equal(theirRight.created_person, true);
+  assert.ok(![P.eve.id, right.person.id, wrong.person.id].includes(theirRight.person.id), 'not linked to Eve or to Priya’s adds');
+  assert.ok(![P.eve.id, right.person.id, wrong.person.id].includes(theirWrong.person.id));
+  assert.equal((await row(theirRight.person.id)).email, null, 'still nobody else holds Eve’s email');
+  assert.equal((await row(theirWrong.person.id)).email, null, '…nor the email Priya typed');
+  // Their own add again does find their own: not a fifth.
+  const theirAgain = ok(await add(vol2, { person: { name: 'Eve Example', email: `eve+${tag}@example.org` }, kind: 'work' }));
+  assert.equal(theirAgain.person.id, theirRight.person.id);
+  assert.equal(theirAgain.duplicate, true);
+  assert.equal((await db.query(`select count(*)::int as n from persons where workspace_id = $1 and name = 'Eve Example'`, [ws])).rows[0].n, 5);
   // Their own email is theirs to know: that's them.
   const me = await add(vol, { person: { name: 'Not Me', email: `REL-VOL+${tag}@example.org` }, kind: 'friend' });
   assert.equal(me.status, 400);
@@ -201,7 +216,7 @@ test('a volunteer’s guess at someone’s email tells them nothing, and the new
   const byPhone = ok(await add(vol, { person: { name: 'Eve Example', phone: '604 555 0134', email: `eve+${tag}@example.org` }, kind: 'friend' }));
   assert.equal(byPhone.person.id, P.eve.id, 'name + phone: Eve herself');
   for (const id of [right.relationship.id, wrong.relationship.id, byPhone.relationship.id]) ok(await vol.action('relationship.remove', { id }));
-  ok(await vol2.action('relationship.remove', { id: again.relationship.id }));
+  for (const id of [theirRight.relationship.id, theirWrong.relationship.id]) ok(await vol2.action('relationship.remove', { id }));
 });
 
 test('a volunteer sees and changes only their own people', async () => {

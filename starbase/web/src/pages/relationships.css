@@ -96,7 +96,7 @@
 .rel-knows li:last-child { border-bottom: 0; }
 .rel-knows__who { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; min-width: 0; }
 .rel-knows__who a { font-weight: 600; overflow-wrap: anywhere; }
-.rel-knows__kind { color: var(--text-3); font-size: 14px; }
+.rel-knows__kind { color: var(--text-3); font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
 .rel-knows__end { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 .rel-confirm { gap: var(--s-2); }
 .rel-add { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); }

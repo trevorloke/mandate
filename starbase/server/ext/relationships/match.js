@@ -8,9 +8,10 @@
 // the campaign holds — not alone, not with the name: a match (or a miss)
 // would tell them whether their guess at someone's email was right, and they
 // never see anyone else's. They match on name + phone (a phone they see
-// anyway), on name + an email a volunteer typed for someone they added
-// (attrs.typed_email: what was typed, never what the campaign was told), or
-// on their own email (that's them).
+// anyway), on name + an email they typed themselves for someone they brought
+// in (attrs.typed_email on their own add — never another volunteer's, which
+// would tell them what someone else typed), or on their own email (that's
+// them).
 import { newId } from '../../lib/events.js';
 import { loginEmail } from '../../lib/viewer.js';
 
@@ -32,7 +33,8 @@ const first = async (tx, sql, params) => (await tx.query(
 )).rows[0] || null;
 
 // { name, phone?, email? } → the person already on the list, or null.
-export const findKnown = async (tx, ctx, { name, phone, email }) => {
+// fromId: whose people it goes on (a volunteer's own record).
+export const findKnown = async (tx, ctx, { name, phone, email }, fromId = null) => {
   const ws = ctx.workspaceId;
   const n = nameKey(name);
   const e = emailKey(email);
@@ -46,9 +48,14 @@ export const findKnown = async (tx, ctx, { name, phone, email }) => {
     const hit = await first(tx, `${NAME_SQL} = $2 and ${PHONE_SQL} = $3`, [ws, n, ph]);
     if (hit) return hit;
   }
-  // Last, someone a volunteer added with this name and email (not the record
-  // the campaign holds: name + phone finds that one first).
-  if (e && vol) return first(tx, `lower(attrs->>'typed_email') = $2 and ${NAME_SQL} = $3`, [ws, e, n]);
+  // Last, someone this volunteer brought in with this name and email (not
+  // the record the campaign holds: name + phone finds that one first; not
+  // another volunteer's add: right or wrong, their guess finds nothing).
+  if (e && vol && fromId) {
+    return first(tx, `lower(attrs->>'typed_email') = $2 and ${NAME_SQL} = $3
+      and exists (select 1 from relationships r where r.workspace_id = $1 and r.brought_in = persons.id and r.from_person = $4)`,
+    [ws, e, n, fromId]);
+  }
   return null;
 };
 

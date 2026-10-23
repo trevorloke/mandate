@@ -476,6 +476,22 @@ await sleep(300);
 check('Priya’s profile Knows: her seven', (await knowsRows()).length === 7);
 m = await simple(page, 'profile with Knows open (desk 390)');
 await D.shot('10-profile-knows-phone');
+// A long note with no spaces (a link, say) wraps in Knows; the page never scrolls sideways.
+{
+  const ada = (await D.api('/actions/person.create', { name: 'Ada Anchor', phone: '604-555-0171' })).json.person;
+  const notes = ['https://www.facebook.com/groups/newtonlibrarybookclub.wednesdays', 'x'.repeat(90)];
+  for (const [i, note] of notes.entries()) {
+    const bea = (await D.api('/actions/person.create', { name: `Bea Book ${i + 1}`, phone: `604-555-017${i + 2}` })).json.person;
+    await D.api('/actions/relationship.add', { from_id: ada.id, person_id: bea.id, kind: 'community', note });
+  }
+  await D.go(`/people/${ada.id}`);
+  await page.click('.pf-sec__btn:has-text("Knows")');
+  await sleep(300);
+  const long = await knowsRows();
+  check('Knows shows a long unbroken note, wrapped', long.length === 2 && long.some((t) => t.replace(/\s+/g, '').includes(notes[0])), long.join(' | '));
+  m = await simple(page, 'profile Knows with a long unbroken note (desk 390)');
+  await D.shot('10b-profile-knows-long-note-phone');
+}
 await D.go('/my-people');
 check('the manager’s own My people starts empty: one line + one button', /Add the people you know — friends, family, neighbours\./.test(await D.text()) && (await measure(page)).yellow === 1);
 m = await simple(page, 'My people (desk 390)');

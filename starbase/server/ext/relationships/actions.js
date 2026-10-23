@@ -119,7 +119,7 @@ export const actions = {
           other = cur || null;
         }
         if (!other) {
-          other = await findKnown(tx, ctx, p);
+          other = await findKnown(tx, ctx, p, from.id);
           matched = Boolean(other);
         }
         if (!other) {
