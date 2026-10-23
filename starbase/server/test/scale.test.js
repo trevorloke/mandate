@@ -14,7 +14,7 @@ import { RATINGS } from '@starbase/shared/canvass';
 import {
   DEFAULT_SCALE, normalizeScale, ratingText, ratingByCode, matchRating, makeCode, offeredCodes, allCodes, bandOf,
 } from '@starbase/shared/scale';
-import { REPLAY_DAYS, ratingRefusal } from '../ext/scale/rules.js';
+import { REPLAY_DAYS, ratingRefusal, applyEdit } from '../ext/scale/rules.js';
 
 const tag = Math.random().toString(36).slice(2, 8);
 let mgr, staff, treas, vol, other, ws;
@@ -298,4 +298,44 @@ test('sample data uses only what the list offers; the log has every change', asy
   assert.ok(events.some((e) => e.changes?.added?.some((a) => a.code === '4BA')));
   assert.ok(events.some((e) => e.changes?.off?.includes('4B')));
   assert.equal(ok(await mgr.get('/api/audit/verify')).ok, true);
+});
+
+test('one name is never on the list and off it, whichever way a save gets there', async () => {
+  const s = await scaleOf();
+  const [a, b] = s.candidates.filter((c) => !c.off);
+  const gone = s.candidates.find((c) => c.off);
+  const save = (fn) => mgr.action('scale.save', { candidates: listOf(s).map((c) => fn(c) ?? c) });
+  // The editor: a row renamed to a name already on the list, then Take off
+  // → Yes, then Save. It used to save, and Put back then had no way out.
+  const renamedOff = await save((c) => (c.code === b.code ? { ...c, name: a.name.toUpperCase(), off: true } : null));
+  assert.equal(renamedOff.status, 400, JSON.stringify(renamedOff.json));
+  assert.equal(renamedOff.json.error, `${a.name} is already on the list — pick another name`);
+  // Someone off the list renamed (over the API) to a name on it, or to
+  // another name off it.
+  const offRenamed = await save((c) => (c.code === gone.code ? { ...c, name: a.name.toLowerCase() } : null));
+  assert.equal(offRenamed.status, 400, JSON.stringify(offRenamed.json));
+  assert.match(offRenamed.json.error, /is already on the list — pick another name/);
+  const twoOff = await save((c) => (c.code === b.code ? { ...c, name: gone.name, off: true } : null));
+  assert.equal(twoOff.status, 400, JSON.stringify(twoOff.json));
+  assert.equal(twoOff.json.error, `another ${gone.name} is off the list — pick another name`);
+  assert.deepEqual(listOf(await scaleOf()), listOf(s), 'nothing changed');
+  // A rename that clashes with no one, on the way off, still saves — and
+  // they come back.
+  const away = ok(await save((c) => (c.code === b.code ? { ...c, name: `${b.name} Sr`, off: true } : null)));
+  assert.deepEqual(away.changes.off, [b.code]);
+  ok(await mgr.action('scale.save', { candidates: listOf(away.scale).map((c) => (c.code === b.code ? { ...c, name: b.name, off: false } : c)) }), 'back');
+
+  // A campaign that already holds such a pair (saved before this rule):
+  // other changes still save, and so does taking the one on the list off;
+  // putting the other back asks for a new name first.
+  const twin = DEFAULT_SCALE.candidates.find((c) => !c.off);
+  const pair = normalizeScale({ candidates: [...DEFAULT_SCALE.candidates, { code: '4TW', name: twin.name, off: true, off_at: new Date().toISOString() }] });
+  const L = listOf(pair);
+  assert.doesNotThrow(() => applyEdit(pair, { words: { 3: 'Unsure' }, candidates: L }));
+  const bothOff = normalizeScale(applyEdit(pair, { candidates: L.map((c) => (c.code === twin.code ? { ...c, off: true } : c)) }).stored);
+  assert.throws(() => applyEdit(pair, { candidates: L.map((c) => (c.code === '4TW' ? { ...c, off: false } : c)) }), /two candidates are called/);
+  assert.throws(() => applyEdit(bothOff, { candidates: listOf(bothOff).map((c) => (c.code === '4TW' ? { ...c, off: false } : c)) }),
+    new RegExp(`another ${twin.name} is off the list — rename this one`));
+  const fixed = applyEdit(bothOff, { candidates: listOf(bothOff).map((c) => (c.code === '4TW' ? { ...c, name: `${twin.name} Jr`, off: false } : c)) });
+  assert.deepEqual(fixed.changes.back, ['4TW']);
 });

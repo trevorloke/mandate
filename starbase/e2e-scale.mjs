@@ -571,6 +571,66 @@ check('back online: Lena, the one person it matches', (await listed()).join(' ')
 await v2ctx.close();
 const v7 = (await D.api('/audit/verify')).json;
 check('hash chain still verifies', v7.ok === true, JSON.stringify(v7));
+
+// ════════════════════════════════════════════════════════════════════════════
+// 8. Fix round 2: a row renamed to a name on the list, then taken off, is
+//    refused at Save (said under it, too); Calls never shows "Offline copy"
+//    over "No signal"
+// ════════════════════════════════════════════════════════════════════════════
+const s8 = (await D.api('/scale')).json.scale;
+await D.go('/rating-scale');
+await page.waitForSelector('.sc-page .rb-btn', { timeout: 8000 }).catch(() => {});
+const on8 = await rows7();
+const [first8, , third8] = on8;
+await page.locator('.sc-cand').nth(2).locator('input').fill(first8);
+notes = await noteText();
+check(`renamed onto ${first8} (on the list): "${first8} is already on the list"`, notes.includes(`${first8} is already on the list`), notes.join(' | '));
+await page.locator('.sc-cand').nth(2).locator('button:has-text("Take off")').click();
+await page.click('.sc-confirm button:has-text("Yes")');
+notes = await noteText();
+const offSec = await page.innerText('.sc-sec:has(#sc-off)').catch(() => '');
+check(`…taken off: under Off the list, "${first8} is already on the list — Put back to rename"`,
+  notes.includes(`${first8} is already on the list — Put back to rename`) && offSec.includes(`${first8} is already on the list — Put back to rename`), notes.join(' | '));
+m = await measure(page);
+check('…one yellow button, no sideways scroll', m.yellow === 1 && m.overflow <= 0, JSON.stringify({ y: m.yellow, o: m.overflow }));
+await D.shot('08-renamed-off');
+await page.click('.sc-save .btn-primary');
+await page.waitForSelector('.sc-page > .error', { timeout: 6000 }).catch(() => {});
+const err8 = await page.innerText('.sc-page > .error').catch(() => '');
+const s8after = (await D.api('/scale')).json.scale;
+check(`Save refuses it: "${first8} is already on the list — pick another name", nothing changed`,
+  err8 === `${first8} is already on the list — pick another name` && JSON.stringify(s8after.candidates) === JSON.stringify(s8.candidates), err8);
+// Put back, the old name typed again: no line, Save is the same list.
+await page.click(`.sc-gone:has-text("${first8}") button:has-text("Put back")`);
+await page.locator('.sc-cand').last().locator('input').fill(third8);
+check('put back and named as before: no line', (await noteText()).length === 0, (await noteText()).join(' | '));
+await D.go('/rating-scale');
+
+// Calls (volunteer, 390): loaded with signal, then a filter never opened
+// here with no signal — "No signal", and no "Offline copy" over it.
+const c8ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'America/Vancouver' });
+const c8 = await c8ctx.newPage();
+const C8 = helpers(c8, c8ctx, 'vol-calls');
+check('volunteer signs in on another phone', (await c8ctx.request.post(`${BASE}/api/auth/login`, { data: { email: volEmail, password: 'knock-knock-2026' } })).ok());
+await C8.go('/calls?channel=phone');
+await c8.waitForSelector('.cl-page', { timeout: 10000 }).catch(() => {});
+await sleep(1500); // kept a moment after it loads
+await c8ctx.setOffline(true);
+const inApp8 = (url) => c8.evaluate((u) => { history.pushState({}, '', u); dispatchEvent(new PopStateEvent('popstate')); }, url);
+await inApp8('/calls?channel=phone&rating=3');
+await sleep(2500);
+t = await C8.text();
+const copyChip = await c8.$$eval('.cl-copy', (els) => els.length);
+check('no signal, Calls for Undecided (never opened here): "No signal", no "Offline copy" chip',
+  /No signal — your list loads when you’re back online/.test(t) && copyChip === 0 && !/\d+ to call/.test(t), `${copyChip} chip · ${t.slice(0, 160)}`);
+m = await measure(c8);
+check('…no sideways scroll', m.overflow <= 0, m.overflow);
+await C8.shot('08-calls-offline-unseen');
+await inApp8('/calls?channel=phone');
+await sleep(2500);
+t = await C8.text();
+check('…back to the list it kept: "Offline copy" and the list', (await c8.$$eval('.cl-copy', (els) => els.length)) === 1 && !/No signal — your list loads/.test(t), t.slice(0, 160));
+await c8ctx.close();
 check('no page errors', errors.length === 0, errors.join(' | '));
 
 await browser.close();

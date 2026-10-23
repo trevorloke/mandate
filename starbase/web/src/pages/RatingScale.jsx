@@ -10,7 +10,8 @@
 // over someone people were rated for moves those ratings to the new name:
 // the row says so ("3 people rated McCallum will read Bains — someone
 // new?") with "Add them instead". A name Save would refuse (someone off
-// the list, a step's words, a name twice) is said under its row as typed.
+// the list, a step's words, a name twice) is said under its row as typed —
+// on the list or, renamed and then taken off, under "Off the list".
 // Reached from the account menu (managers), beside Team.
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Navigate, useOutletContext } from 'react-router-dom';
@@ -97,6 +98,7 @@ function Editor() {
   const offList = draft.list.filter((c) => c.off);
   const changed = !same(draft, base);
   const savedName = new Map((base?.list || []).map((c) => [c.key, c.name]));
+  const savedOff = new Map((base?.list || []).map((c) => [c.key, c.off]));
   const full = on.length >= LIMITS.offered;
   // Why a name can't go on the list (the server says the same at Save), or
   // null. skip: the row this name is in.
@@ -116,11 +118,26 @@ function Editor() {
   const rowNote = (c) => {
     const name = cleanWord(c.name);
     const was = savedName.get(c.key);
-    if (!name || (was != null && lower(was) === name.toLowerCase())) return null;
+    if (!name) return null;
+    if (was != null && lower(was) === name.toLowerCase()) {
+      // Put back while another of that name is off the list.
+      const twin = savedOff.get(c.key) && offList.some((o) => lower(o.name) === name.toLowerCase());
+      return twin ? { why: `Another ${name} is off the list — rename this one` } : null;
+    }
     const why = clash(name, c.key);
     if (why) return { why };
     const n = c.code ? Number(counts[c.code]) || 0 : 0;
     return n > 0 && was ? { moves: `${plural(n, 'person', 'people')} rated ${was} will read ${name} — someone new?`, was, name } : null;
+  };
+  // Said under someone off the list whose name was changed here before
+  // they were taken off (the server refuses the same at Save).
+  const offNote = (c) => {
+    const name = cleanWord(c.name);
+    const k = name.toLowerCase();
+    if (!k || lower(savedName.get(c.key) ?? '') === k) return null;
+    if (on.some((o) => lower(o.name) === k)) return `${name} is already on the list — Put back to rename`;
+    if (offList.some((o) => o.key !== c.key && lower(o.name) === k)) return `Another ${name} is off the list — Put back to rename`;
+    return null;
   };
   const edit = (fn) => { setDraft((d) => fn(d)); setSaid(null); setError(null); };
   const setWord = (code, w) => edit((d) => ({ ...d, words: { ...d.words, [code]: w } }));
@@ -264,13 +281,17 @@ function Editor() {
           <h2 id="sc-off" className="eyebrow sc-h">Off the list <span className="sc-count">{offList.length}</span></h2>
           <p className="sc-line">{full ? `${LIMITS.offered} at most on the list — take one off first` : 'Their old ratings stay; volunteers can’t pick them.'}</p>
           <ul className="sc-list">
-            {offList.map((c) => (
-              <li key={c.key} className="sc-row sc-gone">
-                <span className="sc-gone__name">{c.name}</span>
-                <span className="muted mono sc-gone__n">{Number(counts[c.code]) || 0} rated</span>
-                <button type="button" className="btn btn-quiet pp-btn" disabled={full} onClick={() => setOff(c.key, false)}>Put back</button>
-              </li>
-            ))}
+            {offList.map((c) => {
+              const why = offNote(c);
+              return [
+                <li key={c.key} className="sc-row sc-gone">
+                  <span className="sc-gone__name">{c.name}</span>
+                  <span className="muted mono sc-gone__n">{Number(counts[c.code]) || 0} rated</span>
+                  <button type="button" className="btn btn-quiet pp-btn" disabled={full} onClick={() => setOff(c.key, false)}>Put back</button>
+                </li>,
+                why && <li key={`${c.key}-note`} className="sc-note"><span className="error">{why}</span></li>,
+              ];
+            })}
           </ul>
         </section>
       )}

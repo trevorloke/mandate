@@ -116,13 +116,23 @@ export function applyEdit(scale, input, now = new Date()) {
     if (names.has(k)) bad(`two candidates are called ${c.name}`);
     names.set(k, c);
   }
-  // A new name on the list — added or renamed — that matches someone off
-  // it: put them back instead (their old ratings are theirs).
+  // One name on the list and off it (two "Bains" in Voting for…, Put back
+  // refused) — never made by this save. Checked for every candidate whose
+  // name changed here (added or renamed, going on or off the list) and every
+  // one put back. Only taking someone off never refuses: a campaign that
+  // already holds such a pair can always save.
   const fresh = new Set([...changes.added, ...changes.renamed].map((c) => c.code));
-  for (const c of offered) {
-    if (!fresh.has(c.code)) continue;
-    const old = out.find((o) => o.off && o.code !== c.code && o.name.toLowerCase() === c.name.toLowerCase());
-    if (old) bad(`${old.name} is off the list — put them back instead`);
+  const back = new Set(changes.back);
+  for (const c of out) {
+    if (!fresh.has(c.code) && !back.has(c.code)) continue;
+    const k = c.name.toLowerCase();
+    const o = out.find((x) => x.code !== c.code && (x.off || c.off) && x.name.toLowerCase() === k);
+    if (!o) continue;
+    // A new name on the list matching someone off it: their old ratings are theirs.
+    if (!c.off && fresh.has(c.code)) bad(`${o.name} is off the list — put them back instead`);
+    if (!c.off) bad(`another ${c.name} is off the list — rename this one`);
+    if (!o.off) bad(`${o.name} is already on the list — pick another name`);
+    bad(`another ${o.name} is off the list — pick another name`);
   }
   return { stored: { v: (scale.version || 0) + 1, words, candidates: out }, changes };
 }

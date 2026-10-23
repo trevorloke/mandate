@@ -1107,7 +1107,7 @@ function CallsScreen() {
       <MyPeopleLink me={me} />
       <TextingRepliesLink me={me} />
 
-      {listCopy && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
+      {listCopy && !offline && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
       {persons.isError && !offline && !listCopy && <p className="error">{persons.error.message}</p>}
 
       {offline ? (
