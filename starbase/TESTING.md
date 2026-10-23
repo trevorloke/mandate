@@ -115,12 +115,20 @@ one tap away under **More**.
   people already rated Locke read *4 · Locke (off the list)* on People,
   profiles and the *Voting for…* filter, and still count on Today. Staff,
   treasurers and volunteers have no Rating scale (typing `/rating-scale`
-  lands on Today).
+  lands on Today). Type a new name over a candidate people were rated for:
+  the row says *3 people rated McCallum will read Bains — someone new?*;
+  **Add them instead** keeps McCallum and adds Bains. A row renamed to
+  someone off the list, to a step's words (*Undecided*) or to a name already
+  on the list says why under it, and Save refuses it. With 12 on the list
+  *Put back* is off (*12 at most on the list — take one off first*). Filter
+  People → *Opposed*, add a candidate, rate someone for them, reload: the
+  same Opposed link (and the Call list carried from it) still finds them.
 - **People → More → Profile fields** → **Add a field**: a name, a type (Text ·
   Yes/No · Pick one · Number · Date), its choices, and *Volunteers can see
   this* (off by default). Tap a field to rename it, add a choice or *Move
-  up*; once something is filled in its type can only become Text (the screen
-  says so). **Take off** keeps everything filled in (still in *Export all
+  up*; once something is filled in its type can only become Text — a Text
+  field's stays Text (the screen says so). A new choice can always be fixed
+  or removed with ✕. **Take off** keeps everything filled in (still in *Export all
   data*); *Taken off → Bring back* restores it. The sample adds *Language at
   home*, *Strata council member* and *Union local*.
 
@@ -133,13 +141,25 @@ one tap away under **More**.
   Randhawa · Not sure (or the list your manager set; *Not sure* is always
   last). A toast confirms; *Change* fixes a mis-tap.
 - **My people** (a quiet row on Today, *My people · 6*, and on Calls) — the
-  people you know. **Add someone**: a name, a phone or an email, and how you
-  know them; someone already on the list is linked, not added twice, and
-  someone new is *Brought in by* you. Tap a person → *Phone · Text · In
+  people you know. **Add someone**: a name, a phone or an email, how you know
+  them, and an optional note under *More details* (it shows on the row:
+  *Neighbour · Book club*). Someone already on the list with that name and
+  phone is linked, not added twice, and so is someone you added before with
+  that name and email. Anyone else is new and *Brought in by* you. An email
+  never links you to someone, so you can't tell whose email it is; if
+  someone already has that email (or name), the desk sees *May be the same
+  person as …* on both profiles. With no signal an add or a rating is saved
+  on the phone (the row says *Offline*; the line turns to *✓ Added …* once
+  sent); *Remove* needs signal. Tap a person → *Phone · Text · In
   person* (Phone and Text are the Calls card; In person is a talk away from
   their door) → one tap on 1–4 logs it (*✓ In person · Rated 1 · Strong
   yes*). The sample volunteer *Priya Nair* (invite `priya.nair@example.org`)
-  already knows six people.
+  already knows six people, and still does after *Clear sample data* →
+  *Load sample data* (her own record is used again, never doubled).
+- A long candidate name, or one off the list, never pushes the address or
+  names aside: on the walk list and the door card's tabs the chip ends in …
+  (its full words on long-press), and two people at a door who don't fit
+  side by side go on two lines.
 - **More** on a door: note, Call / Text (the phone's own dialer; with Twilio
   connected, the person's card on Calls), request a lawn / large sign or
   billboard (with Undo), add a person at the door.
@@ -188,23 +208,42 @@ one tap away under **More**.
 - **A profile → More details** — tap Yes/No or a choice, type the rest,
   **Save** → *✓ Saved*. **People → Filter → More filters** → e.g. *Language
   at home: Punjabi*; *More → Call list* keeps it. Volunteers see only the
-  fields marked for them, read-only.
+  fields marked for them, read-only. Follow *Same address* to the next
+  person: nothing you typed or saved goes with you.
 - **Who knows whom** — **People → More → Most connected**: the sample's
   *Priya Nair* is first (*knows 6 · 1 supporter*). Open *Jasmine Wong*
   (undecided): under the rating, *Ask Priya Nair — they know each other*.
   **Knows** lists who someone knows; **+ Someone they know** → search → *how
   do they know each other?* links them both ways; *Remove? Yes · No* takes
-  it off. *Sofia Petrova → Knows* says *Brought in by Priya Nair*.
+  it off. *Sofia Petrova → Knows* says *Brought in by Priya Nair*. Someone
+  tagged *do-not-contact* gets no nudge and is never the one suggested. A
+  long note (a link) wraps in Knows.
 - **Desk with no signal** — with wifi, open Today, People, a profile,
   Shifts, Signs, Money and the Inbox. Turn wifi off and reload: each shows
   what it had and the strip says *No signal · from 2:14 pm*. Search People —
-  it searches what this computer kept. A profile never opened says *No
-  signal — this profile loads when you're back online*. On a profile, add a
-  note and tap a rating, add a tag, remove one: *Saved on this device —
-  sends when you're back online*, and History shows *Not sent yet*. *Add
-  person*, *Log a gift*, *Add a sign*, *New shift* and *Edit details* say
-  they need signal. Wifi back: each is sent once. Sign out: nothing stays —
-  the next person on that computer sees none of it.
+  it searches what this tab kept. A profile never opened says *No signal —
+  this profile loads when you're back online*. On a profile, add a note and
+  tap a rating, add a tag, remove one: *Saved on this device — sends when
+  you're back online*, and History shows *Not sent yet*; a note typed on its
+  own goes out when you leave the profile. *More details* shows what it had,
+  read-only (*Changing these needs signal*); Knows and its nudge show from the
+  kept copy, with *+ Someone they know* and *Remove* off (*Adding and removing
+  need signal*). *Add person*, *Log a gift*, *Add a sign*, *New shift*, *Edit
+  details*, *Get invite link*, *Add filing*, *Clear sample data* and Profile
+  fields changes say they need signal. Rating scale, Team and a shift never
+  opened say *No signal — this loads…* with no time in the strip. A People or
+  Calls filter on a profile field never opened with signal says *No signal —
+  the list loads when you're back online*, never the whole list. Wifi back:
+  each is sent once.
+  - **Two tabs**: with no signal, rate someone in one tab and tag someone in
+    another, close the first, reconnect: both are sent once.
+  - **Wifi with no internet** (router up, uplink down): reload and you're
+    still signed in, the strip saying *No answer · from 2:14 pm*; it clears
+    by itself. **Server down** (502 during a deploy) in a new tab: People says
+    *No answer — check your signal*, never *0 people*.
+  - **Sign out**: a note still typed on a profile or door card is sent first,
+    as yours; nothing stays, the next person on that computer sees none of
+    it, and another open tab goes to Sign in.
 
 ### Treasurer
 - **Money** — **Log a gift**; log enough to one donor to cross the annual
@@ -236,9 +275,11 @@ one tap away under **More**.
   column. Sample gifts are never in it.
 - **Today → More → Verify my books** replays the tamper-evident log;
   **Export all data** downloads everything.
-- **Money with no signal** reads only in the same browser tab (anything with
-  money in it is never kept past the tab): close the tab, reopen with no
-  signal, and Money says *No signal*.
+- **Money and People with no signal** read only in the same browser tab
+  (money and donor lists are never kept past the tab): close the tab, reopen
+  with no signal, and Money says *No signal*. Make a volunteer a treasurer
+  while their app is open: Today's money stays in their tab; make them a
+  volunteer again and, after a reload, nothing a treasurer saw is kept.
 
 ### Public volunteer page
 - `/v/imagine-surrey` in a private window: tick *Hi-rise building captain* —
@@ -252,8 +293,10 @@ check step should report **9 new, 1 merged** (Jordan Lee appears twice with
 the same email) and **1 refused** (the row with no name); Robin Kaur's rating
 "7" isn't on the scale, so she comes in unrated and the check step says so.
 Ratings import as codes, words or candidate names in any case (*definitely*,
-*Locke*, *4b*). A column named like a profile field (any case) fills it; a
-bad cell (e.g. *Klingon* for *Language at home*) is refused by row number.
+*Locke*, *4b*). A column named like a profile field (any case, any script —
+*语言*, *ਭਾਸ਼ਾ*) fills it; a bad cell (e.g. *Klingon* for *Language at home*, or
+*1 2 3* for a Number) is refused by row number. A field taken off before you
+tap Import is skipped; the row still comes in.
 Then **Place on map** looks the addresses up with the BC Address
 Geocoder (needs internet).
 
@@ -269,7 +312,8 @@ the same file never creates duplicates.
 - Offline covers **field work** (knocks, new people and doors, pins, sign
   requests, shift sign-ups, *My people*) and **reading the desk**; on a
   profile, ratings, notes and tags save offline. Gifts, imports, outreach
-  and other edits need signal. Receipts and Filings aren't kept offline.
+  and other edits need signal. Receipts and Filings aren't kept offline
+  (Filings says *No signal* and its buttons are off).
 - The BC municipal contribution limit is seeded at Elections BC's 2026
   figure, **$1,429.70** per contributor for the calendar year — one limit
   shared by an elector organization and its endorsed candidates (2022:

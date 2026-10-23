@@ -44,8 +44,10 @@ reorder, take off, put back — with a preview of the buttons volunteers will
 see. The four steps never change, so counts, filters, ladders and the map
 read the same. A code keeps its meaning forever: someone taken off the list
 keeps their old ratings ("4 · Locke (off the list)") and is never offered
-again; a knock saved on a phone before they came off still counts if it
-arrives within a week. Contacts are door, phone, text or **in person**.
+again. A knock tapped on a phone while they were still offered still counts,
+however late it arrives (the phone sends when it was tapped); one tapped more
+than a week after they came off is refused. Contacts are door, phone, text or
+**in person**.
 
 ### What's tracked
 
@@ -61,19 +63,22 @@ arrives within a week. Contacts are door, phone, text or **in person**.
   LinkedIn, Bluesky.
 - **Profile fields**: the campaign's own — Text · Yes/No · Pick one · Number ·
   Date (*Language at home*, *Strata council member*, …) — set up by a manager,
-  filled in by the desk under *More details*, filtered, imported and exported;
-  volunteers see only the ones marked for them, read-only.
+  filled in by the desk under *More details* (read-only with no signal),
+  filtered, imported (column names in any script) and exported; volunteers
+  see only the ones marked for them, read-only.
 - **Relationships**: who knows whom (Family · Friend · Neighbour · Work ·
   Community · Other), *brought in by*, and each volunteer's **My people** —
   add someone you know, call, text, or rate a talk in person. A profile's
-  *Knows* nudges the desk ("Ask Priya Nair — they know each other") and
-  *Most connected* finds the connectors.
+  *Knows* nudges the desk ("Ask Priya Nair — they know each other"; never on
+  a do-not-contact profile) and *Most connected* finds the connectors. A
+  volunteer's add never matches on, or takes, an email the campaign holds, so
+  a possible double is flagged to the desk (*May be the same person as …*).
 
 ## Coverage vs. the tools it replaces
 
 | | Starbase today | Next |
 |---|---|---|
-| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, survey builder (door and calls), custom person fields, offline field mode, offline desk (each sign-in's last copy of every screen; ratings, notes and tags queued) | — |
+| **Ecanvasser** | map canvass, door cards, household grouping, ratings, no-answer outcomes, signs at the door, place-on-map, call/text lists, turf cutting & assignment, walk lists, survey builder (door and calls), custom person fields, offline field mode, offline desk (each sign-in's last copy of every screen, money and donor lists in the tab only; ratings, notes and tags queued; one outbox across tabs) | — |
 | **Action Builder** | assessments (= the rating scale, its words and Voting-for list edited per campaign), tags, roles, relational notes, relationship graph (My people, Knows with a nudge, Most connected, brought in by), event-logged every touch | — |
 | **Action Network** | newsletter list + signup page + unsubscribe, press list + releases, petitions with public pages, volunteer signup page, event RSVP pages, donation pages (Stripe or pledges), website JSON bridge, ladders of engagement, A/B subject lines with open/click tracking | — |
 
@@ -151,7 +156,9 @@ With no signal, field work saves on the phone and sends once, in order, when
 the signal is back: knocks, new people and doors (staff), dropped pins, sign
 requests and their Undo, and *Count me in* / *Can't make it*. The map's doors,
 the Calls list, shifts and walk lists keep their last loaded copy on the
-phone for a day ("Offline copy"); sign-out forgets them. Anything the server
+phone for a day ("Offline copy"). With signal a screen always asks the server
+first, so a copy never hides a knock. Sign-out forgets them, and so does a
+sign-in the server says is over. Anything the server
 refuses on the way is kept and listed under the strip's "saved on this phone"
 chip ("this device" on a computer) with the reason — *Try again* or
 *Dismiss*.
@@ -161,10 +168,17 @@ search, profiles opened, Shifts, Signs, Calls, Money (desk roles), the Inbox —
 and the strip says when it's from (*No signal · from 2:14 pm*). On a profile,
 a rating with its note and tags put on or taken off save on this device and
 send once; every other write says it needs signal (*Adding people needs
-signal*). Copies are keyed to the person and campaign, a day old at most,
-forgotten at sign-out; anything with money in it is kept for that browser tab
-only. A screen never loaded on this device says *No signal — this loads when
-you're back online.*
+signal*). Copies are keyed to the person, campaign and role. They are a day
+old at most (older ones are dropped when the app opens) and are forgotten at
+sign-out (in every open tab), when the session ends, and when the person's
+role changes. On a desk sign-in, Today, profiles, Money and People lists (they
+carry donor tags) are kept for that browser tab only; the map's doors and the
+Calls list stay in the browser for a day. Wifi with no internet, or the server
+restarting (502/503), reads as *No answer*: the app stays signed in on its kept
+copies and asks again every 15 s. Two tabs share one outbox. Sign-out sends a
+note still typed on an open card first; after sign-out nothing is saved on the
+computer. A screen never loaded on this device says *No signal — this loads
+when you're back online.*
 
 ## Architecture
 
