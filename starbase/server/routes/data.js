@@ -242,8 +242,8 @@ app.post('/geocode', async (c) => {
 // POST /sample records every row it creates, by id, in settings.sample.ids;
 // DELETE /sample removes exactly those rows and nothing else. What you made
 // yourself stays, even when it hangs on a sample row — a gift, sign, knock,
-// role, booking or link to someone they know on a sample voter keeps that
-// voter (no longer marked sample), and a booking you made on the sample shift, an RSVP to the sample
+// role, booking, link to someone they know or profile detail you set on a
+// sample voter keeps that voter (no longer marked sample), and a booking you made on the sample shift, an RSVP to the sample
 // town hall or a signature on the sample petition keeps that shift, event or
 // petition. Sample gifts are voided (an event on the books, never a silent
 // delete); everything else sample-made is deleted with a 'void' event.
@@ -456,6 +456,7 @@ const KINDS = [
   ['in_person', 'talk in person', 'talks in person'], ['connection', 'connection', 'connections'],
   ['role', 'volunteer role', 'volunteer roles'], ['booking', 'shift booking', 'shift bookings'],
   ['rsvp', 'RSVP', 'RSVPs'], ['signature', 'signature', 'signatures'],
+  ['field', 'profile detail', 'profile details'],
 ];
 const kindList = (byKind) => KINDS.filter(([k]) => byKind[k]).map(([k, one, many]) => nOf(byKind[k], one, many)).join(', ');
 
@@ -492,6 +493,8 @@ const clearSample = async (tx, W, emit) => {
   await onPerson('role', `select id, person_id from volunteer_roles where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.roles);
   await onPerson('booking', `select id, person_id from shift_assignments where workspace_id = $1 and person_id = any($2::uuid[]) and not (id = any($3::uuid[]))`, ids.assignments);
   await onPerson('rsvp', `select id, person_id from event_rsvps where workspace_id = $1 and person_id = any($2::uuid[])`);
+  // A profile detail you set (ext/fields): the sample's own values are marked sample.
+  await onPerson('field', `select id, person_id from person_field_values where workspace_id = $1 and person_id = any($2::uuid[]) and not sample`);
   // A link you made (ext/relationships) keeps the sample people at both ends.
   for (const r of await rows(
     `select id, person_a, person_b from relationships where workspace_id = $1 and removed_at is null
@@ -578,6 +581,11 @@ const clearSample = async (tx, W, emit) => {
     );
     emit('person', p.id, 'update', { tags, sample: false, ...(p.sample_rating ? { rating: null } : {}), kept: keptPeople.get(p.id) });
   }
+  // Features' own sample rows (ext/fields), each with a void event, while
+  // the people they hang on are still here (a delete below would take them
+  // by cascade, off the books).
+  const said = [];
+  await runHooks('sampleCleared', tx, { workspaceId: W }, { emit, said });
   // The rest go. One whose voided sample gift is still in the books stays as
   // a hidden (deleted) row so that gift keeps its donor; the others are deleted.
   const leave = P.filter((pid) => !keptPeople.has(pid));
@@ -592,9 +600,6 @@ const clearSample = async (tx, W, emit) => {
   if (del.length) await tx.query('delete from persons where workspace_id = $1 and id = any($2::uuid[])', [W, del]);
   for (const pid of leave) emit('person', pid, 'void', { sample: true });
   removed.people = leave.length;
-  // Features' own sample rows, now the sample's people are gone (ext/fields).
-  const said = [];
-  await runHooks('sampleCleared', tx, { workspaceId: W }, { emit, said });
 
   await tx.query(`update workspaces set settings = settings - 'sample' where id = $1`, [W]);
 

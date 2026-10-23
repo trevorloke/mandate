@@ -7,9 +7,16 @@
 // taking one off keeps its values and "Bring back" restores it; the CSV
 // import fills a field by its column name and refuses a bad cell with its
 // row number; a volunteer on a phone sees only the filled-in field marked
-// for volunteers, read-only, and can't reach the manager's screen. Every
-// claim on a screen is checked against the API; each new screen is measured
-// (visible words, yellow buttons, sideways scroll, 48px targets).
+// for volunteers, read-only, and can't reach the manager's screen. Then the
+// audit's findings: nothing typed or saved on one profile follows a link to
+// the next; a no-change save still reads as saved; a Text field's type
+// "stays Text"; a new choice can't turn into a fixed row; a field named in
+// another script matches its own column; a field taken off mid-import
+// doesn't refuse the row; filter chips name their field (a volunteer's
+// too); and with no signal More details and Profile fields say so, kept
+// values read-only. Every claim on a screen is checked against the API;
+// each new screen is measured (visible words, yellow buttons, sideways
+// scroll, 48px targets).
 //
 //   STARBASE_DATA=memory PORT=4213 node server/index.js &
 //   BASE=http://127.0.0.1:4213 SHOTS=/tmp/fields node e2e-fields.mjs
@@ -391,7 +398,208 @@ check('nothing filled in for them: no "More details" at all', !(await vpage.$('.
 await V.go('/people/fields');
 check('volunteer typing /people/fields lands on Today', new URL(vpage.url()).pathname === '/', vpage.url());
 
-// ── 10. The books still verify ──
+// ── 10. Fix round: what the audit found, checked as each role sees it ──
+const openSec = async (pg, title) => {
+  await pg.waitForSelector(`.pf-sec__btn:has-text("${title}")`, { timeout: 8000 }).catch(() => {});
+  const b = await pg.$(`.pf-sec__btn:has-text("${title}")`);
+  if (b && (await b.getAttribute('aria-expanded')) !== 'true') { await b.click(); await sleep(300); }
+  return b;
+};
+const secBody = (title) => `.pf-sec:has(.pf-sec__btn:has-text("${title}")) .pf-sec__body`;
+const navIn = (pg, path) => pg.evaluate((u) => { history.pushState({}, '', u); dispatchEvent(new PopStateEvent('popstate')); }, path);
+const swReady = (pg) => pg.evaluate(() => navigator.serviceWorker.ready.then(() => Boolean(navigator.serviceWorker.controller))).catch(() => false);
+const simple = async (pg, name, sel = null) => {
+  const mm = await measure(pg, sel);
+  check(`${name}: ≤ 1 yellow, no sideways scroll${sel ? ', targets ≥ 48px' : ''}`, mm.yellow <= 1 && mm.overflow <= 0 && (mm.minTap == null || mm.minTap >= 47.5), JSON.stringify(mm));
+};
+
+// fields-02 (staff, 390): two people at one address; nothing typed or
+// saved on one profile follows the "Same address" link to the next.
+const mkAt = async (name, phone) => (await D.api('/actions/person.create', { name, phone, address: '12345 72 Ave', city: 'Surrey' })).json.person;
+P.alpha = await mkAt('Alpha Example', '604-555-0161');
+P.bravo = await mkAt('Bravo Example', '604-555-0162');
+const follow = async (pg, id) => { await openSec(pg, 'Details'); await pg.click(`${secBody('Details')} a[href="/people/${id}"]`); await sleep(1300); };
+const unionIn = `${q} .sv-q:has-text("Union local #") input`;
+const saveOff = (pg) => pg.$eval(`${q} .fd-save`, (b) => b.disabled).catch(() => null);
+const saidOn = async (pg) => ((await pg.innerText(`${q} .fd-said`).catch(() => '')) || '').trim();
+await PH.go(`/people/${P.alpha.id}`);
+await openSec(ppage, 'More details');
+await ppage.fill(unionIn, 'CUPE 402');
+await follow(ppage, P.bravo.id);
+await openSec(ppage, 'More details');
+check('fields-02: a draft typed on Alpha stays on Alpha — Bravo’s Union local is empty, Save off',
+  /Bravo Example/.test(await ppage.innerText('h1')) && (await ppage.inputValue(unionIn)) === '' && (await saveOff(ppage)) === true,
+  `${await ppage.innerText('h1')} · "${await ppage.inputValue(unionIn).catch(() => '?')}"`);
+await ppage.click(`${q} .sv-q:has-text("Strata council member") .sv-opt:has-text("Yes")`);
+await ppage.click(`${q} .fd-save`);
+await sleep(1000);
+const bSaid = await saidOn(ppage);
+await follow(ppage, P.alpha.id);
+await openSec(ppage, 'More details');
+const aSaid = await saidOn(ppage);
+const aVals = byName((await PH.api(`/persons/${P.alpha.id}/fields`)).json.fields);
+const bVals = byName((await PH.api(`/persons/${P.bravo.id}/fields`)).json.fields);
+check('…Bravo’s “✓ Saved” stays on Bravo: back on Alpha nothing is said, Save is off, and only Bravo was saved',
+  bSaid === '✓ Saved' && aSaid === '' && (await saveOff(ppage)) === true
+  && Object.values(aVals).every((v) => v === null) && bVals['Strata council member'] === true && bVals['Union local #'] === null,
+  `B said "${bSaid}" · A said "${aSaid}" · A ${JSON.stringify(aVals)} · B ${JSON.stringify(bVals)}`);
+// fields-11: a save the server takes as no change still reads as saved.
+await ppage.fill(unionIn, 'CUPE 402');
+await ppage.click(`${q} .fd-save`);
+await sleep(1000);
+await ppage.fill(unionIn, 'CUPE  402');
+const onBefore = (await saveOff(ppage)) === false;
+await ppage.click(`${q} .fd-save`);
+await sleep(1000);
+check('fields-11: "CUPE  402" over a stored "CUPE 402" → “✓ Saved”, the box reads as stored, Save off',
+  onBefore && (await saidOn(ppage)) === '✓ Saved' && (await ppage.inputValue(unionIn)) === 'CUPE 402' && (await saveOff(ppage)) === true
+  && byName((await PH.api(`/persons/${P.alpha.id}/fields`)).json.fields)['Union local #'] === 'CUPE 402',
+  `"${await saidOn(ppage)}" · "${await ppage.inputValue(unionIn)}"`);
+await simple(ppage, 'profile after a household link at 390', `${q} .sv-opt, ${q} input, ${q} .fd-save, .pf-sec__btn`);
+await PH.shot('11-profile-after-link-phone');
+
+// fields-12 / cross-08 (volunteer, 390): the Calls filter chip says which field.
+await V.go(`/calls?field=${encodeURIComponent(`${F['Language at home'].id}:Punjabi`)}`);
+let vchip = await vpage.innerText('.pp-fchip').catch(() => '');
+check('fields-12: a volunteer’s Calls chip names a field marked for them — "Language at home: Punjabi"', vchip.trim() === 'Language at home: Punjabi', vchip);
+await simple(vpage, 'volunteer Calls with a field filter at 390');
+await V.shot('12-volunteer-calls-chip');
+await V.go(`/calls?field=${F['Strata council member'].id}:yes`);
+vchip = await vpage.innerText('.pp-fchip').catch(() => '');
+check('…a field they can’t see reads "Profile field: Yes" — never a bare "yes" — over no one', vchip.trim() === 'Profile field: Yes'
+  && /No one to call yet/.test(await V.text()), `${vchip} · ${(await V.text()).slice(0, 120)}`);
+
+// fields-08 (manager, 1360): a filled-in Text field's type stays Text.
+await D.go('/people/fields');
+await page.click('ol[aria-label="Fields"] .ops-row:has-text("Union local #")');
+await sleep(300);
+const unionF = (await D.api('/fields')).json.fields.find((f) => f.name === 'Union local #');
+const whyText = await page.innerText(`${open} .fd-why`).catch(() => '');
+check('fields-08: a filled-in Text field says "… — its type stays Text", not "it can only become Text"',
+  whyText === `Filled in for ${unionF.filled} people — its type stays Text` && unionF.filled === 2, whyText);
+// fields-07 (manager, 390): typing a used choice's words into a new row keeps it an input with ✕.
+await MP.go('/people/fields');
+await mpage.click('ol[aria-label="Fields"] .ops-row:has-text("Language at home")');
+await sleep(300);
+const rowsNow = () => mpage.$$eval(`${open} .sv-choice`, (els) => els.map((e) => (e.querySelector('input') ? `[${e.querySelector('input').value}]${e.querySelector('.sv-choice__x') ? '✕' : ''}` : e.innerText.replace(/\s+/g, ' ').trim())));
+const keptBefore = (await rowsNow()).filter((r) => !r.startsWith('['));
+await mpage.click(`${open} button:has-text("+ Add a choice")`);
+const newIn = (await mpage.$$(`${open} .sv-choice input`)).pop();
+await newIn.type('Punjabi', { delay: 25 });
+await sleep(200);
+const rowsTyped = await rowsNow();
+check('fields-07: a new row typed "Punjabi" stays an input with ✕; the kept rows are as they were',
+  rowsTyped[rowsTyped.length - 1] === '[Punjabi]✕' && JSON.stringify(rowsTyped.filter((r) => !r.startsWith('['))) === JSON.stringify(keptBefore),
+  rowsTyped.join(' | '));
+await mpage.click(`${open} button[type="submit"]`);
+await sleep(800);
+const twinErr = await mpage.innerText(`${open} .error`).catch(() => '');
+await mpage.click(`${open} .sv-choice:last-of-type .sv-choice__x`);
+await sleep(200);
+const rowsFixed = await rowsNow();
+check('…Save says "two choices are the same", and the ✕ takes the twin away', /two choices are the same/.test(twinErr)
+  && !rowsFixed.includes('[Punjabi]✕') && rowsFixed.length === rowsTyped.length - 1, `${twinErr} · ${rowsFixed.join(' | ')}`);
+await simple(mpage, 'field editor at 390 after the fix', `${open} .btn, ${open} .input, ${open} .sv-kind, ${open} .fd-switch`);
+await mpage.click(`${open} button:has-text("Cancel")`);
+
+// fields-05 (staff, 1360): a field named in another script matches its own column only.
+const yuyan = (await D.api('/actions/field.create', { name: '语言', kind: 'choice', choices: ['中文', 'English'] })).json.field;
+await S.go('/people/import');
+await spage.click('button:has-text("Paste text")');
+await spage.fill('#imp-paste', 'Name,电话,语言\nCharlie Example,604-555-0173,中文\n');
+await spage.click('button:has-text("Use this text")');
+await sleep(600);
+const map2 = await spage.$$eval('.imp-map__row', (rows) => rows.map((r) => `${r.querySelector('.imp-map__head').textContent} → ${r.querySelector('select').selectedOptions[0].text}`));
+check('fields-05: "电话" is the phone, "语言" fills the field 语言', map2.join(' | ') === 'Name → Full name | 电话 → Phone | 语言 → 语言', map2.join(' | '));
+// fields-06: the manager takes 语言 off before staff tap Import — the row still comes in, no id on screen.
+await D.api('/actions/field.retire', { id: yuyan.id });
+await spage.click('button:has-text("Check 1 row")');
+await sleep(1200);
+const checked = await S.text();
+await spage.click('button:has-text("Import 1 person")');
+await sleep(1500);
+const afterImp = await S.text();
+const charlie = (await S.api('/persons?q=Charlie%20Example')).json.persons[0];
+const yuyanVals = (await D.api('/export')).json.person_field_values.filter((v) => v.field_id === yuyan.id);
+check('fields-06: a field taken off mid-import: the row comes in, nothing is filled, no id is shown',
+  !!charlie && yuyanVals.length === 0 && !/[0-9a-f]{8}-[0-9a-f]{4}-/.test(checked + afterImp) && !/no field called/i.test(checked + afterImp),
+  `${checked.slice(-200)} · ${yuyanVals.length}`);
+
+// fields-03 / cross-04 / desk-offline-12 (staff, 1360): with no signal a kept
+// profile keeps More details, read-only; nothing kept says No signal.
+await S.go(`/people/${P.tom.id}`);
+await openSec(spage, 'More details');
+await S.go(`/people/${P.harjit.id}`);
+await openSec(spage, 'More details');
+await sleep(1500);
+const sReady = await swReady(spage);
+// Tom's More details was never kept here (as if it never loaded).
+await spage.evaluate((id) => { for (let i = sessionStorage.length - 1; i >= 0; i -= 1) { const k = sessionStorage.key(i); if (k && k.includes(`person:${id}:fields`)) sessionStorage.removeItem(k); } }, P.tom.id);
+await S.go('/people');
+await sctx.setOffline(true);
+await spage.click(`a[href="/people/${P.harjit.id}"]`);
+await sleep(1500);
+await openSec(spage, 'More details');
+const offBody = secBody('More details');
+const offControls = await spage.$$eval(`${q} .sv-opt, ${q} input, ${q} .fd-save`, (els) => els.map((e) => e.disabled));
+const offText = ((await spage.innerText(offBody).catch(() => '')) || '').replace(/\s+/g, ' ');
+const punjabiOn = await spage.$eval(`${q} .sv-q:has-text("Language at home") .sv-opt[aria-pressed="true"]`, (e) => e.textContent).catch(() => '');
+check('fields-03: no signal, a kept profile: More details is there with its count (3), from the kept copy',
+  sReady && (await spage.innerText('.pf-sec__btn:has-text("More details") .pf-sec__count').catch(() => '')).trim() === '3', `sw ${sReady}`);
+check('…read-only: every control and Save off, the values shown, one line "Changing these needs signal"',
+  offControls.length > 3 && offControls.every(Boolean) && punjabiOn === 'Punjabi' && (await spage.inputValue(`${q} .sv-q:has-text("Union local #") input`)) === 'CUPE 402'
+  && /Changing these needs signal/.test(offText), `${offControls.join(',')} · ${punjabiOn} · ${offText.slice(0, 120)}`);
+await simple(spage, 'profile, no signal (1360)');
+await S.shot('13-profile-no-signal-desk');
+await navIn(spage, `/people/${P.tom.id}`);
+await sleep(1500);
+await openSec(spage, 'More details');
+check('…a profile whose More details was never kept says "No signal — this loads when you’re back online."',
+  /No signal — this loads when you’re back online\./.test(await spage.innerText(secBody('More details')).catch(() => '')) && /Tom Example/.test(await spage.innerText('h1')),
+  await spage.innerText(secBody('More details')).catch(() => '(no section)'));
+await sctx.setOffline(false);
+await spage.evaluate(() => window.dispatchEvent(new Event('online')));
+await spage.waitForSelector(`${q} .fd-save`, { timeout: 8000 }).catch(() => {});
+check('…and back online it loads: the form, Save off until something changes', (await saveOff(spage)) === true
+  && !(await spage.$$eval(`${q} input`, (els) => els.some((e) => e.disabled))));
+
+// The volunteer (390): their kept profile keeps the field marked for them, with no signal.
+await V.go(`/people/${P.harjit.id}`);
+await sleep(1500);
+await V.go('/');
+await vctx.setOffline(true);
+await navIn(vpage, `/people/${P.harjit.id}`);
+await sleep(1500);
+await openSec(vpage, 'More details');
+const vOff = ((await vpage.innerText(secBody('More details')).catch(() => '')) || '').replace(/\s+/g, ' ');
+check('volunteer, no signal: More details from the kept copy — Language at home: Punjabi, nothing else, read-only',
+  /Language at home/i.test(vOff) && /Punjabi/.test(vOff) && !/Strata|Union|CUPE/i.test(vOff)
+  && (await vpage.$$(`${secBody('More details')} :is(input, button)`)).length === 0, vOff);
+await simple(vpage, 'volunteer profile, no signal (390)');
+await vctx.setOffline(false);
+
+// cross-09 / cross-08 (manager, 1360): Profile fields with no signal keeps its title; changes are off.
+await D.go('/people/fields');
+const dReady = await swReady(page);
+await dctx.setOffline(true);
+await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+await sleep(300);
+const addOff = await page.$eval('.ops-head .btn-primary', (b) => b.disabled).catch(() => null);
+check('cross-09: no signal, in the app: "Add a field" is off and the line says "Changing fields needs signal"',
+  addOff === true && /Changing fields needs signal/.test(await D.text()), `${addOff}`);
+await D.go('/people/fields');
+const offFields = await D.text();
+check('…after a reload with no signal: the title "Profile fields", then the No signal line', dReady
+  && (await page.innerText('h1').catch(() => '')) === 'Profile fields' && /No signal — this loads when you’re back online\./.test(offFields), offFields.slice(0, 160));
+await simple(page, 'Profile fields, no signal (1360)');
+await D.shot('14-fields-no-signal');
+await D.go(`/people?field=${F['Strata council member'].id}:yes`);
+const deskChip = await page.innerText('.pp-chips .pp-fchip').catch(() => '');
+check('cross-08: the desk’s chip with no signal (no list kept): "Profile field: Yes", never a bare "yes"', deskChip.trim() === 'Profile field: Yes', deskChip);
+await dctx.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+
+// ── 11. The books still verify ──
 const v = (await D.api('/audit/verify')).json;
 check('hash chain verifies after the whole journey', v.ok === true && v.checked > 20, JSON.stringify(v));
 check('no page errors', errors.length === 0, errors.join(' | '));

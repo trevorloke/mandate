@@ -9,12 +9,14 @@
 //   under the kinds says so, and the server refuses anything else). A choice
 //   someone has can't be dropped. "Taken off · N" under the list brings one
 //   back. Staff and treasurers fill fields in on profiles; this screen is
-//   the manager's (the server refuses anyone else's changes too).
-import { useId, useState } from 'react';
+//   the manager's (the server refuses anyone else's changes too). With no
+//   signal it keeps its title and says so; changes are off ("Changing
+//   fields needs signal").
+import { useId, useRef, useState } from 'react';
 import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { action } from '../api.js';
-import { NoSignal, noSignal } from '../components/NoSignal.jsx';
+import { NeedsSignalLine, NoSignal, noSignal, useOnline } from '../components/NoSignal.jsx';
 import { FIELDS_QUERY, KINDS, KIND_LABEL } from '../components/FieldsBits.jsx';
 import './shifts.css';
 import './surveys.css';
@@ -35,22 +37,29 @@ function VolunteersSwitch({ on, onChange, disabled }) {
 }
 
 // initial: the field as GET /fields has it (editing), or null (adding).
+// A choice someone has is decided once, when the form opens: it shows as
+// words with its count (no ✕). Every other row — added or unused — stays an
+// input with ✕, whatever is typed in it (a twin is caught on Save).
 function FieldForm({ initial = null, primary = false, submitLabel, busy, onSubmit, onCancel }) {
   const uid = useId();
+  const used = new Map((initial?.uses || []).map((u) => [u.value, u.n]));
+  const nextKey = useRef(0);
+  const row = (words, kept = false) => ({ words, kept, key: nextKey.current++ });
   const [name, setName] = useState(initial?.name || '');
   const [kind, setKind] = useState(initial?.kind || 'text');
-  const [choices, setChoices] = useState(initial?.kind === 'choice' ? initial.choices : ['', '']);
+  const [choices, setChoices] = useState(() => (initial?.kind === 'choice'
+    ? initial.choices.map((c) => row(c, (used.get(c) || 0) > 0))
+    : [row(''), row('')]));
   const [volunteers, setVolunteers] = useState(Boolean(initial?.volunteers));
   const [error, setError] = useState(null);
   const filled = initial?.filled || 0;
-  const used = new Map((initial?.uses || []).map((u) => [u.value, u.n]));
   const kindLocked = filled > 0;
-  const setChoice = (i, v) => setChoices((list) => list.map((x, j) => (j === i ? v : x)));
+  const setChoice = (key, v) => setChoices((list) => list.map((x) => (x.key === key ? { ...x, words: v } : x)));
   const removable = choices.length > 2;
 
   const submit = async (e) => {
     e.preventDefault();
-    const clean = choices.map((c) => c.trim()).filter(Boolean);
+    const clean = choices.map((c) => c.words.trim()).filter(Boolean);
     if (!name.trim()) { setError('Add a name'); return; }
     if (kind === 'choice' && clean.length < 2) { setError('Add at least two choices'); return; }
     setError(null);
@@ -65,7 +74,8 @@ function FieldForm({ initial = null, primary = false, submitLabel, busy, onSubmi
 
   // Why the kinds are as they are, in one line.
   const kindLine = !kindLocked ? null
-    : kind === initial.kind ? `Filled in for ${plural(filled, 'person', 'people')} — it can only become Text`
+    : kind === initial.kind
+      ? `Filled in for ${plural(filled, 'person', 'people')} — ${initial.kind === 'text' ? 'its type stays Text' : 'it can only become Text'}`
       : `Changes ${filled} to text — nothing is lost`;
 
   return (
@@ -91,29 +101,28 @@ function FieldForm({ initial = null, primary = false, submitLabel, busy, onSubmi
         <div className="field sv-choices">
           <span className="sv-label">Choices</span>
           {choices.map((c, i) => {
-            const n = initial?.kind === 'choice' ? used.get(c) || 0 : 0;
             // A choice someone has keeps its words (they're what's on file).
-            if (n > 0 && initial.choices.includes(c)) {
+            if (c.kept) {
               return (
-                <div className="sv-choice fd-choice--kept" key={`kept-${c}`}>
-                  <span className="fd-choice__words">{c}</span>
-                  <span className="fd-choice__n mono">{n} filled in</span>
+                <div className="sv-choice fd-choice--kept" key={c.key}>
+                  <span className="fd-choice__words">{c.words}</span>
+                  <span className="fd-choice__n mono">{used.get(c.words) || 0} filled in</span>
                 </div>
               );
             }
             return (
-              <div className="sv-choice" key={i}>
+              <div className="sv-choice" key={c.key}>
                 <input className="input" aria-label={`Choice ${i + 1}`} maxLength={80} autoComplete="off"
-                  value={c} onChange={(e) => setChoice(i, e.target.value)} />
+                  value={c.words} onChange={(e) => setChoice(c.key, e.target.value)} />
                 {removable && (
                   <button type="button" className="btn btn-quiet sv-choice__x" aria-label={`Remove choice ${i + 1}`}
-                    onClick={() => setChoices((list) => list.filter((_, j) => j !== i))}>✕</button>
+                    onClick={() => setChoices((list) => list.filter((x) => x.key !== c.key))}>✕</button>
                 )}
               </div>
             );
           })}
           {choices.length < CHOICES_MAX && (
-            <button type="button" className="btn btn-quiet ops-tap sv-choice__add" onClick={() => setChoices((list) => [...list, ''])}>
+            <button type="button" className="btn btn-quiet ops-tap sv-choice__add" onClick={() => setChoices((list) => [...list, row('')])}>
               + Add a choice
             </button>
           )}
@@ -207,6 +216,7 @@ export default function Fields() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [said, setSaid] = useState(null);
+  const online = useOnline();
 
   if (me?.role !== 'manager') return <Navigate to="/people" replace />;
 
@@ -236,9 +246,13 @@ export default function Fields() {
   };
 
   const back = <Link to="/people" className="ops-back">← People</Link>;
-  if (noSignal(q)) return <div className="ops-page fd-page">{back}<NoSignal /></div>;
-  if (q.isPending) return <p className="muted">Loading…</p>;
-  if (q.isError) return <div className="ops-page fd-page">{back}<p className="error" role="alert">{q.error.message}</p></div>;
+  // The same head whatever the list's state: where you are, then why it's empty.
+  const head = <>{back}<div className="ops-head"><h1>Profile fields</h1></div></>;
+  if (noSignal(q)) return <div className="ops-page fd-page">{head}<NoSignal /></div>;
+  if (q.isPending) return <div className="ops-page fd-page">{head}<p className="muted">Loading…</p></div>;
+  if (q.isError) return <div className="ops-page fd-page">{head}<p className="error" role="alert">{q.error.message}</p></div>;
+  // No signal: the list as last loaded here, every change off.
+  const locked = busy || !online;
   const all = q.data.fields || [];
   const live = all.filter((f) => !f.retired);
   const off = all.filter((f) => f.retired);
@@ -271,17 +285,19 @@ export default function Fields() {
       <div className="ops-head">
         <h1>Profile fields</h1>
         {!adding && (
-          <button type="button" className="btn btn-primary ops-tap" onClick={() => { setOpenId(null); setSaid(null); setParams({ add: '1' }); }}>
+          <button type="button" className="btn btn-primary ops-tap" disabled={!online}
+            onClick={() => { setOpenId(null); setSaid(null); setParams({ add: '1' }); }}>
             Add a field
           </button>
         )}
       </div>
+      {!online && <NeedsSignalLine>Changing fields needs signal</NeedsSignalLine>}
 
       {said && <p className="ops-done" role="status">{said}</p>}
       {error && <p className="error" role="alert">{error}</p>}
 
       {adding && (
-        <FieldForm key={`add-${live.length}`} primary submitLabel="Add field" busy={busy}
+        <FieldForm key={`add-${live.length}`} primary submitLabel="Add field" busy={locked}
           onSubmit={add} onCancel={() => setParams({})} />
       )}
 
@@ -296,7 +312,7 @@ export default function Fields() {
               index={i}
               total={live.length}
               open={openId === f.id}
-              busy={busy}
+              busy={locked}
               onToggle={() => { setError(null); setOpenId((cur) => (cur === f.id ? null : f.id)); }}
               onSave={save(f)}
               onMove={(by) => move(i, by)}
@@ -306,7 +322,7 @@ export default function Fields() {
         </ol>
       )}
 
-      <TakenOff fields={off} busy={busy} onRestore={(f) => inPlace('field.restore', { id: f.id }, `✓ “${f.name}” is back`)} />
+      <TakenOff fields={off} busy={locked} onRestore={(f) => inPlace('field.restore', { id: f.id }, `✓ “${f.name}” is back`)} />
     </div>
   );
 }

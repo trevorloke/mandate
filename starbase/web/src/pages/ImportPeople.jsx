@@ -191,6 +191,11 @@ const MULTI = new Set(['tags']); // several columns can feed tags; every other f
 
 const normHeader = (h) =>
   String(h || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+// A profile field's name against a column's, in any script ("语言", "ਭਾਸ਼ਾ"):
+// every language's letters, digits and vowel signs count, Latin accents
+// fold as above; a name of only symbols is empty and matches nothing.
+const fieldKey = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
 
 // Exact header names first, then looser "contains" rules, then the values.
 const EXACT = [
@@ -268,7 +273,8 @@ function guessMapping(scale, headers, records, noHeader = false, custom = []) {
   });
   pass(EXACT, false);
   headers.forEach((h, i) => {
-    const hit = custom.find((x) => normHeader(x.label) === normHeader(h));
+    const k = fieldKey(h);
+    const hit = k ? custom.find((x) => fieldKey(x.label) === k) : null;
     if (hit) claim(i, hit.key);
   });
   pass(CONTAINS, true);

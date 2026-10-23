@@ -898,10 +898,10 @@ export default function Person() {
         <Section title="Details" open={!!open.details} onToggle={toggle('details')}>
           <Details person={person} household={household} refresh={refresh} desk={desk} me={me} />
         </Section>
-        {/* The campaign's own fields (People → More → Profile fields). */}
-        {fields.data?.fields?.length > 0 && (
+        {/* The campaign's own fields (People → More → Profile fields); with no signal and no copy, it says so. */}
+        {(fields.data?.fields?.length > 0 || noSignal(fields)) && (
           <Section title="More details" count={filledCount(fields) || ''} open={!!open.more} onToggle={toggle('more')}>
-            <PersonFields query={fields} personId={person.id} />
+            <PersonFields key={person.id} query={fields} personId={person.id} />
           </Section>
         )}
         {desk && (

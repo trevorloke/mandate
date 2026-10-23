@@ -61,6 +61,8 @@ function planFor(key, me) {
   const desk = isDeskRole(me.role);
   const money = desk ? 'session' : 'local';
   const q = (name, tier) => ({ name: `q:${me.role}:${name}`, tier });
+  // A profile's More details (ext/fields), kept beside the profile; a volunteer's comes already narrowed.
+  if (key[0] === 'person' && key[2] === 'fields' && key.length === 3 && typeof key[1] === 'string') return q(`person:${key[1]}:fields`, money);
   const [k0, k1, k2] = key;
   switch (k0) {
     // moneyIn: an answer with money in it goes to this tab only, whatever

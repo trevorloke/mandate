@@ -13,7 +13,7 @@
 //   sql.js      tables: person_fields, person_field_values (why a table: sql.js)
 //   kinds.js    the five kinds: checking, storing and showing a value
 //   actions.js  field.* (managers) and field.values.set (desk)
-//   api.js      GET /fields (desk) · GET /persons/:id/fields (any role, filtered)
+//   api.js      GET /fields (desk) · GET /fields/:id and /persons/:id/fields (any role, filtered)
 //   people.js   the People filter, the import, the sample campaign (lib/hooks.js)
 export { sql } from './sql.js';
 export { actions } from './actions.js';
@@ -26,6 +26,6 @@ export const hooks = { personsWhere, importRows, sampleLoaded, sampleCleared };
 export const exportTables = ['person_fields', 'person_field_values'];
 
 // Volunteers read a profile's fields through /persons/:id/fields only (the
-// ones marked for them). The list of every field, with counts and the most
-// common values, is the desk's.
+// ones marked for them), and one such field's name through /fields/:id. The
+// list of every field, with counts and the most common values, is the desk's.
 export const deskOnlyReads = ['/fields'];

@@ -36,7 +36,9 @@ const registry = { events: [], contactLogged: [], brief: [], textOut: [] };
 //                                   emit) → [words for what it filled] }.
 //   sampleLoaded(tx, ctx, { people, emit })   the sample is loading;
 //                                   people: { sample name → person id }.
-//   sampleCleared(tx, ctx, { emit, said })    the sample's people are gone;
+//   sampleCleared(tx, ctx, { emit, said })    the sample is clearing, just
+//                                   before its people go (void what it
+//                                   made while they are still here);
 //                                   said: sentences for the clear message.
 Object.assign(registry, { personsWhere: [], importRows: [], sampleLoaded: [], sampleCleared: [] });
 

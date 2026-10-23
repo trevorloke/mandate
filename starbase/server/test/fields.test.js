@@ -7,8 +7,10 @@
 // unique emails and names per run, every query scoped to this workspace.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { freshDb, Client } from './helpers.js';
 import { getDb } from '../db/client.js';
+import { parseValue } from '../ext/fields/kinds.js';
 
 const tag = Math.random().toString(36).slice(2, 8);
 let mgr, staff, vol, other, ws;
@@ -114,6 +116,20 @@ test('the desk fills them in: each kind checked, cleared, a no-change save logs 
   }
   assert.equal(await valueOf(staff, P.cy.id, F.union.id), null, 'a refused save stored nothing');
 
+  // Spaces only as thousands separators: "1 2 3" or "12 5" is a typo, never 123 or 125.
+  for (const typo of ['1 2 3', '12 5', '1 20', '1 2000']) {
+    const res = await setValues(staff, P.cy.id, { household: typo });
+    assert.equal(res.status, 400, typo);
+    assert.match(res.json.error, /“Household size”: “.*” isn’t a number/, typo);
+  }
+  for (const [given, want] of [['1 200', 1200], ['1 200 000', 1200000], ['-1 200.5', -1200.5], ['1\u00a0200', 1200]]) {
+    ok(await setValues(staff, P.cy.id, { household: given }));
+    assert.equal(await valueOf(staff, P.cy.id, F.household.id), want, `"${given}" is ${want}`);
+  }
+  ok(await setValues(staff, P.cy.id, { household: null }));
+  // The import reads a cell with the same parser.
+  assert.ok(parseValue({ kind: 'number' }, '2 3').error, 'an import cell “2 3” is refused, not 23');
+
   // Clear: null or "".
   ok(await setValues(staff, P.ana.id, { household: null, moved: '' }));
   assert.equal(await valueOf(staff, P.ana.id, F.household.id), null);
@@ -148,6 +164,12 @@ test('volunteers see only filled-in fields marked for them, words only — and n
     'only “Language at home” (marked for volunteers); not strata, not union — and no who or when');
   assert.deepEqual((await fieldsOf(vol, P.cy.id)), [], 'nothing filled in: nothing to see');
   assert.equal((await vol.get('/api/fields')).status, 403, 'the list of every field is the desk’s');
+  // One field's name, for a filter chip's words: a volunteer only gets one marked for them.
+  assert.deepEqual(ok(await vol.get(`/api/fields/${F.language.id}`)).field, { id: F.language.id, name: 'Language at home', kind: 'choice' });
+  assert.equal((await vol.get(`/api/fields/${F.strata.id}`)).status, 404, 'a field volunteers can’t see is not found');
+  assert.equal(ok(await staff.get(`/api/fields/${F.strata.id}`)).field.name, 'Strata council member');
+  assert.equal((await other.get(`/api/fields/${F.language.id}`)).status, 404, 'another campaign’s field is not found');
+  assert.equal((await staff.get('/api/fields/not-a-field')).status, 404);
   const desk = await fieldsOf(staff, P.ben.id);
   assert.equal(desk.length, 5, 'the desk gets every field, empty ones too');
 
@@ -242,8 +264,22 @@ test('taking a field off keeps every value: off the profile, filter and import �
   const list = ok(await staff.get('/api/fields')).fields;
   assert.equal(list[list.length - 1].retired, true, 'listed after the fields on the profile');
   assert.equal(list.find((f) => f.id === F.union.id).filled, 2);
-  const imp = ok(await staff.post('/api/data/import', { rows: [{ name: 'Dee Example', fields: { 'Union local': 'CUPE 402' } }], dryRun: true }));
-  assert.match(imp.invalid[0], /^row 1: there’s no field called “Union local”/, 'the import doesn’t fill a field that’s off');
+  // A column for a field that's off (taken off while the import was set
+  // up: the screen sends its id) is passed over — the person still comes in,
+  // nothing is filled, and no id is ever put on screen.
+  const imp = ok(await staff.post('/api/data/import', {
+    rows: [
+      { name: 'Dee Example', fields: { 'Union local': 'CUPE 402' } },
+      { name: 'Dee Two Example', fields: { [F.union.id]: 'CUPE 402' } },
+      { name: 'Cy Example', phone: '604-555-0132', fields: { [F.union.id]: 'CUPE 402' } },
+      { name: 'Dee Three Example', fields: { [randomUUID()]: 'x' } },
+    ],
+    dryRun: true,
+  }));
+  assert.deepEqual(imp.invalid, ['row 4: a profile field in this import was removed — set its column to Don’t import'],
+    'a field that’s gone altogether is named in words, never by its id');
+  assert.equal(imp.created, 2, 'the rows with a taken-off field’s cell still come in');
+  assert.equal(imp.decisions.find((d) => d.name === 'Cy Example').action, 'unchanged', 'the import doesn’t fill a field that’s off');
   const ex = ok(await mgr.get('/api/export'));
   assert.ok(ex.person_fields.some((f) => f.id === F.union.id && f.retired_at), 'the export has the field, taken off');
   assert.equal(ex.person_field_values.filter((v) => v.field_id === F.union.id).length, 2, 'and its values');
@@ -329,17 +365,40 @@ test('sample campaign: three fields with values; clearing removes them, and keep
   // A real person of yours gets a value on a sample field: that field stays.
   const mine = await s.createPerson(`Real Person ${tag}`);
   ok(await s.action('field.values.set', { person_id: mine.id, values: [{ field_id: lang.id, value: 'Hindi' }] }));
+  // A value you set on a sample person is one of your records, like a knock:
+  // it keeps them — a sample donor (Hannah Lee) as well as anyone else.
+  const strata = list[1];
+  const who = async (name) => (await s.get(`/api/persons?q=${encodeURIComponent(name)}`)).json.persons.find((p) => p.name === name);
+  const simran = await who('Simran Gill');
+  const hannah = await who('Hannah Lee');
+  ok(await s.action('field.values.set', { person_id: simran.id, values: [{ field_id: lang.id, value: 'English' }] }));
+  ok(await s.action('field.values.set', { person_id: hannah.id, values: [{ field_id: strata.id, value: true }] }));
   const clear = ok(await s.req('DELETE', '/api/data/sample'));
-  assert.match(clear.message, /Kept the field “Language at home”: you filled it in for 1 person\.$/);
+  assert.match(clear.message, /Kept 2 sample people with your own records on them \(2 profile details\); they’re no longer marked sample\./);
+  assert.match(clear.message, /Kept the field “Language at home”: you filled it in for 2 people\. Kept the field “Strata council member”: you filled it in for 1 person\.$/);
   const left = ok(await s.get('/api/fields')).fields;
-  assert.deepEqual(left.map((f) => [f.name, f.filled]), [['Language at home', 1]], 'the other sample fields are gone');
+  assert.deepEqual(left.map((f) => [f.name, f.filled]), [['Language at home', 2], ['Strata council member', 1]], 'the other sample field is gone');
   assert.equal(await valueOf(s, mine.id, lang.id), 'Hindi');
+  assert.equal(await valueOf(s, simran.id, lang.id), 'English', 'kept with the person');
+  assert.deepEqual((await s.get(`/api/persons?field=${strata.id}:*`)).json.persons.map((p) => p.name), ['Hannah Lee'],
+    '“1 filled in” is someone People can find');
+  // Every sample value went with a void event — none by cascade, off the books.
+  const db = await getDb();
+  const W = (await db.query('select workspace_id from persons where id = $1', [mine.id])).rows[0].workspace_id;
+  const lost = (await db.query(
+    `select e.entity_id from events e
+     where e.workspace_id = $1 and e.entity_type = 'person_field_value' and e.op = 'create'
+       and not exists (select 1 from person_field_values v where v.id = e.entity_id)
+       and not exists (select 1 from events x where x.workspace_id = $1 and x.entity_type = 'person_field_value'
+                         and x.entity_id = e.entity_id and x.op = 'void')`, [W],
+  )).rows;
+  assert.deepEqual(lost, [], 'no value gone without a void event');
   assert.equal((await s.get('/api/audit/verify')).json.ok, true);
 
   // A second load reuses your same-named field rather than making a twin.
   ok(await s.post('/api/data/sample', {}));
   assert.deepEqual(ok(await s.get('/api/fields')).fields.map((f) => f.name), ['Language at home', 'Strata council member', 'Union local']);
   const c2 = ok(await s.req('DELETE', '/api/data/sample'));
-  assert.doesNotMatch(c2.message, /Kept the field/, 'your field was never sample: nothing to say');
-  assert.deepEqual(ok(await s.get('/api/fields')).fields.map((f) => [f.name, f.filled]), [['Language at home', 1]]);
+  assert.doesNotMatch(c2.message, /Kept the field/, 'your fields were never sample: nothing to say');
+  assert.deepEqual(ok(await s.get('/api/fields')).fields.map((f) => [f.name, f.filled]), [['Language at home', 2], ['Strata council member', 1]]);
 });
