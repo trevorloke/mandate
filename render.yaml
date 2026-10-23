@@ -37,3 +37,45 @@ services:
       # Add this in the Render dashboard (don't commit secrets to the repo):
       # - key: MANDATE_RESEND_KEY
       #   sync: false
+
+  # ── Starbase (starbase/) — the field-first campaign OS ─────────────────
+  # Web service + managed Postgres. After the first deploy, set the secrets
+  # marked sync:false in the Render dashboard (email, SMS, Stripe).
+  - type: web
+    name: starbase
+    runtime: docker
+    plan: starter              # always-on; volunteers canvass at all hours
+    region: oregon
+    dockerfilePath: ./starbase/Dockerfile
+    dockerContext: ./starbase
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: starbase-db
+          property: connectionString
+      - key: STARBASE_PUBLIC_URL     # your public address, e.g. https://starbase.imaginesurrey.ca
+        sync: false
+      - key: RESEND_API_KEY          # email: newsletters, press, invites, shift alerts
+        sync: false
+      - key: MAIL_FROM               # e.g. Imagine Surrey <team@imaginesurrey.ca>
+        sync: false
+      - key: TWILIO_ACCOUNT_SID      # SMS shift alerts
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+      - key: STRIPE_SECRET_KEY       # card donations (leave unset to take pledges)
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET   # from the Stripe webhook pointing at /api/public/stripe/webhook
+        sync: false
+
+databases:
+  - name: starbase-db
+    plan: basic-256mb
+    region: oregon
+    postgresMajorVersion: "16"
