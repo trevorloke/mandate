@@ -351,9 +351,19 @@ const bandOfList = (v) => {
   const b = bandOf(codes[0]);
   return b && codes.every((c) => bandOf(c) === b) ? b : null;
 };
+// The band a rating filter stands for — or null for one code ("Voting for
+// Locke", "Rated 2 · Lean yes").
+const filterBand = (scale, v) => ratingBands(scale).find((b) => b.value === v)?.band || (/,|^unrated$/.test(v) ? bandOfList(v) : null);
+// What the server (or the kept list) is asked: a band is every code in it
+// NOW — an older link of the band (a bookmark, the way back from a profile,
+// the Call list carried from it) still reaches a candidate added since.
+const ratingQuery = (scale, v) => {
+  const band = v ? filterBand(scale, v) : null;
+  return band && band !== 'none' ? codesInBand(scale, band).join(',') : v;
+};
 // "Support", "Voting for Locke", "Rated 2 · Lean yes" (an old one-code link).
 const ratingFilterLabel = (scale, v) => {
-  const band = ratingBands(scale).find((b) => b.value === v)?.band || (/,|^unrated$/.test(v) ? bandOfList(v) : null);
+  const band = filterBand(scale, v);
   if (band) return BAND_LABEL[band] || 'Unrated';
   const r = ratingByCode(scale, v);
   if (r?.name) return `Voting for ${r.name}${offTail(r)}`;
@@ -444,7 +454,6 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose, phone]);
-  const pick = (key, value) => update({ [key]: f[key] === value ? null : value });
   const anyPicked = Boolean(f.rating || f.tag || f.role || f.has || f.field);
   // Who they vote for and volunteer roles are the long lists: one tap away,
   // open if one is picked. Tags in use sit on the first level.
@@ -452,13 +461,15 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
   const [moreOpen, setMoreOpen] = useState(Boolean(f.role || whoPicked || f.field));
   const morePicked = [whoPicked, f.role, f.field].filter(Boolean).length;
   const moreId = useId();
-  const chip = (key, value, label, band) => (
-    <button key={value} type="button" className={`chip-btn pp-pick${f[key] === value ? ' on' : ''}`}
-      aria-pressed={f[key] === value} onClick={() => pick(key, value)}>
+  // on: a band's chip is on for an older link of that band too.
+  const chip = (key, value, label, band, on = f[key] === value) => (
+    <button key={value} type="button" className={`chip-btn pp-pick${on ? ' on' : ''}`}
+      aria-pressed={on} onClick={() => update({ [key]: on ? null : value })}>
       {band && <span className="pp-dot" data-band={band} aria-hidden="true" />}
       {label}
     </button>
   );
+  const pickedBand = f.rating ? filterBand(scale, f.rating) : null;
   return (
     <>
       {phone && <div className="pp-scrim" onClick={onClose} aria-hidden="true" />}
@@ -477,7 +488,7 @@ function FilterSheet({ f, update, tagOptions, onClose, phone }) {
           <fieldset className="pp-group">
             <legend className="eyebrow">Rating</legend>
             <div className="pp-group__opts">
-              {ratingBands(scale).map((b) => chip('rating', b.value, b.label, b.band))}
+              {ratingBands(scale).map((b) => chip('rating', b.value, b.label, b.band, pickedBand === b.band))}
             </div>
           </fieldset>
           <fieldset className="pp-group">
@@ -653,9 +664,10 @@ function PeopleList() {
   const [page, setPage] = useState({ key: '', n: PAGE });
   const showNew = params.get('new') === '1' && desk;
 
+  const scale = useScale();
   const qs = new URLSearchParams({ q: f.q, limit: String(LIMIT) });
   if (f.tag) qs.set('tag', f.tag);
-  if (f.rating) qs.set('rating', f.rating);
+  if (f.rating) qs.set('rating', ratingQuery(scale, f.rating));
   if (f.role) qs.set('role', f.role);
   if (f.has) qs.set('has', f.has);
   if (f.field) qs.set('field', f.field);
@@ -694,7 +706,10 @@ function PeopleList() {
     return <Navigate replace to={`/calls${carry(f, { channel: bank === 'text' ? 'text' : 'phone' })}`} />;
   }
 
-  const offline = noSignal(persons);
+  // No signal — or only the last filter's list, held while this one waits
+  // for signal (one the kept list can't answer, like a profile field): never
+  // under this filter's chips.
+  const offline = noSignal(persons) || (persons.isPlaceholderData && persons.fetchStatus === 'paused');
   // Searched with no signal over a kept list the server had cut off: there may be more.
   const partial = keptPartial(persons.data);
   const count = persons.isLoading ? '…' : rows.length >= LIMIT ? `${LIMIT}+` : String(rows.length);
@@ -895,7 +910,7 @@ function CallsScreen() {
 
   const qs = new URLSearchParams({ q: f.q, limit: String(LIMIT), has: 'phone' });
   if (f.tag) qs.set('tag', f.tag);
-  if (f.rating) qs.set('rating', f.rating);
+  if (f.rating) qs.set('rating', ratingQuery(scale, f.rating));
   if (f.role) qs.set('role', f.role);
   if (f.field) qs.set('field', f.field);
   // The list is kept on this phone, so losing signal mid-list loses nothing.
@@ -923,7 +938,7 @@ function CallsScreen() {
     const open = callOrder(ok.filter((p) => repliedSet.has(p.id) || (!awaySet.has(p.id) && !textedHere.has(p.id))), seed);
     return [...open.filter((p) => repliedSet.has(p.id)), ...open.filter((p) => !repliedSet.has(p.id))];
   }, [reachable, seed, smsOn, away, replied, textedHere]);
-  const offline = noSignal(persons);
+  const offline = noSignal(persons) || (persons.isPlaceholderData && persons.fetchStatus === 'paused');
 
   const [done, setDone] = useState(readDone);
   const [currentId, setCurrentId] = useState(null);
@@ -1094,7 +1109,7 @@ function CallsScreen() {
       <MyPeopleLink me={me} />
       <TextingRepliesLink me={me} />
 
-      {listCopy && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
+      {listCopy && !offline && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
       {persons.isError && !offline && !listCopy && <p className="error">{noAnswer(persons.error) ? 'No answer — check your signal' : persons.error.message}</p>}
 
       {offline ? (

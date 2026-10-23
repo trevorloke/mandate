@@ -95,6 +95,10 @@ export const FIELD_ACTIONS = {
       // Offline outbox key: a knock replayed after reconnecting is the same
       // knock, never a second one.
       client_id: uuid().nullish(),
+      // When the phone's knock was tapped (the outbox keeps it): the rating
+      // scale counts a candidate taken off the list from the tap, not from
+      // when the knock arrived (ext/scale/rules.js). Never later than now.
+      client_at: isoTs().max(40).nullish(),
       // Survey answers given in the same conversation; a feature module
       // (contactLogged hook) stores them with this contact.
       answers: z.array(z.object({
@@ -123,7 +127,9 @@ export const FIELD_ACTIONS = {
       // still taken from a phone's knock for a while (ext/scale/rules.js).
       // Checked where it would be written, after the replay checks: a replay
       // of a knock already in is the same knock, whatever the list says now.
-      const rated = () => input.rating && checkRating(tx, ctx.workspaceId, input.rating, { fromPhone: Boolean(input.client_id) });
+      const rated = () => input.rating && checkRating(tx, ctx.workspaceId, input.rating, {
+        fromPhone: Boolean(input.client_id), tapped: input.client_id ? input.client_at : null,
+      });
       // A hook (surveys) may add to the reply: answers it had to leave out.
       const reply = {};
       if (input.visit_of && input.visit_of !== input.client_id) {

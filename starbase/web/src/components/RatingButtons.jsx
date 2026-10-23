@@ -35,7 +35,11 @@ export { useScale };
 // Small filled chip for a person's current rating — same band colors as the buttons.
 // who: an opposed variant reads "4 · Locke" (the words on the button that
 // was tapped), not the code "4B"; one off the list says so.
-export function RatingChip({ code, className = '', who = false }) {
+// brief: where a name and an address share the line (the walk list's
+// doors, the door card's tabs), "(off the list)" is left to the chip's
+// title and aria-label — the profile and People still say it. A long name
+// gives way with "…" there (rating-words.css), never the person's name.
+export function RatingChip({ code, className = '', who = false, brief = false }) {
   const scale = useScale();
   const r = ratingByCode(scale, code);
   const named = who && r?.band === 'opposed' && r.code !== '4';
@@ -47,7 +51,7 @@ export function RatingChip({ code, className = '', who = false }) {
       title={r ? label : 'Not yet rated'}
       aria-label={r ? `Rating ${r.short}: ${label}` : 'Not yet rated'}
     >
-      {r ? (named ? `4 · ${r.name}${offTail(r)}` : r.short) : 'unrated'}
+      {r ? (named ? `4 · ${r.name}${brief ? '' : offTail(r)}` : r.short) : 'unrated'}
     </span>
   );
 }
@@ -85,7 +89,7 @@ export function PersonTabs({ persons, value, onPick, ratingOf = (p) => p.rating,
         return (
           <button key={p.id} type="button" className={`fk-tab${on ? ' is-on' : ''}`} aria-pressed={on} onClick={() => onPick(p.id)}>
             <span className="fk-tab__name">{p.name}</span>
-            {code && <RatingChip code={code} who />}
+            {code && <RatingChip code={code} who brief />}
           </button>
         );
       })}
