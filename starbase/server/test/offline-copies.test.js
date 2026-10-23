@@ -169,3 +169,28 @@ test('money stays in the tab whatever role the tab thinks it has; a desk’s Peo
   assert.ok(!has(session, staff, 'q:staff:persons:q=&limit=300'), 'refused: the copy goes');
   qc.clear();
 });
+
+test('the strip’s time is what the screen draws: only Today and Money draw the brief; every other read is a side read', async () => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = fileURLToPath(new URL('../../web/src/', import.meta.url));
+  const files = [];
+  const walk = async (dir) => {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) await walk(join(dir, e.name));
+      else if (/\.jsx?$/.test(e.name)) files.push(join(dir, e.name));
+    }
+  };
+  await walk(root);
+  const reads = [];
+  for (const f of files) {
+    const src = await readFile(f, 'utf8');
+    for (const m of src.matchAll(/use(?:Infinite)?Query\(\{\s*queryKey:\s*\['brief'\][^\n]*/g)) reads.push({ file: f.slice(root.length), line: m[0] });
+  }
+  assert.ok(reads.length >= 6, `found the brief's reads (${reads.length})`);
+  const drawers = new Set(['pages/Today.jsx', 'pages/Money.jsx']);
+  const wrong = reads.filter((r) => !drawers.has(r.file) && !/meta:\s*\{\s*side:\s*true\s*\}/.test(r.line));
+  assert.deepEqual(wrong.map((r) => r.file), [], 'a screen that only reads a little of the brief marks it meta: { side: true }');
+  assert.ok(reads.some((r) => r.file === 'pages/Shifts.jsx'), 'the shift detail’s providers read is among them');
+});

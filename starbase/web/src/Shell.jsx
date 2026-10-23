@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost, initials } from './api.js';
 import {
   pendingCount, unsentCount, useOutbox, useOutboxAutoFlush, clearOutbox, dismissItem, retryItem, onOutboxSent, setOutboxOwner, NEW_PERSON,
+  sendHeldNotes, closeOutbox,
   clockText,
 } from './offline.js';
 import OfflineSheet from './components/OfflineSheet.jsx';
@@ -367,6 +368,8 @@ function SignedInShell({ me }) {
     setNotice(null);
     setSigningOut(true);
     try {
+      // A note typed on an open card (door card, profile) goes first, as theirs.
+      await sendHeldNotes();
       // An automatic send may already be running: let it finish, then send the rest.
       for (let i = 0; i < 40 && outboxRef.current.flushing; i += 1) await wait(250);
       if (pendingCount() > 0) {
@@ -379,6 +382,7 @@ function SignedInShell({ me }) {
         return;
       }
       await apiPost('/auth/logout');
+      closeOutbox(); // the screens closing now save nothing as theirs
       queryClient.clear();
       // What this phone kept for them (doors, calls, shifts, walk lists) goes too.
       forgetPhoneCopies();

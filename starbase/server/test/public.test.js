@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { freshDb, Client } from './helpers.js';
 import { app } from '../index.js';
+import { campaignDay } from '../lib/gifts.js';
 
 const tag = Math.random().toString(36).slice(2, 8);
 const mail = (who) => `${who}.pub.${tag}@example.org`;
@@ -380,7 +381,8 @@ test('stripe: checkout link and every payment are logged; the thank-you says Str
     assert.ok(invPaid.json.gift_id);
     const mev = of(await fresh(), 'stripe.payment');
     assert.equal(mev[1].payload.gift_id, invPaid.json.gift_id);
-    assert.equal(mev[1].payload.last_received_on, new Date().toISOString().slice(0, 10));
+    // The campaign's day (Vancouver), not the UTC one: from 5 pm Pacific they differ.
+    assert.equal(mev[1].payload.last_received_on, campaignDay(new Date()));
     const mp = (await mgr.get('/api/pledges')).json.pledges.find((x) => x.id === mId);
     assert.equal(mp.status, 'paid');
     assert.ok(mp.last_received_on, 'the pledges list shows when the last card gift came in');

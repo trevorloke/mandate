@@ -8,6 +8,7 @@ import App from './App.jsx';
 import { ME_KEY, NoSignalError, noAnswer, savedSignIn } from './api.js';
 import { keptPersister, watchKeptCopies } from './components/KeptCopies.js';
 import { forgetPhoneCopies, keepOnlyMine } from './components/OfflineCache.js';
+import { closeOutbox } from './offline.js';
 
 // Once more after a second — except a 401 / 404, or no signal at all (the
 // browser says it's offline): then the screen says so straight away, and
@@ -97,6 +98,7 @@ if (typeof window !== 'undefined') {
       const next = savedSignIn();
       if (next && next.user.id === cur.user.id && next.workspace.id === cur.workspace?.id) return;
       leaving = true;
+      closeOutbox(); // nothing more is saved here under the sign-in that ended
       queryClient.clear();
       if (next) keepOnlyMine(next); else forgetPhoneCopies();
       window.location.assign(next ? '/' : '/login');

@@ -542,3 +542,48 @@ test('two tabs, one outbox: a save, a send or a dismiss here never drops what an
   assert.equal((await c.action('contact.log', { person_id: there.id, channel: 'door', outcome: 'contacted', rating: '4', client_id: cid })).status, 200);
   assert.equal((await contactsOf(there.id)).length, 1);
 });
+
+test('sign-out: a note still in an open card goes first, as theirs; after it nothing is saved here', async () => {
+  ob.setOutboxOwner(null);
+  net.cookie = c.cookie;
+  nav.onLine = true;
+  const p = await c.createPerson('Held Note', { address: '7311 124 St', lat: 49.1343, lng: -122.8543 });
+  const me = { user: { id: `held-${tag}` }, workspace: { id: `ws-${tag}` } };
+  ob.setOutboxOwner(me);
+  // A card with a note typed and no tap yet (the door card, a profile).
+  let box = 'Wants a lawn sign — call back Tuesday';
+  const card = () => {
+    const text = box;
+    box = '';
+    return text ? ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', note: text }, { who: p.name }) : null;
+  };
+  const off = ob.holdNote(card);
+  await ob.sendHeldNotes(); // Sign out, before the flush
+  assert.equal(box, '', 'the box is emptied: a later close can’t send it again');
+  let cs = await contactsOf(p.id);
+  assert.equal(cs.length, 1);
+  assert.equal(cs[0].note, 'Wants a lawn sign — call back Tuesday');
+  await ob.sendHeldNotes();
+  assert.equal((await contactsOf(p.id)).length, 1, 'once');
+  off();
+
+  // Signed out: a card closing on the way to Sign in saves nothing here.
+  ob.closeOutbox();
+  net.cookie = '';
+  const before = store.get('starbase:outbox:v2');
+  await assert.rejects(ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', note: 'After sign-out' }), (e) => e.status === 401);
+  assert.equal(store.get('starbase:outbox:v2'), before, 'nothing stored');
+  assert.equal(ob.unsentCount(), 0);
+  // A last render of the screen being left (the same sign-in) doesn't open it again…
+  ob.setOutboxOwner(me);
+  await assert.rejects(ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', note: 'Still signed out' }), (e) => e.status === 401);
+  // …the next sign-in does (a fresh answer from the server, even for the same person).
+  net.cookie = c.cookie;
+  ob.setOutboxOwner({ ...me });
+  const r = await ob.logContact({ person_id: p.id, channel: 'door', outcome: 'contacted', note: 'Signed in again' }, { who: p.name });
+  assert.equal(r.queued, false);
+  cs = await contactsOf(p.id);
+  assert.equal(cs.length, 2);
+  assert.ok(!cs.some((x) => /sign(ed)? out/i.test(x.note || '') && x.note !== 'Wants a lawn sign — call back Tuesday'));
+  ob.setOutboxOwner(null);
+});

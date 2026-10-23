@@ -43,7 +43,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiGet, ApiError } from '../api.js';
-import { logContact, queueAction, undoQueued, useOutbox } from '../offline.js';
+import { holdNote, logContact, queueAction, undoQueued, useOutbox } from '../offline.js';
 import { isOffline, queuedChip, queuedSaid, queuedText } from './queued.js';
 import { SIGN_KINDS } from '@starbase/shared/canvass';
 import RatingButtons, { More, OutcomeButtons, OUTCOME_LABEL, PersonTabs, focusRating, ratingText, useScale } from './RatingButtons.jsx';
@@ -393,15 +393,17 @@ export default function DoorCard({ door, selectedId, onSelect, onClose, toast, m
       say(refusalMsg(err, 'Note not saved — try again'));
     }
   };
-  // Card closed with a note still in the box: send it on its own.
-  useEffect(() => () => {
+  // Card closed with a note still in the box: send it on its own. Sign-out
+  // sends it first (holdNote), while the card is still open and it's theirs.
+  const sendLeft = () => {
     const text = noteRef.current.trim();
     const ctx = latest.current;
-    if (!text || !ctx?.sel) return;
+    if (!text || !ctx?.sel) return null;
     noteRef.current = '';
-    sendNote(ctx.sel, ctx.channel, text, ctx);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return sendNote(ctx.sel, ctx.channel, text, ctx);
+  };
+  useEffect(() => holdNote(() => { const sent = sendLeft(); if (sent) setNoteState(''); return sent; }), []);
+  useEffect(() => () => { sendLeft(); }, []);
   // Another person at the door: their note is theirs, so send it first.
   const pickPerson = (id) => {
     const text = noteRef.current.trim();

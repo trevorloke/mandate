@@ -249,8 +249,9 @@ export function watchKeptCopies(queryClient) {
 // The screens on the strip's mind: what a desk or field screen draws (not
 // the small reads every screen makes, like texting status). A screen that
 // only reads a little of one for itself (Team's and Rating scale's counts
-// from Today) says so with meta: { side: true } on that useQuery: its
-// time isn't what the screen shows.
+// from Today, a shift's and Outreach's providers) says so with
+// meta: { side: true } on that useQuery: its time isn't what the screen
+// shows. Only Today and Money draw the brief (offline-copies.test.js checks).
 const SHOWN = new Set(['brief', 'persons', 'person', 'signs', 'shifts', 'shift', 'records', 'pledges',
   'receipts', 'doors', 'turf', 'turfs']);
 const shown = (key) => SHOWN.has(key[0]) || (key[0] === 'texting' && (key[1] === 'inbox' || key[1] === 'thread'));

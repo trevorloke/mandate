@@ -14,6 +14,13 @@
 //   undoQueued(cid)    a sign request or a "Count me in" still on the phone:
 //                      take it back.
 //   clearOutbox()      → discard this sign-in's items (sign-out on a shared phone).
+//   holdNote(send)     → a card with a note typed but not sent yet (the door
+//                        card, a profile) holds its send here; sendHeldNotes()
+//                        sends them all — sign-out does, before it flushes, so a
+//                        note goes out under whoever typed it.
+//   closeOutbox()      → signed out on purpose: nothing more is saved here
+//                        (a card closing as the screen goes leaves nothing
+//                        behind) until someone signs in again.
 //   setOutboxOwner(me) → whose items these are (Shell): each item belongs to
 //                        the sign-in that saved it and is only shown to and
 //                        sent by that sign-in — never as someone else's.
@@ -76,6 +83,10 @@ let flushing = null; // the running flush (a promise), or null
 let owner = null;    // "workspace:user" of whoever is signed in (setOutboxOwner)
 let lastError = null;
 let signedOutNow = false;
+// Signed out on purpose (closeOutbox), and the sign-in it was closed under.
+let closed = false;
+let closedFor = null;
+let ownerMe = null;
 // What the server answered for items sent by a flush, by client id, so a
 // caller who queued behind others (or a later Undo) can still read it.
 const results = new Map();
@@ -192,6 +203,10 @@ export const unsentCount = () => visible.length;
 // items at once; anything already listening is told just after the render.
 export function setOutboxOwner(me) {
   const next = me?.user?.id && me?.workspace?.id ? `${me.workspace.id}:${me.user.id}` : null;
+  // A new sign-in opens it again (a last render of the screen being left,
+  // with the same sign-in it was closed under, doesn't).
+  if (closed && next && me !== closedFor) closed = false;
+  ownerMe = me;
   if (next === owner) return;
   owner = next;
   lastError = null;
@@ -206,6 +221,27 @@ export function clearOutbox() {
   signedOutNow = false;
   results.clear();
   change((list) => list.filter((i) => !mine(i)));
+}
+
+// Signed out on purpose: from now until the next sign-in nothing is saved
+// as theirs — a note sent as its card closes on the way to Sign in would
+// otherwise wait on this computer for them (sign-out sent the held ones first).
+export function closeOutbox() {
+  closed = true;
+  closedFor = ownerMe;
+}
+
+// Notes typed on a card and not sent yet: each card holds its send here, and
+// sign-out sends them before it flushes, under whoever typed them.
+const heldNotes = new Set();
+export function holdNote(send) {
+  heldNotes.add(send);
+  return () => { heldNotes.delete(send); };
+}
+export async function sendHeldNotes() {
+  await Promise.all([...heldNotes].map(async (send) => {
+    try { await send(); } catch { /* the card says what went wrong */ }
+  }));
 }
 
 // The id the server dedupes on, made here so a replay is the same write.
@@ -248,6 +284,7 @@ export function onOutboxSent(fn) {
 // server will put them — so the map and walk list show them meanwhile.
 export async function queueAction(name, input, meta = {}) {
   if (!FIELD_ACTIONS.includes(name)) throw new Error(`${name} can't be saved offline`);
+  if (closed) throw new ApiError(401, 'Signed out');
   const body = withClientId(name, input);
   const item = { cid: cidOf(name, body), name, input: body, meta, at: new Date().toISOString(), tries: 0, state: 'pending', owner };
   if (offlineNow()) {

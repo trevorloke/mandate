@@ -171,6 +171,8 @@ const maya = byName('Maya Chen');
 const dev = byName('Dev Patel');
 const harjit = byName('Harjit Gill');
 check('sample people found', tom && maya && dev && harjit, everyone.length);
+// A shift this test never opens (its detail is never kept here).
+const unopenedShift = ((await D.api('/shifts')).json.shifts || []).at(-1);
 
 await D.go('/');
 check('service worker controls the page', await D.swReady() || (await (async () => { await D.go('/'); return D.swReady(); })()));
@@ -320,6 +322,12 @@ await page.waitForSelector('.today-morebox__toggle', { timeout: 8000 }).catch(()
 await page.click('.today-morebox__toggle').catch(() => {});
 check('Today → More with no signal: Clear sample data is off — "Needs signal"',
   await page.locator('.today-sample-clear button:has-text("Clear sample data")').isDisabled().catch(() => false) && /Needs signal/.test(await page.innerText('.today-sample-clear').catch(() => '')));
+// A shift never opened here: nothing kept for it — and the strip claims no
+// copy (its email/texting line reads Today's kept brief on the side).
+await D.go(`/shifts/${unopenedShift.id}`);
+t = await D.main();
+check('a shift never opened, no signal: "No signal — this loads…", and the strip shows no "from <time>"',
+  /No signal — this loads when you’re back online/.test(t) && !(await D.kept()), `${await D.kept()} · ${t.slice(0, 120)}`);
 
 // ════════════════════════════════════════════════════════════════════════════
 // 3. No signal, on a profile: a note with a rating, a tag on, a tag off
@@ -463,6 +471,33 @@ t = await D.main();
 check('…a profile never opened: "No answer — check your signal", never "No one here — they may have been removed"',
   /No answer — check your signal/.test(t) && !/No one here/.test(t), t.slice(0, 160));
 await page.unroute('**/api/**');
+// …and a new tab, which kept no People list (a desk's lists stay in their own
+// tab): no "0 people" and no empty table, at 1360 and 390.
+{
+  const p3 = await ctx.newPage();
+  p3.on('pageerror', (e) => errors.push('[502 tab] ' + e.message));
+  const D3 = helpers(p3, ctx);
+  await D3.go('/');
+  await p3.waitForSelector('.today-nums', { timeout: 8000 }).catch(() => {});
+  await p3.route('**/api/**', (route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }));
+  await p3.click('nav.links a[href="/people"]');
+  await until(async () => /No answer — check your signal/.test(await D3.main()), 8000);
+  let t3 = await D3.main();
+  check('server down (502), no list kept in this tab: "No answer — check your signal" — no "0 people", no empty table, no "No people yet"',
+    /No answer — check your signal/.test(t3) && !/\b0 people\b|No people yet|Import a list|request failed/i.test(t3) && !(await p3.$('.pp-table, .pp-list, .pp-count')), t3.slice(0, 200));
+  await simple(D3, 'People, server down (1360)');
+  await p3.setViewportSize({ width: 390, height: 844 });
+  await sleep(600);
+  t3 = await D3.main();
+  check('…and at 390: the same, no empty list', /No answer — check your signal/.test(t3) && !/\b0 people\b|No people yet/i.test(t3) && !(await p3.$('.pp-table, .pp-list, .pp-count')), t3.slice(0, 200));
+  await simple(D3, 'People, server down (390)');
+  // The Calls list with nothing to show: never "No one to call yet".
+  await p3.evaluate(() => { history.pushState({}, '', '/calls?channel=phone'); window.dispatchEvent(new PopStateEvent('popstate')); });
+  await sleep(3000);
+  t3 = await D3.main();
+  check('…Calls, server down: never "No one to call yet" or "request failed"', !/No one to call|request failed/i.test(t3), t3.slice(0, 200));
+  await p3.close();
+}
 // A note typed on a profile, then off to People without a tap: sent anyway (as the door card does).
 const leftNote = `Left on the profile ${tag}`;
 const harjitBefore = (await D.api(`/persons/${harjit.id}`)).json.contacts.length;
@@ -528,14 +563,24 @@ await TB.go('/money');
 await tabB.waitForSelector('#gift-list, .ops-rows', { timeout: 8000 }).catch(() => {});
 await sleep(1200);
 const tabBHad = Object.keys((await TB.stored()).session);
-await D.go('/');
+// Signed out from a profile with a note still in the box: it goes first, as
+// theirs, and nothing is left waiting on this computer afterwards.
+const byeNote = `Typed before sign-out ${tag}`;
+const devBefore = (await D.api(`/persons/${dev.id}`)).json.contacts.length;
+await D.go(`/people/${dev.id}`);
+await page.waitForSelector('.pf-rate', { timeout: 8000 });
+await page.click('.pf-rate button:has-text("+ Add a note")');
+await page.fill('#contact-note', byeNote);
 await page.click('.acct-btn');
 await page.click('.acct-panel button:has-text("Sign out")');
 await page.waitForURL(`${BASE}/login`, { timeout: 10000 }).catch(() => {});
-await sleep(500);
+await sleep(1200);
+const byeOutbox = await D.outbox();
 let left = await D.stored();
 check('signed out: no copies left in this browser or this tab', Object.keys(left.local).length === 0 && Object.keys(left.session).length === 0,
   JSON.stringify([...Object.keys(left.local), ...Object.keys(left.session)]).slice(0, 200));
+check('…a note typed on the profile was sent before signing out, and nothing is left in the outbox',
+  byeOutbox.length === 0 && (await D.outbox()).length === 0, JSON.stringify(byeOutbox).slice(0, 200));
 await tabB.waitForURL(`${BASE}/login`, { timeout: 8000 }).catch(() => {});
 const tabBLeft = await TB.stored();
 check('…the other open tab is told: it goes to Sign in, and its tab-only copies (the ledger) are gone',
@@ -549,6 +594,9 @@ await tabB.close();
 await join(page, staffInv.joinUrl, 'Sam Staff');
 const meB = (await D.api('/auth/me')).json;
 check('a second person signs in on the same browser', meB.user.id !== meA.user.id && meB.role === 'staff');
+const devAfter = (await D.api(`/persons/${dev.id}`)).json.contacts;
+check('…the note typed before signing out is on the server once, from the first person',
+  devAfter.length === devBefore + 1 && devAfter.filter((c) => c.note === byeNote && c.by_name === 'Riley Desk').length === 1, `${devBefore} → ${devAfter.length}`);
 await page.waitForSelector('.today-nums', { timeout: 8000 }).catch(() => {});
 await sleep(1200);
 await ctx.setOffline(true);

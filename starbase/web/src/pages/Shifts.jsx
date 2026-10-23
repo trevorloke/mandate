@@ -725,8 +725,9 @@ function ShiftDetail({ id, canDesk, me }) {
   const waiting = waitingSelf(outbox.items, id);
   // The desk's Notify needs signal (it emails and texts now, or not at all).
   const online = useOnline();
-  // Providers are read once; the brief is shared with Today so it is usually cached.
-  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity });
+  // Providers are read once; the brief is shared with Today so it is usually
+  // cached (a side read: its time isn't this screen's, KeptCopies.js).
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity, meta: { side: true } });
   // Which actions this login may run. A volunteer gets "Count me in" only
   // when the server offers shift.join; otherwise "Ask your organizer".
   const allowed = useQuery({

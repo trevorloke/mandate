@@ -599,6 +599,15 @@ check('server: Jas never on the lit drop (taken back before it went)', !(await D
 await sleep(4200);
 check('…and "1 sent" goes by itself', !/1 sent/i.test(await vp.innerText('.offline-strip').catch(() => '')));
 
+// A note typed on an open door card when Sign out is tapped: it goes first,
+// as theirs — never left on the phone after sign-out.
+const byeNote = `Door note before sign-out ${tag}`;
+const harjitN = (await D.api(`/persons/${P.harjit.id}`)).json.contacts.length;
+await V.go(`/map?person=${P.harjit.id}`);
+await vp.waitForSelector('aside.door-card', { timeout: 8000 }).catch(() => {});
+await vp.tap('aside.door-card .fk-more__btn').catch(() => vp.click('aside.door-card .fk-more__btn'));
+await vp.fill('#door-note', byeNote);
+
 // Sign-out asks about what's still on the phone, then forgets everything.
 await vp.click('.acct-btn');
 await vp.click('.acct-panel button:has-text("Sign out")');
@@ -611,6 +620,9 @@ await vp.waitForURL(`${BASE}/login`, { timeout: 8000 }).catch(() => {});
 await sleep(500);
 const leftKeys = await vp.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('starbase:copy:') || k.startsWith('starbase:field:')).map((k) => [k.split(':').slice(-1)[0], Date.now() - (JSON.parse(localStorage.getItem(k)).at || 0)]));
 check('signed out: the phone forgets its copies and outbox', leftKeys.length === 0 && (await V.outbox()).length === 0, JSON.stringify({ leftKeys, url: vp.url() }));
+const harjitBye = (await D.api(`/persons/${P.harjit.id}`)).json.contacts;
+check('…the note typed on the open door card went first, once, as the volunteer’s',
+  harjitBye.length === harjitN + 1 && harjitBye.filter((x) => x.note === byeNote && x.by_name === 'Jas Volunteer').length === 1, `${harjitN} → ${harjitBye.length}`);
 await vctx.close();
 
 // ── The books still verify ──

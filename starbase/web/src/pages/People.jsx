@@ -698,6 +698,8 @@ function PeopleList() {
   // Searched with no signal over a kept list the server had cut off: there may be more.
   const partial = keptPartial(persons.data);
   const count = persons.isLoading ? '…' : rows.length >= LIMIT ? `${LIMIT}+` : String(rows.length);
+  // No list at all (no answer, nothing kept): no count, no empty table — the error line says it.
+  const failed = persons.isError && !persons.data;
   // The profile's back link returns to this list, filters and all.
   const back = { from: { to: `/people${carry(f, { has: f.has })}`, label: 'People' } };
 
@@ -748,13 +750,13 @@ function PeopleList() {
       <FilterChips f={f} update={update}
         extra={f.field ? <FieldFilterChip value={f.field} onRemove={() => update({ field: null })} /> : null} />
 
-      {!offline && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}{partial ? ' in the kept list' : ''}</p>}
+      {!offline && !failed && <p className="pp-count"><strong className="mono">{count}</strong> {rows.length === 1 ? 'person' : 'people'}{partial ? ' in the kept list' : ''}</p>}
 
       {persons.isError && !offline && <p className="error">{noAnswer(persons.error) ? 'No answer — check your signal' : persons.error.message}</p>}
 
       {offline ? (
         <p className="pp-offline" role="status">No signal — the list loads when you’re back online.</p>
-      ) : rows.length === 0 && !persons.isLoading && !persons.isError ? (
+      ) : failed ? null : rows.length === 0 && !persons.isLoading && !persons.isError ? (
         <div className="pp-empty">
           <p>{partial ? 'No one in the kept list matches.' : anyFilter ? 'No one matches.' : 'No people yet.'}</p>
           {anyFilter ? (
@@ -1093,13 +1095,13 @@ function CallsScreen() {
       <TextingRepliesLink me={me} />
 
       {listCopy && <p className="cl-copy"><span className="chip obx-copy">Offline copy</span></p>}
-      {persons.isError && !offline && !listCopy && <p className="error">{persons.error.message}</p>}
+      {persons.isError && !offline && !listCopy && <p className="error">{noAnswer(persons.error) ? 'No answer — check your signal' : persons.error.message}</p>}
 
       {offline ? (
         <p className="pp-offline" role="status">No signal — your list loads when you’re back online.</p>
       ) : persons.isLoading || (channel === 'text' && texting.isLoading) || (smsOn && textQueue.isLoading) ? (
         <p className="muted">Loading…</p>
-      ) : rows.length === 0 && !current ? (
+      ) : persons.isError && !list && !current ? null : rows.length === 0 && !current ? (
         <div className="pp-empty">
           {/* Everyone here has a text from the campaign: replies come to the Inbox. */}
           <p>{reachable.length > 0 ? `No one left to ${noun}.` : `No one to ${noun} yet.`}</p>

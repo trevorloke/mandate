@@ -23,7 +23,7 @@ import { apiGet, fmtMoney, fmtDate, noAnswer } from '../api.js';
 import { EngagementChip, PersonLadders, usePersonLadders } from '../components/LaddersBits.jsx';
 import { queuedText, useThisDevice } from '../components/queued.js';
 import { PersonFields, filledCount, usePersonFields } from '../components/FieldsBits.jsx';
-import { useOutbox, applyOutboxToProfile, pendingAbout, logContact } from '../offline.js';
+import { useOutbox, applyOutboxToProfile, pendingAbout, logContact, holdNote } from '../offline.js';
 import { useOnline } from '../components/NoSignal.jsx';
 import {
   TagEditor, Icon, useAction, fmtWhen, fmtShort, telHref, smsHref, textBody,
@@ -240,16 +240,19 @@ function RatingCard({ person, refresh, channel, setChannel, cardRef }) {
   const setNote = (v) => { noteRef.current = v; setNoteState(v); };
   const latest = useRef(null);
   useLayoutEffect(() => { latest.current = { person, channel, refresh }; });
-  useEffect(() => () => {
+  const sendLeft = () => {
     const text = noteRef.current.trim();
     const ctx = latest.current;
-    if (!text || !ctx?.person) return;
+    if (!text || !ctx?.person) return null;
     noteRef.current = '';
     // Through the outbox: with no signal it waits on this device.
-    logContact({ person_id: ctx.person.id, channel: ctx.channel, outcome: 'contacted', note: text }, { who: ctx.person.name })
+    return logContact({ person_id: ctx.person.id, channel: ctx.channel, outcome: 'contacted', note: text }, { who: ctx.person.name })
       .then((r) => { if (!r.queued) ctx.refresh?.(); })
       .catch(() => { /* refused: nothing else to say on a screen that's gone */ });
-  }, []);
+  };
+  // Sign-out sends it first (holdNote), while it's still theirs.
+  useEffect(() => holdNote(() => { const sent = sendLeft(); if (sent) { setNoteState(''); setNoteOpen(false); } return sent; }), []);
+  useEffect(() => () => { sendLeft(); }, []);
   // { text, what, queued }: the line under the buttons. A knock still in the
   // outbox says so, and the line turns to "✓ Sent" once the outbox empties.
   const [said, setSaid] = useState(null);

@@ -1699,7 +1699,8 @@ function DonationsSettings({ me, toast }) {
 // Email & texting: on or off, said once. They're switched on where Starbase
 // is hosted, not here — so the line says who to ask.
 function Connections({ focus }) {
-  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity });
+  // A side read of Today's brief (its time isn't this screen's, KeptCopies.js).
+  const brief = useQuery({ queryKey: ['brief'], queryFn: () => apiGet('/brief'), staleTime: Infinity, meta: { side: true } });
   const p = brief.data?.providers;
   const ref = useRef(null);
   // Arriving from a "Connect" link: bring this section into view.
